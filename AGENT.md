@@ -73,14 +73,30 @@
 
 固件主工程目录。
 
-当前尚未初始化，后续会承载 `ESP-IDF` 工程。
+当前已初始化为最小 `ESP-IDF` 工程骨架。
 
-计划结构：
+当前结构：
 
 - `main/`：启动入口
 - `components/`：按模块拆分的业务组件
 - `sdkconfig.defaults`：默认配置
 - `partitions.csv`：分区表
+
+当前已落地的最小组件：
+
+- `diagnostics_service`
+
+预留目录：
+
+- `board_support`
+- `display_service`
+- `touch_service`
+- `ui_core`
+- `ui_pages`
+- `audio_service`
+- `sr_service`
+- `settings_service`
+- `network_service`
 
 ## 功能模块说明
 
@@ -143,4 +159,3 @@
 - 测试方案
 - 技术文档沉淀
 - review 后推送
-

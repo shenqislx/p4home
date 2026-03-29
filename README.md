@@ -18,6 +18,12 @@
 3. 验证原生 UI 与本地唤醒词链路
 4. 再进入 `Home Assistant` 与语音网关联调
 
+当前工程状态：
+
+- 已完成项目治理与 GitHub milestones 基线
+- 已创建 `firmware/` 最小 `ESP-IDF` 工程骨架
+- 下一步进入 `M1` 板级 bring-up
+
 现有文档：
 
 - [总体方案](./docs/esp32-p4-smart-panel-plan.md)
@@ -41,3 +47,4 @@
 - `docs/templates/`：文档模板
 - `scripts/`：plan、commit、push、hook 安装辅助脚本
 - `.githooks/`：本地 hook 模板
+- `firmware/`：固件主工程
