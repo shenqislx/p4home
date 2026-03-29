@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${P4HOME_REVIEW_CONFIRMED:-0}" != "1" ]]; then
+  echo "pre-push blocked: review confirmation is required."
+  echo "Use ./scripts/git-push.sh --reviewed or export P4HOME_REVIEW_CONFIRMED=1 for a direct push."
+  exit 1
+fi
+
