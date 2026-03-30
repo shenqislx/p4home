@@ -93,7 +93,8 @@
 
 - `main/`：启动入口
 - `components/`：按模块拆分的业务组件
-- `sdkconfig.defaults`：默认配置
+- `sdkconfig.defaults`：人工维护的默认配置基线
+- `sdkconfig`：`ESP-IDF` 自动生成的完整配置快照
 - `partitions.csv`：分区表
 
 当前已落地的最小组件：

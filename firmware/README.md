@@ -13,7 +13,19 @@
 - `main/`：启动入口
 - `components/`：按功能拆分的业务组件
 - `sdkconfig.defaults`：默认配置基线
+- `sdkconfig`：`idf.py` 生成的完整配置快照
 - `partitions.csv`：分区表
+
+配置文件说明：
+
+- `sdkconfig.defaults`：人工维护的最小默认配置。这里只放项目明确想固定的少量基线项。
+- `sdkconfig`：由 `idf.py set-target`、`idf.py build`、`menuconfig` 等流程生成或更新的完整配置结果，会展开目标芯片和组件依赖的默认值。
+
+维护原则：
+
+- 想固定项目默认行为时，优先修改 `sdkconfig.defaults`
+- 想看当前构建实际使用了哪些配置时，查看 `sdkconfig`
+- 不要把 `sdkconfig` 当作当前阶段的主维护入口
 
 后续优先开发顺序：
 
@@ -37,4 +49,3 @@ cd firmware
 idf.py set-target esp32p4
 idf.py build
 ```
-
