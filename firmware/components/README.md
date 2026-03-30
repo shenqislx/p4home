@@ -15,5 +15,9 @@
 - `settings_service`：本地配置与 NVS
 - `network_service`：网络与后续网关通信
 
-当前阶段只实现最小 `diagnostics_service`，其余目录先建立结构。
+当前阶段已实现：
 
+- `board_support`：最小板级初始化入口
+- `diagnostics_service`：启动与运行期诊断输出
+
+其余目录先建立结构。

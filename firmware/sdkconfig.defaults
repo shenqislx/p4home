@@ -1,5 +1,6 @@
-# Keep defaults conservative until the actual EVB flash/PSRAM layout is verified.
+# Align defaults with the ESP32-P4 EVB baseline so the custom partition table fits.
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
-
