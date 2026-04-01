@@ -21,6 +21,9 @@ void app_main(void)
     ESP_LOGI(TAG, "boot diagnostics baseline active");
     ESP_LOGI(TAG, "display bootstrap ready=%s",
              board_support_display_ready() ? "yes" : "no");
+    ESP_LOGI(TAG, "touch diagnostics gt911_detected=%s bsp_touch_ready=%s",
+             board_support_touch_detected() ? "yes" : "no",
+             board_support_touch_ready() ? "yes" : "no");
 
     while (true) {
         diagnostics_service_log_runtime_heartbeat();
