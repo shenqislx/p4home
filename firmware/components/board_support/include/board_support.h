@@ -10,3 +10,4 @@ void board_support_log_summary(void);
 bool board_support_display_ready(void);
 bool board_support_touch_ready(void);
 bool board_support_touch_detected(void);
+bool board_support_touch_indev_ready(void);

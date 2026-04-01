@@ -10,6 +10,7 @@
 #include "esp_lcd_touch.h"
 #include "esp_lcd_touch_gt911.h"
 #include "esp_log.h"
+#include "esp_lvgl_port.h"
 
 static const char *TAG = "touch_service";
 static const uint8_t GT911_ADDR_PRIMARY = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS;
@@ -26,11 +27,14 @@ typedef struct {
     bool gt911_detected;
     bool gt911_product_id_valid;
     bool bsp_touch_ready;
+    bool lvgl_indev_ready;
     uint8_t gt911_addr;
     char gt911_product_id[5];
 } touch_diag_state_t;
 
 static touch_diag_state_t s_state;
+static esp_lcd_touch_handle_t s_touch_handle;
+static lv_indev_t *s_touch_indev;
 
 static esp_err_t touch_service_read_gt911_product_id(i2c_master_bus_handle_t bus,
                                                      uint8_t addr,
@@ -105,14 +109,15 @@ static void touch_service_attempt_gt911_probe(i2c_master_bus_handle_t bus, uint8
 
 static void touch_service_attempt_bsp_touch_init(void)
 {
-    esp_lcd_touch_handle_t tp = NULL;
-    esp_err_t ret = bsp_touch_new(NULL, &tp);
+    if (s_touch_handle != NULL) {
+        s_state.bsp_touch_ready = true;
+        return;
+    }
+
+    esp_err_t ret = bsp_touch_new(NULL, &s_touch_handle);
     if (ret == ESP_OK) {
         s_state.bsp_touch_ready = true;
         ESP_LOGI(TAG, "BSP touch init succeeded");
-        if (tp != NULL) {
-            bsp_touch_delete();
-        }
         return;
     }
 
@@ -157,6 +162,45 @@ esp_err_t touch_service_run_diagnostics(void)
     return ESP_OK;
 }
 
+esp_err_t touch_service_attach_to_lvgl(lv_display_t *display)
+{
+    ESP_RETURN_ON_FALSE(display != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "display handle is required");
+
+    if (s_touch_indev != NULL) {
+        s_state.lvgl_indev_ready = true;
+        ESP_LOGI(TAG, "LVGL touch indev already attached");
+        return ESP_OK;
+    }
+
+    if (!s_state.diagnostics_ran) {
+        ESP_RETURN_ON_ERROR(touch_service_run_diagnostics(), TAG,
+                            "touch diagnostics must complete before LVGL attach");
+    }
+
+    ESP_RETURN_ON_FALSE(s_touch_handle != NULL && s_state.bsp_touch_ready,
+                        ESP_ERR_INVALID_STATE, TAG,
+                        "touch handle unavailable");
+
+    const lvgl_port_touch_cfg_t touch_cfg = {
+        .disp = display,
+        .handle = s_touch_handle,
+        .scale = {
+            .x = 1.0f,
+            .y = 1.0f,
+        },
+    };
+
+    s_touch_indev = lvgl_port_add_touch(&touch_cfg);
+    ESP_RETURN_ON_FALSE(s_touch_indev != NULL, ESP_FAIL, TAG,
+                        "failed to attach LVGL touch indev");
+
+    s_state.lvgl_indev_ready = true;
+    ESP_LOGI(TAG, "LVGL touch indev attached: indev=%p display=%p",
+             (void *)s_touch_indev, (void *)display);
+    return ESP_OK;
+}
+
 bool touch_service_gt911_detected(void)
 {
     return s_state.gt911_detected;
@@ -167,6 +211,11 @@ bool touch_service_bsp_touch_ready(void)
     return s_state.bsp_touch_ready;
 }
 
+bool touch_service_lvgl_indev_ready(void)
+{
+    return s_state.lvgl_indev_ready;
+}
+
 uint8_t touch_service_get_gt911_address(void)
 {
     return s_state.gt911_addr;
@@ -175,7 +224,7 @@ uint8_t touch_service_get_gt911_address(void)
 void touch_service_log_summary(void)
 {
     ESP_LOGI(TAG,
-             "touch diagnostics ran=%s i2c_ready=%s devices_found=%u gt911_0x5d=%s gt911_0x14=%s gt911_detected=%s gt911_addr=%s product_id=%s bsp_touch_ready=%s",
+             "touch diagnostics ran=%s i2c_ready=%s devices_found=%u gt911_0x5d=%s gt911_0x14=%s gt911_detected=%s gt911_addr=%s product_id=%s bsp_touch_ready=%s lvgl_indev_ready=%s",
              s_state.diagnostics_ran ? "yes" : "no",
              s_state.i2c_ready ? "yes" : "no",
              s_state.devices_found,
@@ -184,5 +233,6 @@ void touch_service_log_summary(void)
              s_state.gt911_detected ? "yes" : "no",
              s_state.gt911_detected ? (s_state.gt911_addr == GT911_ADDR_PRIMARY ? "0x5d" : "0x14") : "n/a",
              s_state.gt911_product_id,
-             s_state.bsp_touch_ready ? "yes" : "no");
+             s_state.bsp_touch_ready ? "yes" : "no",
+             s_state.lvgl_indev_ready ? "yes" : "no");
 }
