@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 
+#include "display_service.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
 
@@ -17,9 +18,7 @@ esp_err_t board_support_init(void)
 
     ESP_LOGI(TAG, "starting minimal board initialization");
 
-    /* Keep M1 initialization intentionally narrow. Real peripheral bring-up
-     * will be added incrementally after the boot diagnostics baseline is stable.
-     */
+    ESP_ERROR_CHECK(display_service_init());
     s_board_initialized = true;
 
     ESP_LOGI(TAG, "minimal board initialization complete");
@@ -37,4 +36,10 @@ void board_support_log_summary(void)
              board_support_get_name(),
              CONFIG_IDF_TARGET,
              s_board_initialized ? "yes" : "no");
+    display_service_log_summary();
+}
+
+bool board_support_display_ready(void)
+{
+    return display_service_is_ready();
 }

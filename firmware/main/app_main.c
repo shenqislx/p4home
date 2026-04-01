@@ -19,6 +19,8 @@ void app_main(void)
     diagnostics_service_log_memory_summary();
 
     ESP_LOGI(TAG, "boot diagnostics baseline active");
+    ESP_LOGI(TAG, "display bootstrap ready=%s",
+             board_support_display_ready() ? "yes" : "no");
 
     while (true) {
         diagnostics_service_log_runtime_heartbeat();
