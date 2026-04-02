@@ -32,6 +32,7 @@ static int16_t s_tone_buffer[8000];
 static int16_t s_capture_buffer[1024];
 static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_action_running;
+static bool s_microphone_stream_open;
 
 static const esp_codec_dev_sample_info_t AUDIO_SERVICE_SAMPLE_INFO = {
     .bits_per_sample = 16,
@@ -60,6 +61,67 @@ static void audio_service_finish_action(void)
     taskENTER_CRITICAL(&s_state_lock);
     s_action_running = false;
     taskEXIT_CRITICAL(&s_state_lock);
+}
+
+static void audio_service_fill_snapshot(audio_service_microphone_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) {
+        return;
+    }
+
+    snapshot->ready = s_state.microphone_capture_ready;
+    snapshot->bytes_read = s_state.microphone_bytes_read;
+    snapshot->peak_abs = s_state.microphone_peak_abs;
+    snapshot->mean_abs = s_state.microphone_mean_abs;
+    snapshot->nonzero_samples = s_state.microphone_nonzero_samples;
+}
+
+static void audio_service_process_capture_buffer(uint32_t bytes_read, bool log_result)
+{
+    uint32_t sample_count = bytes_read / sizeof(int16_t);
+    int64_t sum_samples = 0;
+    uint32_t sum_abs = 0;
+    uint16_t peak_abs = 0;
+    uint32_t nonzero_samples = 0;
+
+    for (uint32_t i = 0; i < sample_count; ++i) {
+        sum_samples += s_capture_buffer[i];
+    }
+
+    const int32_t dc_offset = sample_count > 0 ? (int32_t)(sum_samples / (int64_t)sample_count) : 0;
+
+    for (uint32_t i = 0; i < sample_count; ++i) {
+        int32_t sample = s_capture_buffer[i];
+        sample -= dc_offset;
+        if (sample < 0) {
+            sample = -sample;
+        }
+        uint16_t magnitude = (uint16_t)sample;
+        if (magnitude > peak_abs) {
+            peak_abs = magnitude;
+        }
+        sum_abs += magnitude;
+        if (magnitude != 0) {
+            nonzero_samples++;
+        }
+    }
+
+    s_state.microphone_capture_ready = true;
+    s_state.microphone_bytes_read = bytes_read;
+    s_state.microphone_peak_abs = peak_abs;
+    s_state.microphone_mean_abs = sample_count > 0 ? (sum_abs / sample_count) : 0;
+    s_state.microphone_nonzero_samples = nonzero_samples;
+
+    if (log_result) {
+        ESP_LOGI(TAG,
+                 "microphone capture bytes=%" PRIu32 " samples=%" PRIu32 " dc_offset=%" PRId32 " peak_abs=%u mean_abs=%" PRIu32 " nonzero=%" PRIu32,
+                 s_state.microphone_bytes_read,
+                 sample_count,
+                 dc_offset,
+                 s_state.microphone_peak_abs,
+                 s_state.microphone_mean_abs,
+                 s_state.microphone_nonzero_samples);
+    }
 }
 
 static esp_err_t audio_service_init_speaker(void)
@@ -145,7 +207,7 @@ cleanup:
     return err;
 }
 
-esp_err_t audio_service_capture_microphone_sample(void)
+esp_err_t audio_service_begin_microphone_stream(void)
 {
     ESP_RETURN_ON_FALSE(s_state.initialized, ESP_ERR_INVALID_STATE, TAG,
                         "audio service not initialized");
@@ -154,72 +216,93 @@ esp_err_t audio_service_capture_microphone_sample(void)
     ESP_RETURN_ON_FALSE(audio_service_try_begin_action(), ESP_ERR_INVALID_STATE, TAG,
                         "audio action already running");
 
-    esp_err_t err = ESP_OK;
     int ret = esp_codec_dev_set_in_gain(s_microphone_codec, 30.0f);
     if (ret != ESP_CODEC_DEV_OK) {
-        err = ESP_FAIL;
         ESP_LOGE(TAG, "failed to set microphone gain: %d", ret);
-        goto cleanup;
+        audio_service_finish_action();
+        return ESP_FAIL;
     }
 
     ret = esp_codec_dev_open(s_microphone_codec, (esp_codec_dev_sample_info_t *)&AUDIO_SERVICE_SAMPLE_INFO);
     if (ret != ESP_CODEC_DEV_OK) {
-        err = ESP_FAIL;
         ESP_LOGE(TAG, "failed to open microphone stream: %d", ret);
-        goto cleanup;
+        audio_service_finish_action();
+        return ESP_FAIL;
     }
 
+    s_microphone_stream_open = true;
+    return ESP_OK;
+}
+
+static esp_err_t audio_service_read_microphone_stream_internal(audio_service_microphone_snapshot_t *snapshot,
+                                                               bool log_result)
+{
+    ESP_RETURN_ON_FALSE(s_microphone_stream_open, ESP_ERR_INVALID_STATE, TAG,
+                        "microphone stream not open");
+
     memset(s_capture_buffer, 0, sizeof(s_capture_buffer));
-    ret = esp_codec_dev_read(s_microphone_codec, s_capture_buffer, sizeof(s_capture_buffer));
-    int close_ret = esp_codec_dev_close(s_microphone_codec);
-    if (close_ret != ESP_CODEC_DEV_OK) {
-        err = ESP_FAIL;
-        ESP_LOGE(TAG, "failed to close microphone stream: %d", close_ret);
-        goto cleanup;
-    }
+    int ret = esp_codec_dev_read(s_microphone_codec, s_capture_buffer, sizeof(s_capture_buffer));
     if (ret != ESP_CODEC_DEV_OK) {
-        err = ESP_FAIL;
         ESP_LOGE(TAG, "failed to read microphone samples: %d", ret);
-        goto cleanup;
+        return ESP_FAIL;
     }
 
     uint32_t bytes_read = sizeof(s_capture_buffer);
-    uint32_t sample_count = bytes_read / sizeof(int16_t);
-    uint32_t sum_abs = 0;
-    uint16_t peak_abs = 0;
-    uint32_t nonzero_samples = 0;
+    audio_service_process_capture_buffer(bytes_read, log_result);
+    audio_service_fill_snapshot(snapshot);
+    return ESP_OK;
+}
 
-    for (uint32_t i = 0; i < sample_count; ++i) {
-        int32_t sample = s_capture_buffer[i];
-        if (sample < 0) {
-            sample = -sample;
-        }
-        uint16_t magnitude = (uint16_t)sample;
-        if (magnitude > peak_abs) {
-            peak_abs = magnitude;
-        }
-        sum_abs += magnitude;
-        if (magnitude != 0) {
-            nonzero_samples++;
-        }
-    }
+esp_err_t audio_service_read_microphone_stream(audio_service_microphone_snapshot_t *snapshot)
+{
+    return audio_service_read_microphone_stream_internal(snapshot, false);
+}
 
-    s_state.microphone_capture_ready = true;
-    s_state.microphone_bytes_read = bytes_read;
-    s_state.microphone_peak_abs = peak_abs;
-    s_state.microphone_mean_abs = sample_count > 0 ? (sum_abs / sample_count) : 0;
-    s_state.microphone_nonzero_samples = nonzero_samples;
+esp_err_t audio_service_end_microphone_stream(void)
+{
+    ESP_RETURN_ON_FALSE(s_microphone_stream_open, ESP_ERR_INVALID_STATE, TAG,
+                        "microphone stream not open");
 
-    ESP_LOGI(TAG,
-             "microphone capture bytes=%" PRIu32 " samples=%" PRIu32 " peak_abs=%u mean_abs=%" PRIu32 " nonzero=%" PRIu32,
-             s_state.microphone_bytes_read,
-             sample_count,
-             s_state.microphone_peak_abs,
-             s_state.microphone_mean_abs,
-             s_state.microphone_nonzero_samples);
-cleanup:
+    int close_ret = esp_codec_dev_close(s_microphone_codec);
+    s_microphone_stream_open = false;
     audio_service_finish_action();
+    if (close_ret != ESP_CODEC_DEV_OK) {
+        ESP_LOGE(TAG, "failed to close microphone stream: %d", close_ret);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t audio_service_capture_microphone(bool log_result)
+{
+    ESP_RETURN_ON_ERROR(audio_service_begin_microphone_stream(), TAG,
+                        "failed to begin microphone stream");
+
+    esp_err_t err = audio_service_read_microphone_stream_internal(NULL, log_result);
+    esp_err_t close_err = audio_service_end_microphone_stream();
+    if (err == ESP_OK && close_err != ESP_OK) {
+        err = close_err;
+    }
     return err;
+}
+
+esp_err_t audio_service_capture_microphone_sample(void)
+{
+    return audio_service_capture_microphone(true);
+}
+
+esp_err_t audio_service_poll_microphone_level(audio_service_microphone_snapshot_t *snapshot)
+{
+    esp_err_t ret = audio_service_capture_microphone(false);
+    if (ret == ESP_OK) {
+        audio_service_fill_snapshot(snapshot);
+    }
+    return ret;
+}
+
+void audio_service_get_microphone_snapshot(audio_service_microphone_snapshot_t *snapshot)
+{
+    audio_service_fill_snapshot(snapshot);
 }
 
 esp_err_t audio_service_init(void)

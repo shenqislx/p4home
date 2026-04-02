@@ -20,22 +20,42 @@ static lv_obj_t *s_touch_status_label;
 static lv_obj_t *s_touch_hint_label;
 static lv_obj_t *s_audio_status_label;
 static lv_obj_t *s_audio_metrics_label;
+static lv_obj_t *s_audio_meter_label;
+static lv_obj_t *s_audio_meter_button_label;
+static lv_obj_t *s_audio_meter_bar;
 static uint32_t s_touch_click_count;
+static TaskHandle_t s_audio_meter_task;
+static bool s_audio_meter_running;
 
 typedef enum {
     DISPLAY_AUDIO_ACTION_TONE,
     DISPLAY_AUDIO_ACTION_MIC_CAPTURE,
 } display_audio_action_t;
 
-static void display_service_update_audio_labels_locked(const char *status_text,
-                                                       const char *metrics_text)
+static void display_service_update_meter_ui_locked(const char *status_text,
+                                                   int meter_value,
+                                                   const char *metrics_text,
+                                                   bool meter_running)
 {
     if (s_audio_status_label != NULL && status_text != NULL) {
         lv_label_set_text(s_audio_status_label, status_text);
     }
+    if (s_audio_meter_bar != NULL && meter_value >= 0) {
+        lv_bar_set_value(s_audio_meter_bar, meter_value, LV_ANIM_ON);
+    }
     if (s_audio_metrics_label != NULL && metrics_text != NULL) {
         lv_label_set_text(s_audio_metrics_label, metrics_text);
     }
+    if (s_audio_meter_button_label != NULL) {
+        lv_label_set_text(s_audio_meter_button_label,
+                          meter_running ? "Stop Mic Meter" : "Start Mic Meter");
+    }
+}
+
+static void display_service_update_audio_labels_locked(const char *status_text,
+                                                       const char *metrics_text)
+{
+    display_service_update_meter_ui_locked(status_text, -1, metrics_text, s_audio_meter_running);
 }
 
 static esp_err_t display_service_update_audio_labels(const char *status_text,
@@ -49,6 +69,112 @@ static esp_err_t display_service_update_audio_labels(const char *status_text,
     display_service_update_audio_labels_locked(status_text, metrics_text);
     bsp_display_unlock();
     return ESP_OK;
+}
+
+static esp_err_t display_service_update_meter_ui(const char *status_text,
+                                                 int meter_value,
+                                                 const char *metrics_text,
+                                                 bool meter_running)
+{
+    ESP_RETURN_ON_FALSE(s_display_ready, ESP_ERR_INVALID_STATE, TAG,
+                        "display not ready");
+    ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
+                        "failed to lock LVGL");
+
+    display_service_update_meter_ui_locked(status_text, meter_value, metrics_text, meter_running);
+    bsp_display_unlock();
+    return ESP_OK;
+}
+
+static int display_service_mean_abs_to_percent(uint32_t mean_abs)
+{
+    // Favor low-to-mid speech amplitudes so the bar remains useful during
+    // near-field voice testing on the EVB's onboard microphone.
+    if (mean_abs <= 64U) {
+        return (int)((mean_abs * 12U) / 64U);
+    }
+    if (mean_abs <= 256U) {
+        return 12 + (int)(((mean_abs - 64U) * 18U) / 192U);
+    }
+    if (mean_abs <= 1024U) {
+        return 30 + (int)(((mean_abs - 256U) * 30U) / 768U);
+    }
+    if (mean_abs <= 4096U) {
+        return 60 + (int)(((mean_abs - 1024U) * 30U) / 3072U);
+    }
+    if (mean_abs <= 8192U) {
+        return 90 + (int)(((mean_abs - 4096U) * 10U) / 4096U);
+    }
+    if (mean_abs >= 16384U) {
+        return 100;
+    }
+    return 95 + (int)(((mean_abs - 8192U) * 5U) / 8192U);
+}
+
+static void display_service_audio_meter_task(void *parameter)
+{
+    (void)parameter;
+    uint32_t sample_counter = 0;
+
+    esp_err_t ret = audio_service_begin_microphone_stream();
+    if (ret != ESP_OK) {
+        char status_text[96];
+        snprintf(status_text, sizeof(status_text),
+                 "Mic meter start failed: %s",
+                 esp_err_to_name(ret));
+        display_service_update_meter_ui(status_text, 0, NULL, false);
+        s_audio_meter_running = false;
+        s_audio_meter_task = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    while (s_audio_meter_running) {
+        audio_service_microphone_snapshot_t snapshot = {0};
+        ret = audio_service_read_microphone_stream(&snapshot);
+        if (ret != ESP_OK) {
+            char status_text[96];
+            snprintf(status_text, sizeof(status_text),
+                     "Mic meter capture failed: %s",
+                     esp_err_to_name(ret));
+            display_service_update_meter_ui(status_text, 0, NULL, true);
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+
+        char metrics_text[160];
+        const int meter_value = display_service_mean_abs_to_percent(snapshot.mean_abs);
+        snprintf(metrics_text, sizeof(metrics_text),
+                 "meter=%d%% bytes=%" PRIu32 " peak=%u mean=%" PRIu32 " nonzero=%" PRIu32,
+                 meter_value,
+                 snapshot.bytes_read,
+                 snapshot.peak_abs,
+                 snapshot.mean_abs,
+                 snapshot.nonzero_samples);
+        display_service_update_meter_ui("Mic meter active: speak near the onboard microphone.",
+                                        meter_value,
+                                        metrics_text,
+                                        true);
+        sample_counter++;
+        if ((sample_counter % 4U) == 0U) {
+            ESP_LOGI(TAG,
+                     "mic meter sample=%" PRIu32 " level=%d%% peak=%u mean=%" PRIu32 " nonzero=%" PRIu32,
+                     sample_counter,
+                     meter_value,
+                     snapshot.peak_abs,
+                     snapshot.mean_abs,
+                     snapshot.nonzero_samples);
+        }
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+
+    ret = audio_service_end_microphone_stream();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "failed to stop microphone stream cleanly: %s", esp_err_to_name(ret));
+    }
+    display_service_update_meter_ui("Mic meter stopped.", 0, NULL, false);
+    s_audio_meter_task = NULL;
+    vTaskDelete(NULL);
 }
 
 static void display_service_audio_action_task(void *parameter)
@@ -112,7 +238,7 @@ static void display_service_audio_button_event_cb(lv_event_t *event)
 
     const display_audio_action_t action = (display_audio_action_t)(intptr_t)lv_event_get_user_data(event);
     if (audio_service_is_busy()) {
-        display_service_update_audio_labels_locked("Audio action already running. Wait for completion.", NULL);
+        display_service_update_audio_labels_locked("Audio action already running. Stop mic meter or wait for current action.", NULL);
         return;
     }
 
@@ -132,6 +258,33 @@ static void display_service_audio_button_event_cb(lv_event_t *event)
     if (task_created != pdPASS) {
         display_service_update_audio_labels_locked("Failed to create audio task.", NULL);
         ESP_LOGW(TAG, "failed to create audio action task");
+    }
+}
+
+static void display_service_audio_meter_button_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    if (s_audio_meter_running) {
+        s_audio_meter_running = false;
+        display_service_update_meter_ui_locked("Stopping mic meter...", 0, NULL, false);
+        return;
+    }
+
+    s_audio_meter_running = true;
+    display_service_update_meter_ui_locked("Mic meter requested: creating capture loop...", 0, NULL, true);
+    const BaseType_t task_created = xTaskCreate(display_service_audio_meter_task,
+                                                "audio_meter",
+                                                4096,
+                                                NULL,
+                                                5,
+                                                &s_audio_meter_task);
+    if (task_created != pdPASS) {
+        s_audio_meter_running = false;
+        display_service_update_meter_ui_locked("Failed to create mic meter task.", 0, NULL, false);
+        ESP_LOGW(TAG, "failed to create mic meter task");
     }
 }
 
@@ -310,25 +463,47 @@ static esp_err_t display_service_render_bootstrap(void)
     lv_obj_set_style_text_color(mic_button_label, lv_color_white(), LV_PART_MAIN);
     lv_obj_center(mic_button_label);
 
+    lv_obj_t *meter_button = lv_button_create(screen);
+    lv_obj_set_size(meter_button, 240, 64);
+    lv_obj_align(meter_button, LV_ALIGN_CENTER, 0, 190);
+    lv_obj_set_style_bg_color(meter_button, lv_palette_main(LV_PALETTE_RED), LV_PART_MAIN);
+    lv_obj_add_event_cb(meter_button, display_service_audio_meter_button_event_cb, LV_EVENT_CLICKED, NULL);
+
+    s_audio_meter_button_label = lv_label_create(meter_button);
+    lv_label_set_text(s_audio_meter_button_label, "Start Mic Meter");
+    lv_obj_set_style_text_color(s_audio_meter_button_label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_center(s_audio_meter_button_label);
+
+    s_audio_meter_label = lv_label_create(screen);
+    lv_label_set_text(s_audio_meter_label, "Mic level");
+    lv_obj_set_style_text_color(s_audio_meter_label, lv_color_hex(0xd0d7de), LV_PART_MAIN);
+    lv_obj_align(s_audio_meter_label, LV_ALIGN_BOTTOM_LEFT, 40, -118);
+
+    s_audio_meter_bar = lv_bar_create(screen);
+    lv_obj_set_size(s_audio_meter_bar, 320, 12);
+    lv_bar_set_range(s_audio_meter_bar, 0, 100);
+    lv_bar_set_value(s_audio_meter_bar, 0, LV_ANIM_OFF);
+    lv_obj_align(s_audio_meter_bar, LV_ALIGN_BOTTOM_LEFT, 110, -112);
+
     s_touch_status_label = lv_label_create(screen);
     lv_label_set_text(s_touch_status_label, "Touch pending: indev not attached");
     lv_obj_set_style_text_color(s_touch_status_label, lv_color_hex(0xd0d7de), LV_PART_MAIN);
-    lv_obj_align(s_touch_status_label, LV_ALIGN_BOTTOM_LEFT, 40, -112);
+    lv_obj_align(s_touch_status_label, LV_ALIGN_BOTTOM_LEFT, 40, -92);
 
     s_touch_hint_label = lv_label_create(screen);
     lv_label_set_text(s_touch_hint_label, "Touch connected: validate center and corner orientation.");
     lv_obj_set_style_text_color(s_touch_hint_label, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN);
-    lv_obj_align(s_touch_hint_label, LV_ALIGN_BOTTOM_LEFT, 40, -80);
+    lv_obj_align(s_touch_hint_label, LV_ALIGN_BOTTOM_LEFT, 40, -64);
 
     s_audio_status_label = lv_label_create(screen);
     lv_label_set_text(s_audio_status_label, "Audio ready: use the buttons below to trigger diagnostics.");
     lv_obj_set_style_text_color(s_audio_status_label, lv_color_hex(0xd0d7de), LV_PART_MAIN);
-    lv_obj_align(s_audio_status_label, LV_ALIGN_BOTTOM_LEFT, 40, -48);
+    lv_obj_align(s_audio_status_label, LV_ALIGN_BOTTOM_LEFT, 40, -36);
 
     s_audio_metrics_label = lv_label_create(screen);
     lv_label_set_text(s_audio_metrics_label, "speaker_ready=no microphone_ready=no tone_played=no mic_capture_ready=no");
     lv_obj_set_style_text_color(s_audio_metrics_label, lv_color_hex(0x58a6ff), LV_PART_MAIN);
-    lv_obj_align(s_audio_metrics_label, LV_ALIGN_BOTTOM_LEFT, 40, -18);
+    lv_obj_align(s_audio_metrics_label, LV_ALIGN_BOTTOM_LEFT, 40, -12);
 
     bsp_display_unlock();
     return ESP_OK;
@@ -418,7 +593,7 @@ esp_err_t display_service_set_audio_state(bool speaker_ready, bool microphone_re
              audio_service_tone_played() ? "yes" : "no",
              audio_service_microphone_capture_ready() ? "yes" : "no");
 
-    return display_service_update_audio_labels(NULL, metrics_text);
+    return display_service_update_meter_ui(NULL, -1, metrics_text, s_audio_meter_running);
 }
 
 void display_service_log_summary(void)

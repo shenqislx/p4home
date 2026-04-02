@@ -5,9 +5,22 @@
 
 #include "esp_err.h"
 
+typedef struct {
+    bool ready;
+    uint32_t bytes_read;
+    uint16_t peak_abs;
+    uint32_t mean_abs;
+    uint32_t nonzero_samples;
+} audio_service_microphone_snapshot_t;
+
 esp_err_t audio_service_init(void);
 esp_err_t audio_service_play_test_tone(void);
 esp_err_t audio_service_capture_microphone_sample(void);
+esp_err_t audio_service_poll_microphone_level(audio_service_microphone_snapshot_t *snapshot);
+esp_err_t audio_service_begin_microphone_stream(void);
+esp_err_t audio_service_read_microphone_stream(audio_service_microphone_snapshot_t *snapshot);
+esp_err_t audio_service_end_microphone_stream(void);
+void audio_service_get_microphone_snapshot(audio_service_microphone_snapshot_t *snapshot);
 bool audio_service_is_busy(void);
 bool audio_service_speaker_ready(void);
 bool audio_service_microphone_ready(void);
