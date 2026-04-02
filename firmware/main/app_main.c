@@ -25,6 +25,12 @@ void app_main(void)
              board_support_touch_detected() ? "yes" : "no",
              board_support_touch_ready() ? "yes" : "no",
              board_support_touch_indev_ready() ? "yes" : "no");
+    ESP_LOGI(TAG, "audio service speaker_ready=%s microphone_ready=%s tone_played=%s mic_capture_ready=%s busy=%s",
+             board_support_audio_speaker_ready() ? "yes" : "no",
+             board_support_audio_microphone_ready() ? "yes" : "no",
+             board_support_audio_tone_played() ? "yes" : "no",
+             board_support_audio_microphone_capture_ready() ? "yes" : "no",
+             board_support_audio_busy() ? "yes" : "no");
 
     while (true) {
         diagnostics_service_log_runtime_heartbeat();

@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 
+#include "audio_service.h"
 #include "display_service.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
@@ -32,6 +33,17 @@ esp_err_t board_support_init(void)
             ESP_ERROR_CHECK(display_service_set_touch_state(true));
         }
     }
+
+    esp_err_t audio_ret = audio_service_init();
+    if (audio_ret != ESP_OK) {
+        ESP_LOGW(TAG, "audio service init failed: %s", esp_err_to_name(audio_ret));
+    } else {
+        audio_ret = display_service_set_audio_state(audio_service_speaker_ready(),
+                                                    audio_service_microphone_ready());
+        if (audio_ret != ESP_OK) {
+            ESP_LOGW(TAG, "audio UI state update failed: %s", esp_err_to_name(audio_ret));
+        }
+    }
     s_board_initialized = true;
 
     ESP_LOGI(TAG, "minimal board initialization complete");
@@ -51,6 +63,7 @@ void board_support_log_summary(void)
              s_board_initialized ? "yes" : "no");
     display_service_log_summary();
     touch_service_log_summary();
+    audio_service_log_summary();
 }
 
 bool board_support_display_ready(void)
@@ -71,4 +84,29 @@ bool board_support_touch_detected(void)
 bool board_support_touch_indev_ready(void)
 {
     return touch_service_lvgl_indev_ready();
+}
+
+bool board_support_audio_speaker_ready(void)
+{
+    return audio_service_speaker_ready();
+}
+
+bool board_support_audio_microphone_ready(void)
+{
+    return audio_service_microphone_ready();
+}
+
+bool board_support_audio_tone_played(void)
+{
+    return audio_service_tone_played();
+}
+
+bool board_support_audio_microphone_capture_ready(void)
+{
+    return audio_service_microphone_capture_ready();
+}
+
+bool board_support_audio_busy(void)
+{
+    return audio_service_is_busy();
 }

@@ -1,12 +1,16 @@
 #include "display_service.h"
 
 #include <inttypes.h>
+#include <stdio.h>
 
+#include "audio_service.h"
 #include "bsp/esp32_p4_function_ev_board.h"
 #include "esp_check.h"
 #include "esp_idf_version.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "display_service";
 static lv_display_t *s_display;
@@ -14,7 +18,122 @@ static bool s_display_ready;
 static bsp_lcd_handles_t s_lcd_handles;
 static lv_obj_t *s_touch_status_label;
 static lv_obj_t *s_touch_hint_label;
+static lv_obj_t *s_audio_status_label;
+static lv_obj_t *s_audio_metrics_label;
 static uint32_t s_touch_click_count;
+
+typedef enum {
+    DISPLAY_AUDIO_ACTION_TONE,
+    DISPLAY_AUDIO_ACTION_MIC_CAPTURE,
+} display_audio_action_t;
+
+static void display_service_update_audio_labels_locked(const char *status_text,
+                                                       const char *metrics_text)
+{
+    if (s_audio_status_label != NULL && status_text != NULL) {
+        lv_label_set_text(s_audio_status_label, status_text);
+    }
+    if (s_audio_metrics_label != NULL && metrics_text != NULL) {
+        lv_label_set_text(s_audio_metrics_label, metrics_text);
+    }
+}
+
+static esp_err_t display_service_update_audio_labels(const char *status_text,
+                                                     const char *metrics_text)
+{
+    ESP_RETURN_ON_FALSE(s_display_ready, ESP_ERR_INVALID_STATE, TAG,
+                        "display not ready");
+    ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
+                        "failed to lock LVGL");
+
+    display_service_update_audio_labels_locked(status_text, metrics_text);
+    bsp_display_unlock();
+    return ESP_OK;
+}
+
+static void display_service_audio_action_task(void *parameter)
+{
+    display_audio_action_t action = (display_audio_action_t)(intptr_t)parameter;
+    const bool is_tone = (action == DISPLAY_AUDIO_ACTION_TONE);
+    const char *start_text = is_tone ? "Speaker test requested: playing 500 ms tone..."
+                                     : "Mic sample requested: capturing PCM...";
+
+    if (display_service_update_audio_labels(start_text, NULL) != ESP_OK) {
+        ESP_LOGW(TAG, "failed to update audio start status");
+    }
+
+    esp_err_t ret = is_tone ? audio_service_play_test_tone()
+                            : audio_service_capture_microphone_sample();
+    if (ret != ESP_OK) {
+        char status_text[96];
+        snprintf(status_text, sizeof(status_text),
+                 "%s failed: %s",
+                 is_tone ? "Speaker test" : "Mic sample",
+                 esp_err_to_name(ret));
+        display_service_update_audio_labels(status_text, NULL);
+        ESP_LOGW(TAG, "%s action failed: %s",
+                 is_tone ? "speaker" : "microphone",
+                 esp_err_to_name(ret));
+        vTaskDelete(NULL);
+        return;
+    }
+
+    char status_text[96];
+    char metrics_text[160];
+    if (is_tone) {
+        snprintf(status_text, sizeof(status_text),
+                 "Speaker tone played. Confirm whether the tone was audible.");
+        snprintf(metrics_text, sizeof(metrics_text),
+                 "speaker_ready=%s microphone_ready=%s tone_played=%s mic_capture_ready=%s",
+                 audio_service_speaker_ready() ? "yes" : "no",
+                 audio_service_microphone_ready() ? "yes" : "no",
+                 audio_service_tone_played() ? "yes" : "no",
+                 audio_service_microphone_capture_ready() ? "yes" : "no");
+    } else {
+        snprintf(status_text, sizeof(status_text),
+                 "Mic sample captured. Check serial log and metrics below.");
+        snprintf(metrics_text, sizeof(metrics_text),
+                 "bytes=%" PRIu32 " peak=%u mean=%" PRIu32 " nonzero=%" PRIu32,
+                 audio_service_microphone_bytes_read(),
+                 audio_service_microphone_peak_abs(),
+                 audio_service_microphone_mean_abs(),
+                 audio_service_microphone_nonzero_samples());
+    }
+    display_service_update_audio_labels(status_text, metrics_text);
+    audio_service_log_summary();
+    vTaskDelete(NULL);
+}
+
+static void display_service_audio_button_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    const display_audio_action_t action = (display_audio_action_t)(intptr_t)lv_event_get_user_data(event);
+    if (audio_service_is_busy()) {
+        display_service_update_audio_labels_locked("Audio action already running. Wait for completion.", NULL);
+        return;
+    }
+
+    display_service_update_audio_labels_locked(action == DISPLAY_AUDIO_ACTION_TONE
+                                                   ? "Speaker test requested: creating tone task..."
+                                                   : "Mic sample requested: creating capture task...",
+                                               NULL);
+
+    const BaseType_t task_created = xTaskCreate(display_service_audio_action_task,
+                                                action == DISPLAY_AUDIO_ACTION_TONE
+                                                    ? "audio_tone"
+                                                    : "audio_capture",
+                                                4096,
+                                                (void *)(intptr_t)action,
+                                                5,
+                                                NULL);
+    if (task_created != pdPASS) {
+        display_service_update_audio_labels_locked("Failed to create audio task.", NULL);
+        ESP_LOGW(TAG, "failed to create audio action task");
+    }
+}
 
 static void display_service_touch_demo_event_cb(lv_event_t *event)
 {
@@ -156,8 +275,8 @@ static esp_err_t display_service_render_bootstrap(void)
     lv_obj_align(summary, LV_ALIGN_TOP_LEFT, 40, 96);
 
     lv_obj_t *touch_button = lv_button_create(screen);
-    lv_obj_set_size(touch_button, 280, 84);
-    lv_obj_align(touch_button, LV_ALIGN_CENTER, 0, 40);
+    lv_obj_set_size(touch_button, 280, 72);
+    lv_obj_align(touch_button, LV_ALIGN_CENTER, 0, 10);
     lv_obj_set_style_bg_color(touch_button, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN);
     lv_obj_add_event_cb(touch_button, display_service_touch_demo_event_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(touch_button, display_service_touch_demo_event_cb, LV_EVENT_CLICKED, NULL);
@@ -167,15 +286,49 @@ static esp_err_t display_service_render_bootstrap(void)
     lv_obj_set_style_text_color(touch_button_label, lv_color_white(), LV_PART_MAIN);
     lv_obj_center(touch_button_label);
 
+    lv_obj_t *tone_button = lv_button_create(screen);
+    lv_obj_set_size(tone_button, 240, 64);
+    lv_obj_align(tone_button, LV_ALIGN_CENTER, -140, 110);
+    lv_obj_set_style_bg_color(tone_button, lv_palette_main(LV_PALETTE_GREEN), LV_PART_MAIN);
+    lv_obj_add_event_cb(tone_button, display_service_audio_button_event_cb, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)DISPLAY_AUDIO_ACTION_TONE);
+
+    lv_obj_t *tone_button_label = lv_label_create(tone_button);
+    lv_label_set_text(tone_button_label, "Play Test Tone");
+    lv_obj_set_style_text_color(tone_button_label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_center(tone_button_label);
+
+    lv_obj_t *mic_button = lv_button_create(screen);
+    lv_obj_set_size(mic_button, 240, 64);
+    lv_obj_align(mic_button, LV_ALIGN_CENTER, 140, 110);
+    lv_obj_set_style_bg_color(mic_button, lv_palette_main(LV_PALETTE_ORANGE), LV_PART_MAIN);
+    lv_obj_add_event_cb(mic_button, display_service_audio_button_event_cb, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)DISPLAY_AUDIO_ACTION_MIC_CAPTURE);
+
+    lv_obj_t *mic_button_label = lv_label_create(mic_button);
+    lv_label_set_text(mic_button_label, "Capture Mic Sample");
+    lv_obj_set_style_text_color(mic_button_label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_center(mic_button_label);
+
     s_touch_status_label = lv_label_create(screen);
     lv_label_set_text(s_touch_status_label, "Touch pending: indev not attached");
     lv_obj_set_style_text_color(s_touch_status_label, lv_color_hex(0xd0d7de), LV_PART_MAIN);
-    lv_obj_align(s_touch_status_label, LV_ALIGN_BOTTOM_LEFT, 40, -72);
+    lv_obj_align(s_touch_status_label, LV_ALIGN_BOTTOM_LEFT, 40, -112);
 
     s_touch_hint_label = lv_label_create(screen);
-    lv_label_set_text(s_touch_hint_label, "Waiting for next milestone: touch, navigation, data.");
+    lv_label_set_text(s_touch_hint_label, "Touch connected: validate center and corner orientation.");
     lv_obj_set_style_text_color(s_touch_hint_label, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN);
-    lv_obj_align(s_touch_hint_label, LV_ALIGN_BOTTOM_LEFT, 40, -32);
+    lv_obj_align(s_touch_hint_label, LV_ALIGN_BOTTOM_LEFT, 40, -80);
+
+    s_audio_status_label = lv_label_create(screen);
+    lv_label_set_text(s_audio_status_label, "Audio ready: use the buttons below to trigger diagnostics.");
+    lv_obj_set_style_text_color(s_audio_status_label, lv_color_hex(0xd0d7de), LV_PART_MAIN);
+    lv_obj_align(s_audio_status_label, LV_ALIGN_BOTTOM_LEFT, 40, -48);
+
+    s_audio_metrics_label = lv_label_create(screen);
+    lv_label_set_text(s_audio_metrics_label, "speaker_ready=no microphone_ready=no tone_played=no mic_capture_ready=no");
+    lv_obj_set_style_text_color(s_audio_metrics_label, lv_color_hex(0x58a6ff), LV_PART_MAIN);
+    lv_obj_align(s_audio_metrics_label, LV_ALIGN_BOTTOM_LEFT, 40, -18);
 
     bsp_display_unlock();
     return ESP_OK;
@@ -252,6 +405,20 @@ esp_err_t display_service_record_touch_sample(uint16_t x, uint16_t y, uint32_t c
 
     bsp_display_unlock();
     return ESP_OK;
+}
+
+esp_err_t display_service_set_audio_state(bool speaker_ready, bool microphone_ready)
+{
+    char metrics_text[96];
+
+    snprintf(metrics_text, sizeof(metrics_text),
+             "speaker_ready=%s microphone_ready=%s tone_played=%s mic_capture_ready=%s",
+             speaker_ready ? "yes" : "no",
+             microphone_ready ? "yes" : "no",
+             audio_service_tone_played() ? "yes" : "no",
+             audio_service_microphone_capture_ready() ? "yes" : "no");
+
+    return display_service_update_audio_labels(NULL, metrics_text);
 }
 
 void display_service_log_summary(void)

@@ -11,3 +11,8 @@ bool board_support_display_ready(void);
 bool board_support_touch_ready(void);
 bool board_support_touch_detected(void);
 bool board_support_touch_indev_ready(void);
+bool board_support_audio_speaker_ready(void);
+bool board_support_audio_microphone_ready(void);
+bool board_support_audio_tone_played(void);
+bool board_support_audio_microphone_capture_ready(void);
+bool board_support_audio_busy(void);
