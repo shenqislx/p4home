@@ -51,25 +51,19 @@ jobs:
           idf.py set-target esp32p4
           idf.py fullclean build
 
-      - name: Flash firmware
-        run: |
-          . ../scripts/activate-idf-v5.5.4.sh
-          idf.py -p "$SERIAL_PORT" flash
-
-      - name: Capture startup serial logs
+      - name: Flash firmware and capture startup serial logs
         run: |
           . ../scripts/activate-idf-v5.5.4.sh
           python3 - <<'PY'
           import os
           import pathlib
           import subprocess
-          import sys
 
           port = os.environ["SERIAL_PORT"]
           timeout_seconds = int(os.environ["MONITOR_SECONDS"])
           log_path = pathlib.Path("monitor.log")
 
-          command = ["idf.py", "-p", port, "monitor"]
+          command = ["idf.py", "-p", port, "flash", "monitor"]
 
           with log_path.open("w", encoding="utf-8", errors="replace") as handle:
               handle.write(f"$ {' '.join(command)}\n")
@@ -99,7 +93,12 @@ jobs:
           rg -n "diagnostics: p4home firmware starting" monitor.log
           rg -n "board_support: board=ESP32-P4 Function EV Board" monitor.log
 
+      - name: Show monitor log tail on failure
+        if: failure()
+        run: tail -n 200 monitor.log || true
+
       - name: Upload serial log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: esp32-p4-monitor-log
