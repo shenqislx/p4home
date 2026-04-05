@@ -1,0 +1,106 @@
+name: Firmware Self-Hosted Flash Serial
+
+on:
+  workflow_dispatch:
+    inputs:
+      serial_port:
+        description: macOS serial device path
+        required: true
+        default: /dev/cu.usbserial-10
+      monitor_seconds:
+        description: Seconds to capture startup logs
+        required: true
+        default: "20"
+
+jobs:
+  flash-and-monitor:
+    name: Flash ESP32-P4 and capture serial logs
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - esp32-p4
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: zsh -l {0}
+        working-directory: firmware
+    env:
+      SERIAL_PORT: ${{ inputs.serial_port }}
+      MONITOR_SECONDS: ${{ inputs.monitor_seconds }}
+      IDF_SKIP_CHECK_SUBMODULES: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show runner context
+        run: |
+          uname -a
+          whoami
+          pwd
+          ls "$SERIAL_PORT"
+
+      - name: Verify ESP-IDF activation script exists
+        run: |
+          test -f ../scripts/activate-idf-v5.5.4.sh
+          test -f "$HOME/.espressif/tools/activate_idf_v5.5.4.sh"
+
+      - name: Build firmware
+        run: |
+          . ../scripts/activate-idf-v5.5.4.sh
+          idf.py fullclean build
+
+      - name: Flash firmware
+        run: |
+          . ../scripts/activate-idf-v5.5.4.sh
+          idf.py -p "$SERIAL_PORT" flash
+
+      - name: Capture startup serial logs
+        run: |
+          . ../scripts/activate-idf-v5.5.4.sh
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import subprocess
+          import sys
+
+          port = os.environ["SERIAL_PORT"]
+          timeout_seconds = int(os.environ["MONITOR_SECONDS"])
+          log_path = pathlib.Path("monitor.log")
+
+          command = ["idf.py", "-p", port, "monitor"]
+
+          with log_path.open("w", encoding="utf-8", errors="replace") as handle:
+              handle.write(f"$ {' '.join(command)}\n")
+              handle.flush()
+              process = subprocess.Popen(
+                  command,
+                  stdout=handle,
+                  stderr=subprocess.STDOUT,
+                  text=True,
+              )
+              try:
+                  process.wait(timeout=timeout_seconds)
+              except subprocess.TimeoutExpired:
+                  process.terminate()
+                  try:
+                      process.wait(timeout=5)
+                  except subprocess.TimeoutExpired:
+                      process.kill()
+                      process.wait()
+
+          print(f"Saved serial log to {log_path}")
+          PY
+
+      - name: Assert startup markers
+        run: |
+          rg -n "ESP-IDF v5\\.5\\.4" monitor.log
+          rg -n "diagnostics: p4home firmware starting" monitor.log
+          rg -n "board_support: board=ESP32-P4 Function EV Board" monitor.log
+
+      - name: Upload serial log
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32-p4-monitor-log
+          path: firmware/monitor.log
+          if-no-files-found: error
