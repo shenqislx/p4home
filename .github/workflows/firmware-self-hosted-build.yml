@@ -1,0 +1,38 @@
+name: Firmware Self-Hosted Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ESP32-P4 firmware
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: zsh -l {0}
+        working-directory: firmware
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show runner context
+        run: |
+          uname -a
+          whoami
+          pwd
+
+      - name: Verify ESP-IDF activation script exists
+        run: |
+          test -f ../scripts/activate-idf-v5.5.4.sh
+          test -f "$HOME/.espressif/tools/activate_idf_v5.5.4.sh"
+
+      - name: Build firmware
+        run: |
+          . ../scripts/activate-idf-v5.5.4.sh
+          export IDF_SKIP_CHECK_SUBMODULES=1
+          idf.py set-target esp32p4
+          idf.py build
