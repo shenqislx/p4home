@@ -54,35 +54,58 @@ jobs:
       - name: Flash firmware and capture startup serial logs
         run: |
           . ../scripts/activate-idf-v5.5.4.sh
-          python3 - <<'PY'
+          python - <<'PY'
           import os
           import pathlib
           import subprocess
+          import time
+
+          import serial
+          from esp_idf_monitor.base.reset import Reset
 
           port = os.environ["SERIAL_PORT"]
           timeout_seconds = int(os.environ["MONITOR_SECONDS"])
           log_path = pathlib.Path("monitor.log")
-
-          command = ["idf.py", "-p", port, "flash", "monitor"]
+          flash_command = ["idf.py", "-p", port, "flash"]
 
           with log_path.open("w", encoding="utf-8", errors="replace") as handle:
-              handle.write(f"$ {' '.join(command)}\n")
+              handle.write(f"$ {' '.join(flash_command)}\n")
               handle.flush()
-              process = subprocess.Popen(
-                  command,
+              subprocess.run(
+                  flash_command,
                   stdout=handle,
                   stderr=subprocess.STDOUT,
                   text=True,
+                  check=True,
               )
+
+              handle.write(f"\n$ serial-capture {port} {timeout_seconds}s\n")
+              handle.flush()
+
+              ser = serial.Serial()
+              ser.port = port
+              ser.baudrate = 115200
+              ser.timeout = 0.25
+              ser.rts = False
+              ser.dtr = False
+              ser.open()
+
               try:
-                  process.wait(timeout=timeout_seconds)
-              except subprocess.TimeoutExpired:
-                  process.terminate()
-                  try:
-                      process.wait(timeout=5)
-                  except subprocess.TimeoutExpired:
-                      process.kill()
-                      process.wait()
+                  reset = Reset(ser, "esp32p4")
+                  reset._setRTS(False)
+                  reset._setDTR(False)
+                  ser.reset_input_buffer()
+                  reset.hard()
+
+                  deadline = time.monotonic() + timeout_seconds
+                  while time.monotonic() < deadline:
+                      chunk = ser.read(ser.in_waiting or 1)
+                      if not chunk:
+                          continue
+                      handle.write(chunk.decode("utf-8", errors="replace"))
+                      handle.flush()
+              finally:
+                  ser.close()
 
           print(f"Saved serial log to {log_path}")
           PY
