@@ -48,6 +48,7 @@ jobs:
       - name: Build firmware
         run: |
           . ../scripts/activate-idf-v5.5.4.sh
+          idf.py set-target esp32p4
           idf.py fullclean build
 
       - name: Flash firmware
