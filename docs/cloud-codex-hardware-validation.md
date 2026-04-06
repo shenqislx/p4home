@@ -15,6 +15,25 @@
 
 该 skill 用于让云端 Codex 在进入 `p4home` 仓库的硬件验证任务时，直接按同一套 artifact-first 协议工作。
 
+仓库内同步副本：
+
+- [SKILL.md](/Users/andyhao/workspace/p4home/.codex/skills/p4home-hardware-validation/SKILL.md)
+
+如果云端 Codex 所在环境无法直接看到本机 `$CODEX_HOME/skills`，应从本仓库安装该 skill 到它自己的 `CODEX_HOME/skills`。
+
+推荐安装方式：
+
+1. 在云端 Codex 中使用预装的 `$skill-installer`
+2. 从 GitHub repo `shenqislx/p4home` 安装路径 `.codex/skills/p4home-hardware-validation`
+
+逻辑上等价于：
+
+```sh
+python3 install-skill-from-github.py \
+  --repo shenqislx/p4home \
+  --path .codex/skills/p4home-hardware-validation
+```
+
 ## Workflow
 
 入口 workflow：

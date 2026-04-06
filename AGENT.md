@@ -60,6 +60,11 @@
 
 - `skills/`
 
+当前项目内已固化的 skill：
+
+- `esp-idf-v5.5.4`
+- `p4home-hardware-validation`
+
 ### `/scripts`
 
 本地辅助脚本目录。
