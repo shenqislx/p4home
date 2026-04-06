@@ -110,11 +110,48 @@ jobs:
           print(f"Saved serial log to {log_path}")
           PY
 
-      - name: Assert startup markers
+      - name: Write hardware validation manifest
         run: |
-          rg -n "ESP-IDF v5\\.5\\.4" monitor.log
-          rg -n "diagnostics: p4home firmware starting" monitor.log
-          rg -n "board_support: board=ESP32-P4 Function EV Board" monitor.log
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          manifest = {
+              "schema_version": 1,
+              "mode": "artifact-only",
+              "verdict_owner": "cloud-codex",
+              "git_sha": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "job": "flash-and-monitor",
+              "serial_port": os.environ["SERIAL_PORT"],
+              "monitor_seconds": int(os.environ["MONITOR_SECONDS"]),
+              "log_file": "monitor.log",
+          }
+
+          pathlib.Path("hardware-validation-manifest.json").write_text(
+              json.dumps(manifest, ensure_ascii=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Assert captured log is non-empty
+        run: |
+          test -s monitor.log
+
+      - name: Write job summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## ESP32-P4 hardware validation artifact
+
+          This workflow only performs build, flash, serial capture, and artifact upload.
+          Functional PASS/FAIL is owned by cloud Codex after it reads the artifact.
+
+          Files:
+          - \`firmware/monitor.log\`
+          - \`firmware/hardware-validation-manifest.json\`
+          EOF
 
       - name: Show monitor log tail on failure
         if: failure()
@@ -125,5 +162,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: esp32-p4-monitor-log
-          path: firmware/monitor.log
+          path: |
+            firmware/monitor.log
+            firmware/hardware-validation-manifest.json
           if-no-files-found: error
