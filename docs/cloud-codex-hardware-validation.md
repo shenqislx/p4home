@@ -78,7 +78,12 @@ artifact 内至少包含两个文件：
   "job": "flash-and-monitor",
   "serial_port": "/dev/cu.usbserial-10",
   "monitor_seconds": 20,
-  "log_file": "monitor.log"
+  "log_file": "monitor.log",
+  "verification_case": "boot-smoke",
+  "expected_markers": [
+    "VERIFY:boot:board_init:PASS",
+    "VERIFY:display:bootstrap:PASS"
+  ]
 }
 ```
 
@@ -86,6 +91,8 @@ artifact 内至少包含两个文件：
 
 - `mode=artifact-only` 表示 workflow 不做功能业务裁决
 - `verdict_owner=cloud-codex` 表示最终通过/失败由云端 Codex 解释
+- `verification_case` 表示本次 run 希望验证的功能场景
+- `expected_markers` 给出建议优先检查的串口标记
 
 ## Minimal Workflow Verdict
 
@@ -128,6 +135,19 @@ workflow 不再负责：
 VERIFY:touch:init:PASS
 VERIFY:wifi:connect:FAIL reason=timeout
 VERIFY:settings:migration:PASS
+```
+
+当前固件启动阶段已经输出以下机器可读标记：
+
+```text
+VERIFY:boot:board_init:PASS
+VERIFY:display:bootstrap:<PASS|FAIL>
+VERIFY:touch:detect:<PASS|FAIL>
+VERIFY:touch:lvgl_indev:<PASS|FAIL>
+VERIFY:audio:speaker:<PASS|FAIL>
+VERIFY:audio:microphone:<PASS|FAIL>
+VERIFY:audio:tone_played:<PASS|FAIL>
+VERIFY:audio:mic_capture:<PASS|FAIL>
 ```
 
 这样可以显著降低云端 Codex 解析串口日志的歧义。

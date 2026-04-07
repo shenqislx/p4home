@@ -11,6 +11,10 @@ on:
         description: Seconds to capture startup logs
         required: true
         default: "20"
+      verification_case:
+        description: Functional case name for cloud Codex judgment
+        required: true
+        default: boot-smoke
 
 jobs:
   flash-and-monitor:
@@ -28,6 +32,7 @@ jobs:
     env:
       SERIAL_PORT: ${{ inputs.serial_port }}
       MONITOR_SECONDS: ${{ inputs.monitor_seconds }}
+      VERIFICATION_CASE: ${{ inputs.verification_case }}
       IDF_SKIP_CHECK_SUBMODULES: "1"
     steps:
       - name: Checkout repository
@@ -128,6 +133,11 @@ jobs:
               "serial_port": os.environ["SERIAL_PORT"],
               "monitor_seconds": int(os.environ["MONITOR_SECONDS"]),
               "log_file": "monitor.log",
+              "verification_case": os.environ["VERIFICATION_CASE"],
+              "expected_markers": [
+                  "VERIFY:boot:board_init:PASS",
+                  "VERIFY:display:bootstrap:PASS",
+              ],
           }
 
           pathlib.Path("hardware-validation-manifest.json").write_text(
