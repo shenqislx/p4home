@@ -36,6 +36,14 @@ void app_main(void)
              board_support_audio_tone_played() ? "yes" : "no",
              board_support_audio_microphone_capture_ready() ? "yes" : "no",
              board_support_audio_busy() ? "yes" : "no");
+    ESP_LOGI(TAG, "sr service dependency_declared=%s afe_config_ready=%s afe_ready=%s",
+             board_support_sr_dependency_declared() ? "yes" : "no",
+             board_support_sr_afe_config_ready() ? "yes" : "no",
+             board_support_sr_afe_ready() ? "yes" : "no");
+    ESP_LOGI(TAG, "sr service models_available=%s model_count=%u status=%s",
+             board_support_sr_models_available() ? "yes" : "no",
+             board_support_sr_model_count(),
+             board_support_sr_status_text());
 
     log_verify_marker("boot", "board_init", true);
     log_verify_marker("display", "bootstrap", board_support_display_ready());

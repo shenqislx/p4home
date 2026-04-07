@@ -6,6 +6,7 @@
 #include "display_service.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
+#include "sr_service.h"
 #include "touch_service.h"
 
 static const char *TAG = "board_support";
@@ -44,6 +45,12 @@ esp_err_t board_support_init(void)
             ESP_LOGW(TAG, "audio UI state update failed: %s", esp_err_to_name(audio_ret));
         }
     }
+
+    esp_err_t sr_ret = sr_service_init();
+    if (sr_ret != ESP_OK) {
+        ESP_LOGW(TAG, "sr service init failed: %s", esp_err_to_name(sr_ret));
+    }
+
     s_board_initialized = true;
 
     ESP_LOGI(TAG, "minimal board initialization complete");
@@ -64,6 +71,7 @@ void board_support_log_summary(void)
     display_service_log_summary();
     touch_service_log_summary();
     audio_service_log_summary();
+    sr_service_log_summary();
 }
 
 bool board_support_display_ready(void)
@@ -109,4 +117,34 @@ bool board_support_audio_microphone_capture_ready(void)
 bool board_support_audio_busy(void)
 {
     return audio_service_is_busy();
+}
+
+bool board_support_sr_dependency_declared(void)
+{
+    return sr_service_dependency_declared();
+}
+
+bool board_support_sr_models_available(void)
+{
+    return sr_service_models_available();
+}
+
+unsigned int board_support_sr_model_count(void)
+{
+    return (unsigned int)sr_service_model_count();
+}
+
+bool board_support_sr_afe_config_ready(void)
+{
+    return sr_service_afe_config_ready();
+}
+
+bool board_support_sr_afe_ready(void)
+{
+    return sr_service_afe_ready();
+}
+
+const char *board_support_sr_status_text(void)
+{
+    return sr_service_status_text();
 }
