@@ -7,6 +7,11 @@
 
 static const char *TAG = "p4home_main";
 
+static void log_verify_marker(const char *area, const char *check, bool pass)
+{
+    ESP_LOGI(TAG, "VERIFY:%s:%s:%s", area, check, pass ? "PASS" : "FAIL");
+}
+
 void app_main(void)
 {
     diagnostics_service_log_boot_banner();
@@ -31,6 +36,15 @@ void app_main(void)
              board_support_audio_tone_played() ? "yes" : "no",
              board_support_audio_microphone_capture_ready() ? "yes" : "no",
              board_support_audio_busy() ? "yes" : "no");
+
+    log_verify_marker("boot", "board_init", true);
+    log_verify_marker("display", "bootstrap", board_support_display_ready());
+    log_verify_marker("touch", "detect", board_support_touch_detected());
+    log_verify_marker("touch", "lvgl_indev", board_support_touch_indev_ready());
+    log_verify_marker("audio", "speaker", board_support_audio_speaker_ready());
+    log_verify_marker("audio", "microphone", board_support_audio_microphone_ready());
+    log_verify_marker("audio", "tone_played", board_support_audio_tone_played());
+    log_verify_marker("audio", "mic_capture", board_support_audio_microphone_capture_ready());
 
     while (true) {
         diagnostics_service_log_runtime_heartbeat();
