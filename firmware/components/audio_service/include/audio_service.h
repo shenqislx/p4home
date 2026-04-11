@@ -16,6 +16,7 @@ typedef struct {
 esp_err_t audio_service_init(void);
 esp_err_t audio_service_play_test_tone(void);
 esp_err_t audio_service_capture_microphone_sample(void);
+esp_err_t audio_service_run_startup_selftest(void);
 esp_err_t audio_service_poll_microphone_level(audio_service_microphone_snapshot_t *snapshot);
 esp_err_t audio_service_begin_microphone_stream(void);
 esp_err_t audio_service_read_microphone_stream(audio_service_microphone_snapshot_t *snapshot);

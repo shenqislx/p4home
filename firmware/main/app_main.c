@@ -53,6 +53,8 @@ void app_main(void)
     log_verify_marker("audio", "microphone", board_support_audio_microphone_ready());
     log_verify_marker("audio", "tone_played", board_support_audio_tone_played());
     log_verify_marker("audio", "mic_capture", board_support_audio_microphone_capture_ready());
+    log_verify_marker("sr", "models", board_support_sr_models_available());
+    log_verify_marker("sr", "afe_preflight", board_support_sr_afe_ready());
 
     while (true) {
         diagnostics_service_log_runtime_heartbeat();

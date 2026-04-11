@@ -5,4 +5,4 @@ factory,  app,  factory, 0x10000,  2M,
 ota_0,    app,  ota_0,   ,         2M,
 ota_1,    app,  ota_1,   ,         2M,
 storage,  data, spiffs,  ,         1M,
-
+model,    data, spiffs,  ,         4M,

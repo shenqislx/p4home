@@ -42,6 +42,48 @@ static const esp_codec_dev_sample_info_t AUDIO_SERVICE_SAMPLE_INFO = {
     .mclk_multiple = 0,
 };
 
+static esp_err_t audio_service_capture_microphone(bool log_result);
+
+static esp_err_t audio_service_write_speaker_tone(size_t sample_count,
+                                                  int16_t amplitude,
+                                                  uint8_t volume_percent,
+                                                  TickType_t settle_delay_ticks)
+{
+    int ret = esp_codec_dev_set_out_vol(s_speaker_codec, volume_percent);
+    if (ret != ESP_CODEC_DEV_OK) {
+        ESP_LOGE(TAG, "failed to set speaker volume: %d", ret);
+        return ESP_FAIL;
+    }
+
+    ret = esp_codec_dev_open(s_speaker_codec, (esp_codec_dev_sample_info_t *)&AUDIO_SERVICE_SAMPLE_INFO);
+    if (ret != ESP_CODEC_DEV_OK) {
+        ESP_LOGE(TAG, "failed to open speaker stream: %d", ret);
+        return ESP_FAIL;
+    }
+
+    const int period_samples = 16;
+    for (size_t i = 0; i < sample_count; ++i) {
+        s_tone_buffer[i] = ((i % period_samples) < (period_samples / 2)) ? amplitude : -amplitude;
+    }
+
+    ret = esp_codec_dev_write(s_speaker_codec, s_tone_buffer, sample_count * sizeof(s_tone_buffer[0]));
+    if (settle_delay_ticks > 0) {
+        vTaskDelay(settle_delay_ticks);
+    }
+    int close_ret = esp_codec_dev_close(s_speaker_codec);
+    if (close_ret != ESP_CODEC_DEV_OK) {
+        ESP_LOGE(TAG, "failed to close speaker stream: %d", close_ret);
+        return ESP_FAIL;
+    }
+    if (ret != ESP_CODEC_DEV_OK) {
+        ESP_LOGE(TAG, "failed to write speaker tone: %d", ret);
+        return ESP_FAIL;
+    }
+
+    s_state.tone_played = true;
+    return ESP_OK;
+}
+
 static bool audio_service_try_begin_action(void)
 {
     bool granted = false;
@@ -166,45 +208,51 @@ esp_err_t audio_service_play_test_tone(void)
                         "audio action already running");
 
     esp_err_t err = ESP_OK;
-    int ret = esp_codec_dev_set_out_vol(s_speaker_codec, 55);
-    if (ret != ESP_CODEC_DEV_OK) {
-        err = ESP_FAIL;
-        ESP_LOGE(TAG, "failed to set speaker volume: %d", ret);
-        goto cleanup;
+    err = audio_service_write_speaker_tone(sizeof(s_tone_buffer) / sizeof(s_tone_buffer[0]),
+                                           9000,
+                                           55,
+                                           pdMS_TO_TICKS(120));
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "speaker test tone wrote %u bytes", (unsigned)sizeof(s_tone_buffer));
     }
-
-    ret = esp_codec_dev_open(s_speaker_codec, (esp_codec_dev_sample_info_t *)&AUDIO_SERVICE_SAMPLE_INFO);
-    if (ret != ESP_CODEC_DEV_OK) {
-        err = ESP_FAIL;
-        ESP_LOGE(TAG, "failed to open speaker stream: %d", ret);
-        goto cleanup;
-    }
-
-    const int period_samples = 16;
-    const int16_t amplitude = 9000;
-    for (size_t i = 0; i < sizeof(s_tone_buffer) / sizeof(s_tone_buffer[0]); ++i) {
-        s_tone_buffer[i] = ((i % period_samples) < (period_samples / 2)) ? amplitude : -amplitude;
-    }
-
-    ret = esp_codec_dev_write(s_speaker_codec, s_tone_buffer, sizeof(s_tone_buffer));
-    vTaskDelay(pdMS_TO_TICKS(120));
-    int close_ret = esp_codec_dev_close(s_speaker_codec);
-    if (close_ret != ESP_CODEC_DEV_OK) {
-        err = ESP_FAIL;
-        ESP_LOGE(TAG, "failed to close speaker stream: %d", close_ret);
-        goto cleanup;
-    }
-    if (ret != ESP_CODEC_DEV_OK) {
-        err = ESP_FAIL;
-        ESP_LOGE(TAG, "failed to write speaker tone: %d", ret);
-        goto cleanup;
-    }
-
-    s_state.tone_played = true;
-    ESP_LOGI(TAG, "speaker test tone wrote %u bytes", (unsigned)sizeof(s_tone_buffer));
-cleanup:
     audio_service_finish_action();
     return err;
+}
+
+esp_err_t audio_service_run_startup_selftest(void)
+{
+    ESP_RETURN_ON_FALSE(s_state.initialized, ESP_ERR_INVALID_STATE, TAG,
+                        "audio service not initialized");
+
+    esp_err_t overall = ESP_OK;
+
+    if (s_speaker_codec != NULL) {
+        if (!audio_service_try_begin_action()) {
+            ESP_LOGW(TAG, "startup speaker selftest skipped: audio action already running");
+            overall = ESP_ERR_INVALID_STATE;
+        } else {
+            esp_err_t ret = audio_service_write_speaker_tone(1024, 7000, 35, pdMS_TO_TICKS(40));
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "startup speaker selftest failed: %s", esp_err_to_name(ret));
+                overall = ret;
+            } else {
+                ESP_LOGI(TAG, "startup speaker selftest wrote %u bytes", 1024U * (unsigned)sizeof(int16_t));
+            }
+            audio_service_finish_action();
+        }
+    }
+
+    if (s_microphone_codec != NULL) {
+        esp_err_t ret = audio_service_capture_microphone(true);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "startup microphone selftest failed: %s", esp_err_to_name(ret));
+            overall = (overall == ESP_OK) ? ret : overall;
+        } else {
+            ESP_LOGI(TAG, "startup microphone selftest complete");
+        }
+    }
+
+    return overall;
 }
 
 esp_err_t audio_service_begin_microphone_stream(void)
@@ -325,6 +373,10 @@ esp_err_t audio_service_init(void)
     }
 
     s_state.initialized = true;
+    esp_err_t selftest_ret = audio_service_run_startup_selftest();
+    if (selftest_ret != ESP_OK) {
+        ESP_LOGW(TAG, "startup selftest completed with warnings: %s", esp_err_to_name(selftest_ret));
+    }
     audio_service_log_summary();
     return ESP_OK;
 }
