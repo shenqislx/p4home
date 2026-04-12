@@ -30,16 +30,20 @@ void app_main(void)
              board_support_touch_detected() ? "yes" : "no",
              board_support_touch_ready() ? "yes" : "no",
              board_support_touch_indev_ready() ? "yes" : "no");
-    ESP_LOGI(TAG, "audio service speaker_ready=%s microphone_ready=%s tone_played=%s mic_capture_ready=%s busy=%s",
+    ESP_LOGI(TAG, "audio service speaker_ready=%s microphone_ready=%s tone_played=%s mic_capture_ready=%s busy=%s owner=%s",
              board_support_audio_speaker_ready() ? "yes" : "no",
              board_support_audio_microphone_ready() ? "yes" : "no",
              board_support_audio_tone_played() ? "yes" : "no",
              board_support_audio_microphone_capture_ready() ? "yes" : "no",
-             board_support_audio_busy() ? "yes" : "no");
-    ESP_LOGI(TAG, "sr service dependency_declared=%s afe_config_ready=%s afe_ready=%s",
+             board_support_audio_busy() ? "yes" : "no",
+             board_support_audio_owner_text());
+    ESP_LOGI(TAG, "sr service dependency_declared=%s afe_config_ready=%s afe_ready=%s afe_runtime_ready=%s runtime_loop_started=%s runtime_loop_active=%s",
              board_support_sr_dependency_declared() ? "yes" : "no",
              board_support_sr_afe_config_ready() ? "yes" : "no",
-             board_support_sr_afe_ready() ? "yes" : "no");
+             board_support_sr_afe_ready() ? "yes" : "no",
+             board_support_sr_afe_runtime_ready() ? "yes" : "no",
+             board_support_sr_runtime_loop_started() ? "yes" : "no",
+             board_support_sr_runtime_loop_active() ? "yes" : "no");
     ESP_LOGI(TAG, "sr service models_available=%s model_count=%u status=%s",
              board_support_sr_models_available() ? "yes" : "no",
              board_support_sr_model_count(),
@@ -55,6 +59,8 @@ void app_main(void)
     log_verify_marker("audio", "mic_capture", board_support_audio_microphone_capture_ready());
     log_verify_marker("sr", "models", board_support_sr_models_available());
     log_verify_marker("sr", "afe_preflight", board_support_sr_afe_ready());
+    log_verify_marker("sr", "afe_runtime", board_support_sr_afe_runtime_ready());
+    log_verify_marker("sr", "runtime_loop", board_support_sr_runtime_loop_started());
 
     while (true) {
         diagnostics_service_log_runtime_heartbeat();

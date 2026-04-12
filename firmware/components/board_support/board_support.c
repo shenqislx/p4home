@@ -119,6 +119,11 @@ bool board_support_audio_busy(void)
     return audio_service_is_busy();
 }
 
+const char *board_support_audio_owner_text(void)
+{
+    return audio_service_current_owner();
+}
+
 bool board_support_sr_dependency_declared(void)
 {
     return sr_service_dependency_declared();
@@ -142,6 +147,21 @@ bool board_support_sr_afe_config_ready(void)
 bool board_support_sr_afe_ready(void)
 {
     return sr_service_afe_ready();
+}
+
+bool board_support_sr_afe_runtime_ready(void)
+{
+    return sr_service_afe_runtime_ready();
+}
+
+bool board_support_sr_runtime_loop_started(void)
+{
+    return sr_service_runtime_loop_started();
+}
+
+bool board_support_sr_runtime_loop_active(void)
+{
+    return sr_service_runtime_loop_active();
 }
 
 const char *board_support_sr_status_text(void)

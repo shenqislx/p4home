@@ -116,12 +116,12 @@ static void display_service_audio_meter_task(void *parameter)
     (void)parameter;
     uint32_t sample_counter = 0;
 
-    esp_err_t ret = audio_service_begin_microphone_stream();
+    esp_err_t ret = audio_service_begin_microphone_stream_for("display_mic_meter");
     if (ret != ESP_OK) {
         char status_text[96];
         snprintf(status_text, sizeof(status_text),
-                 "Mic meter start failed: %s",
-                 esp_err_to_name(ret));
+                 "Mic meter unavailable: %s owns audio.",
+                 audio_service_current_owner());
         display_service_update_meter_ui(status_text, 0, NULL, false);
         s_audio_meter_running = false;
         s_audio_meter_task = NULL;
@@ -192,10 +192,17 @@ static void display_service_audio_action_task(void *parameter)
                             : audio_service_capture_microphone_sample();
     if (ret != ESP_OK) {
         char status_text[96];
-        snprintf(status_text, sizeof(status_text),
-                 "%s failed: %s",
-                 is_tone ? "Speaker test" : "Mic sample",
-                 esp_err_to_name(ret));
+        if (ret == ESP_ERR_INVALID_STATE && audio_service_is_busy()) {
+            snprintf(status_text, sizeof(status_text),
+                     "%s unavailable: %s owns audio.",
+                     is_tone ? "Speaker test" : "Mic sample",
+                     audio_service_current_owner());
+        } else {
+            snprintf(status_text, sizeof(status_text),
+                     "%s failed: %s",
+                     is_tone ? "Speaker test" : "Mic sample",
+                     esp_err_to_name(ret));
+        }
         display_service_update_audio_labels(status_text, NULL);
         ESP_LOGW(TAG, "%s action failed: %s",
                  is_tone ? "speaker" : "microphone",
@@ -238,7 +245,11 @@ static void display_service_audio_button_event_cb(lv_event_t *event)
 
     const display_audio_action_t action = (display_audio_action_t)(intptr_t)lv_event_get_user_data(event);
     if (audio_service_is_busy()) {
-        display_service_update_audio_labels_locked("Audio action already running. Stop mic meter or wait for current action.", NULL);
+        char status_text[96];
+        snprintf(status_text, sizeof(status_text),
+                 "Audio unavailable: %s owns audio.",
+                 audio_service_current_owner());
+        display_service_update_audio_labels_locked(status_text, NULL);
         return;
     }
 
@@ -270,6 +281,16 @@ static void display_service_audio_meter_button_event_cb(lv_event_t *event)
     if (s_audio_meter_running) {
         s_audio_meter_running = false;
         display_service_update_meter_ui_locked("Stopping mic meter...", 0, NULL, false);
+        return;
+    }
+
+    if (audio_service_is_busy()) {
+        char status_text[96];
+        snprintf(status_text, sizeof(status_text),
+                 "Mic meter unavailable: %s owns audio.",
+                 audio_service_current_owner());
+        s_audio_meter_running = false;
+        display_service_update_meter_ui_locked(status_text, 0, NULL, false);
         return;
     }
 
