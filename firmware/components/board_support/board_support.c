@@ -164,6 +164,31 @@ bool board_support_sr_runtime_loop_active(void)
     return sr_service_runtime_loop_active();
 }
 
+bool board_support_sr_wake_state_machine_started(void)
+{
+    return sr_service_wake_state_machine_started();
+}
+
+bool board_support_sr_command_model_ready(void)
+{
+    return sr_service_command_model_ready();
+}
+
+bool board_support_sr_command_set_ready(void)
+{
+    return sr_service_command_set_ready();
+}
+
+const char *board_support_sr_voice_state_text(void)
+{
+    return sr_service_voice_state_text();
+}
+
+const char *board_support_sr_command_text(void)
+{
+    return sr_service_command_text();
+}
+
 const char *board_support_sr_status_text(void)
 {
     return sr_service_status_text();

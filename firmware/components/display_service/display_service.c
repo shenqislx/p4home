@@ -23,9 +23,12 @@ static lv_obj_t *s_audio_metrics_label;
 static lv_obj_t *s_audio_meter_label;
 static lv_obj_t *s_audio_meter_button_label;
 static lv_obj_t *s_audio_meter_bar;
+static lv_obj_t *s_voice_status_label;
+static lv_obj_t *s_voice_metrics_label;
 static uint32_t s_touch_click_count;
 static TaskHandle_t s_audio_meter_task;
 static bool s_audio_meter_running;
+static bool s_backlight_enabled;
 
 typedef enum {
     DISPLAY_AUDIO_ACTION_TONE,
@@ -67,6 +70,31 @@ static esp_err_t display_service_update_audio_labels(const char *status_text,
                         "failed to lock LVGL");
 
     display_service_update_audio_labels_locked(status_text, metrics_text);
+    bsp_display_unlock();
+    return ESP_OK;
+}
+
+static esp_err_t display_service_update_voice_labels_locked(const char *status_text,
+                                                            const char *metrics_text)
+{
+    if (s_voice_status_label != NULL && status_text != NULL) {
+        lv_label_set_text(s_voice_status_label, status_text);
+    }
+    if (s_voice_metrics_label != NULL && metrics_text != NULL) {
+        lv_label_set_text(s_voice_metrics_label, metrics_text);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t display_service_update_voice_labels(const char *status_text,
+                                                     const char *metrics_text)
+{
+    ESP_RETURN_ON_FALSE(s_display_ready, ESP_ERR_INVALID_STATE, TAG,
+                        "display not ready");
+    ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
+                        "failed to lock LVGL");
+
+    display_service_update_voice_labels_locked(status_text, metrics_text);
     bsp_display_unlock();
     return ESP_OK;
 }
@@ -509,12 +537,22 @@ static esp_err_t display_service_render_bootstrap(void)
     s_touch_status_label = lv_label_create(screen);
     lv_label_set_text(s_touch_status_label, "Touch pending: indev not attached");
     lv_obj_set_style_text_color(s_touch_status_label, lv_color_hex(0xd0d7de), LV_PART_MAIN);
-    lv_obj_align(s_touch_status_label, LV_ALIGN_BOTTOM_LEFT, 40, -92);
+    lv_obj_align(s_touch_status_label, LV_ALIGN_BOTTOM_LEFT, 40, -148);
 
     s_touch_hint_label = lv_label_create(screen);
     lv_label_set_text(s_touch_hint_label, "Touch connected: validate center and corner orientation.");
     lv_obj_set_style_text_color(s_touch_hint_label, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN);
-    lv_obj_align(s_touch_hint_label, LV_ALIGN_BOTTOM_LEFT, 40, -64);
+    lv_obj_align(s_touch_hint_label, LV_ALIGN_BOTTOM_LEFT, 40, -120);
+
+    s_voice_status_label = lv_label_create(screen);
+    lv_label_set_text(s_voice_status_label, "Voice standby: waiting for ESP-SR runtime.");
+    lv_obj_set_style_text_color(s_voice_status_label, lv_color_hex(0xffd866), LV_PART_MAIN);
+    lv_obj_align(s_voice_status_label, LV_ALIGN_BOTTOM_LEFT, 40, -92);
+
+    s_voice_metrics_label = lv_label_create(screen);
+    lv_label_set_text(s_voice_metrics_label, "voice_state=inactive command=none backlight=on");
+    lv_obj_set_style_text_color(s_voice_metrics_label, lv_color_hex(0xffa657), LV_PART_MAIN);
+    lv_obj_align(s_voice_metrics_label, LV_ALIGN_BOTTOM_LEFT, 40, -64);
 
     s_audio_status_label = lv_label_create(screen);
     lv_label_set_text(s_audio_status_label, "Audio ready: use the buttons below to trigger diagnostics.");
@@ -546,6 +584,7 @@ esp_err_t display_service_init(void)
                         "failed to render bootstrap screen");
 
     s_display_ready = true;
+    s_backlight_enabled = true;
     ESP_LOGI(TAG, "display bootstrap ready: %dx%d panel=%p",
              BSP_LCD_H_RES,
              BSP_LCD_V_RES,
@@ -617,14 +656,33 @@ esp_err_t display_service_set_audio_state(bool speaker_ready, bool microphone_re
     return display_service_update_meter_ui(NULL, -1, metrics_text, s_audio_meter_running);
 }
 
+esp_err_t display_service_set_voice_state(const char *status_text, const char *metrics_text)
+{
+    return display_service_update_voice_labels(status_text, metrics_text);
+}
+
+esp_err_t display_service_set_backlight_enabled(bool enabled)
+{
+    esp_err_t err = enabled ? bsp_display_backlight_on() : bsp_display_backlight_off();
+    ESP_RETURN_ON_ERROR(err, TAG, "failed to change display backlight");
+    s_backlight_enabled = enabled;
+    return ESP_OK;
+}
+
+bool display_service_backlight_enabled(void)
+{
+    return s_backlight_enabled;
+}
+
 void display_service_log_summary(void)
 {
-    ESP_LOGI(TAG, "display ready=%s resolution=%dx%d handle=%p touch=%s panel=%p io=%p",
+    ESP_LOGI(TAG, "display ready=%s resolution=%dx%d handle=%p touch=%s backlight=%s panel=%p io=%p",
              display_service_is_ready() ? "yes" : "no",
              BSP_LCD_H_RES,
              BSP_LCD_V_RES,
              (void *)s_display,
              bsp_display_get_input_dev() != NULL ? "yes" : "no",
+             s_backlight_enabled ? "on" : "off",
              (void *)s_lcd_handles.panel,
              (void *)s_lcd_handles.io);
 }

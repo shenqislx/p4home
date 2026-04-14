@@ -37,13 +37,18 @@ void app_main(void)
              board_support_audio_microphone_capture_ready() ? "yes" : "no",
              board_support_audio_busy() ? "yes" : "no",
              board_support_audio_owner_text());
-    ESP_LOGI(TAG, "sr service dependency_declared=%s afe_config_ready=%s afe_ready=%s afe_runtime_ready=%s runtime_loop_started=%s runtime_loop_active=%s",
+    ESP_LOGI(TAG, "sr service dependency_declared=%s afe_config_ready=%s afe_ready=%s afe_runtime_ready=%s runtime_loop_started=%s runtime_loop_active=%s wake_state_machine_started=%s command_model_ready=%s command_set_ready=%s voice_state=%s last_command=%s",
              board_support_sr_dependency_declared() ? "yes" : "no",
              board_support_sr_afe_config_ready() ? "yes" : "no",
              board_support_sr_afe_ready() ? "yes" : "no",
              board_support_sr_afe_runtime_ready() ? "yes" : "no",
              board_support_sr_runtime_loop_started() ? "yes" : "no",
-             board_support_sr_runtime_loop_active() ? "yes" : "no");
+             board_support_sr_runtime_loop_active() ? "yes" : "no",
+             board_support_sr_wake_state_machine_started() ? "yes" : "no",
+             board_support_sr_command_model_ready() ? "yes" : "no",
+             board_support_sr_command_set_ready() ? "yes" : "no",
+             board_support_sr_voice_state_text(),
+             board_support_sr_command_text());
     ESP_LOGI(TAG, "sr service models_available=%s model_count=%u status=%s",
              board_support_sr_models_available() ? "yes" : "no",
              board_support_sr_model_count(),
@@ -61,6 +66,9 @@ void app_main(void)
     log_verify_marker("sr", "afe_preflight", board_support_sr_afe_ready());
     log_verify_marker("sr", "afe_runtime", board_support_sr_afe_runtime_ready());
     log_verify_marker("sr", "runtime_loop", board_support_sr_runtime_loop_started());
+    log_verify_marker("sr", "wake_state_machine", board_support_sr_wake_state_machine_started());
+    log_verify_marker("sr", "command_model", board_support_sr_command_model_ready());
+    log_verify_marker("sr", "command_set", board_support_sr_command_set_ready());
 
     while (true) {
         diagnostics_service_log_runtime_heartbeat();

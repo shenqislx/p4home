@@ -12,4 +12,7 @@ lv_display_t *display_service_get_handle(void);
 esp_err_t display_service_set_touch_state(bool attached);
 esp_err_t display_service_record_touch_sample(uint16_t x, uint16_t y, uint32_t click_count);
 esp_err_t display_service_set_audio_state(bool speaker_ready, bool microphone_ready);
+esp_err_t display_service_set_voice_state(const char *status_text, const char *metrics_text);
+esp_err_t display_service_set_backlight_enabled(bool enabled);
+bool display_service_backlight_enabled(void);
 void display_service_log_summary(void);
