@@ -17,9 +17,8 @@ Use this skill only in the `p4home` repository.
    - success does not mean the firmware change passed functional validation
 3. Obtain the artifact `esp32-p4-monitor-log`.
 4. Read `hardware-validation-manifest.json` before `monitor.log`.
-5. Use `verification_case` and `expected_markers` from manifest to scope the judgment.
-6. Check that the artifact belongs to the commit under test.
-7. Judge the firmware change from log evidence, not from the GitHub job color alone.
+5. Check that the artifact belongs to the commit under test.
+6. Judge the firmware change from log evidence, not from the GitHub job color alone.
 
 For the exact artifact contract and verdict model, read [references/artifact-contract.md](references/artifact-contract.md).
 

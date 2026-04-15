@@ -200,10 +200,29 @@ p4home/
 - 上述 7 项已经全部在本地 `ESP32-P4 EVB` 上打通
 - `settings_service` 已接入 `NVS`，可持久化 `boot_count` 与 `startup_page`
 - `display_service` 已具备 `Home / Settings` 双页导航，触摸可切换页面
-- 冷启动串口日志已验证 `VERIFY:settings:nvs:PASS`、`VERIFY:display:bootstrap:PASS`、`VERIFY:touch:*`、`VERIFY:audio:*`、`VERIFY:sr:*`
-- 当前残余问题是 `esp_codec_dev` / `I2S_IF` 初始化路径仍会打印少量 `i2s_channel_disable(...): the channel has not been enabled yet`，但未阻塞音频自检、`ESP-SR` runtime 或 UI 启动
+- `network_service` 已完成最小骨架：`esp_netif`、默认事件循环、`Wi-Fi STA` 形态 `esp_netif`、`hostname/device_id/mac` 摘要
+- `gateway_service` 已完成最小骨架：设备注册模型、状态同步接口、命令邮箱、`Gateway` 页初版
+- `sdkconfig` 已完成首轮低风险瘦身：`size` 优化、收紧默认日志/断言、关闭 `LVGL examples`
+- 当前瘦身后本地冷启动摘要已恢复为 `WARN` 级别，默认 `WARN` 日志下仍可直接读取启动验收结果
+- 冷启动串口日志 [p4home-serial-20260415-network-service-v2.log](/tmp/p4home-serial-20260415-network-service-v2.log) 已验证：
+  - `VERIFY:network:stack:PASS`
+  - `VERIFY:network:event_loop:PASS`
+  - `VERIFY:network:sta_netif:PASS`
+- 冷启动串口日志 [p4home-serial-20260415-gateway-service-v2.log](/tmp/p4home-serial-20260415-gateway-service-v2.log) 已验证：
+  - `VERIFY:gateway:registration:PASS`
+  - `VERIFY:gateway:state_sync:PASS`
+  - `VERIFY:gateway:command_mailbox:PASS`
+- `VERIFY:settings:nvs:PASS`
+- `VERIFY:display:bootstrap:PASS`
+- `VERIFY:touch:*`
+- `VERIFY:audio:*`
+- `VERIFY:sr:*`
+- 当前残余问题是：
+  - `esp_codec_dev` / `I2S_IF` 初始化路径仍会打印少量 `i2s_channel_disable(...): the channel has not been enabled yet`，但未阻塞音频自检、`ESP-SR` runtime 或 UI 启动
+  - 为了在收紧默认日志级别后仍保留本地验收信号，`app_main` 启动摘要与 `VERIFY:*` 标记需要保持在 `WARN` 级别
+  - `factory` app 分区已从约 1% 空余恢复到约 11% 空余；当前带启动摘要/`VERIFY:*` 的镜像为 `0x1c6be0`，剩余 `0x39420`
 
-因此当前建议是：在进入 `M4` 之前，只继续处理“底座稳定性噪音”和少量本地系统能力补齐，不要再回退到单页或占位式设置实现。
+因此当前建议是：继续沿 `M4` 推进真实远端协议适配或先做镜像瘦身，不再回退到本地 bring-up、占位式 network 实现或把外部接入逻辑塞回 `Home/Settings`。
 
 ## 5. 技术实现建议
 

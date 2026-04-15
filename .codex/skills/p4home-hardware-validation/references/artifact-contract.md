@@ -33,12 +33,7 @@ Expected manifest shape:
   "job": "flash-and-monitor",
   "serial_port": "/dev/cu.usbserial-10",
   "monitor_seconds": 20,
-  "log_file": "monitor.log",
-  "verification_case": "boot-smoke",
-  "expected_markers": [
-    "VERIFY:boot:board_init:PASS",
-    "VERIFY:display:bootstrap:PASS"
-  ]
+  "log_file": "monitor.log"
 }
 ```
 
@@ -46,8 +41,6 @@ Interpretation:
 
 - `mode=artifact-only`: the workflow does not perform business-level PASS/FAIL checks
 - `verdict_owner=cloud-codex`: Codex must interpret the artifact and decide whether the change worked
-- `verification_case`: names the intended functional scenario for this run
-- `expected_markers`: hints which stable markers should be prioritized in `monitor.log`
 
 ## Minimal Workflow Failure Model
 

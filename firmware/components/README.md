@@ -14,10 +14,14 @@
 - `sr_service`：`ESP-SR` 封装
 - `settings_service`：本地配置与 NVS
 - `network_service`：网络与后续网关通信
+- `gateway_service`：设备注册、状态同步、命令邮箱
 
 当前阶段已实现：
 
 - `board_support`：最小板级初始化入口
 - `diagnostics_service`：启动与运行期诊断输出
+- `settings_service`：本地配置与 NVS
+- `network_service`：网络栈与设备身份骨架
+- `gateway_service`：本地网关 contract 骨架
 
 其余目录先建立结构。
