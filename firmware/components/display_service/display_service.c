@@ -11,11 +11,16 @@
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "settings_service.h"
 
 static const char *TAG = "display_service";
 static lv_display_t *s_display;
 static bool s_display_ready;
 static bsp_lcd_handles_t s_lcd_handles;
+static lv_obj_t *s_home_page;
+static lv_obj_t *s_settings_page;
+static lv_obj_t *s_home_nav_button;
+static lv_obj_t *s_settings_nav_button;
 static lv_obj_t *s_touch_status_label;
 static lv_obj_t *s_touch_hint_label;
 static lv_obj_t *s_audio_status_label;
@@ -25,15 +30,59 @@ static lv_obj_t *s_audio_meter_button_label;
 static lv_obj_t *s_audio_meter_bar;
 static lv_obj_t *s_voice_status_label;
 static lv_obj_t *s_voice_metrics_label;
+static lv_obj_t *s_settings_boot_count_label;
+static lv_obj_t *s_settings_startup_page_label;
+static lv_obj_t *s_settings_runtime_label;
+static lv_obj_t *s_settings_hint_label;
 static uint32_t s_touch_click_count;
 static TaskHandle_t s_audio_meter_task;
 static bool s_audio_meter_running;
 static bool s_backlight_enabled;
+static bool s_touch_attached;
+
+typedef enum {
+    DISPLAY_PAGE_HOME = 0,
+    DISPLAY_PAGE_SETTINGS = 1,
+} display_page_t;
 
 typedef enum {
     DISPLAY_AUDIO_ACTION_TONE,
     DISPLAY_AUDIO_ACTION_MIC_CAPTURE,
 } display_audio_action_t;
+
+static display_page_t s_current_page = DISPLAY_PAGE_HOME;
+
+static void display_service_show_page_locked(display_page_t page);
+static void display_service_refresh_settings_locked(const char *status_text);
+
+static const char *display_service_page_to_text(display_page_t page)
+{
+    return page == DISPLAY_PAGE_SETTINGS ? "settings" : "home";
+}
+
+static display_page_t display_service_startup_page_to_display_page(settings_service_startup_page_t page)
+{
+    return page == SETTINGS_SERVICE_STARTUP_PAGE_SETTINGS ? DISPLAY_PAGE_SETTINGS : DISPLAY_PAGE_HOME;
+}
+
+static settings_service_startup_page_t display_service_page_to_startup_page(display_page_t page)
+{
+    return page == DISPLAY_PAGE_SETTINGS ? SETTINGS_SERVICE_STARTUP_PAGE_SETTINGS
+                                         : SETTINGS_SERVICE_STARTUP_PAGE_HOME;
+}
+
+static void display_service_style_nav_button_locked(lv_obj_t *button, bool selected)
+{
+    if (button == NULL) {
+        return;
+    }
+
+    lv_obj_set_style_bg_color(button,
+                              selected ? lv_palette_main(LV_PALETTE_BLUE) : lv_color_hex(0x30363d),
+                              LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(button, 0, LV_PART_MAIN);
+}
 
 static void display_service_update_meter_ui_locked(const char *status_text,
                                                    int meter_value,
@@ -52,6 +101,9 @@ static void display_service_update_meter_ui_locked(const char *status_text,
     if (s_audio_meter_button_label != NULL) {
         lv_label_set_text(s_audio_meter_button_label,
                           meter_running ? "Stop Mic Meter" : "Start Mic Meter");
+    }
+    if (s_current_page == DISPLAY_PAGE_SETTINGS) {
+        display_service_refresh_settings_locked(NULL);
     }
 }
 
@@ -82,6 +134,9 @@ static esp_err_t display_service_update_voice_labels_locked(const char *status_t
     }
     if (s_voice_metrics_label != NULL && metrics_text != NULL) {
         lv_label_set_text(s_voice_metrics_label, metrics_text);
+    }
+    if (s_current_page == DISPLAY_PAGE_SETTINGS) {
+        display_service_refresh_settings_locked(NULL);
     }
     return ESP_OK;
 }
@@ -376,6 +431,102 @@ static void display_service_touch_demo_event_cb(lv_event_t *event)
              point.y);
 }
 
+static void display_service_refresh_settings_locked(const char *status_text)
+{
+    if (s_settings_boot_count_label != NULL) {
+        lv_label_set_text_fmt(s_settings_boot_count_label,
+                              "Boot count: %" PRIu32,
+                              settings_service_boot_count());
+    }
+
+    if (s_settings_startup_page_label != NULL) {
+        lv_label_set_text_fmt(s_settings_startup_page_label,
+                              "Startup page: %s",
+                              settings_service_startup_page_text());
+    }
+
+    if (s_settings_runtime_label != NULL) {
+        lv_label_set_text_fmt(s_settings_runtime_label,
+                              "Current page=%s backlight=%s touch_clicks=%" PRIu32 " audio_owner=%s",
+                              display_service_page_to_text(s_current_page),
+                              s_backlight_enabled ? "on" : "off",
+                              s_touch_click_count,
+                              audio_service_current_owner());
+    }
+
+    if (s_settings_hint_label != NULL) {
+        if (!settings_service_is_ready()) {
+            lv_label_set_text(s_settings_hint_label,
+                              "NVS unavailable: startup page cannot be saved.");
+        } else if (status_text != NULL) {
+            lv_label_set_text(s_settings_hint_label, status_text);
+        } else {
+            lv_label_set_text(s_settings_hint_label,
+                              "Save the page that should appear immediately after reboot.");
+        }
+    }
+}
+
+static void display_service_show_page_locked(display_page_t page)
+{
+    s_current_page = page;
+
+    if (s_home_page != NULL) {
+        if (page == DISPLAY_PAGE_HOME) {
+            lv_obj_clear_flag(s_home_page, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_home_page, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    if (s_settings_page != NULL) {
+        if (page == DISPLAY_PAGE_SETTINGS) {
+            lv_obj_clear_flag(s_settings_page, LV_OBJ_FLAG_HIDDEN);
+            display_service_refresh_settings_locked(NULL);
+        } else {
+            lv_obj_add_flag(s_settings_page, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    display_service_style_nav_button_locked(s_home_nav_button, page == DISPLAY_PAGE_HOME);
+    display_service_style_nav_button_locked(s_settings_nav_button, page == DISPLAY_PAGE_SETTINGS);
+}
+
+static void display_service_nav_button_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    display_page_t page = (display_page_t)(intptr_t)lv_event_get_user_data(event);
+    display_service_show_page_locked(page);
+}
+
+static void display_service_save_startup_page_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    display_page_t page = (display_page_t)(intptr_t)lv_event_get_user_data(event);
+    esp_err_t err = settings_service_set_startup_page(display_service_page_to_startup_page(page));
+    if (err != ESP_OK) {
+        char hint_text[96];
+        snprintf(hint_text, sizeof(hint_text),
+                 "Failed to save startup page: %s",
+                 esp_err_to_name(err));
+        display_service_refresh_settings_locked(hint_text);
+        ESP_LOGW(TAG, "failed to save startup page: %s", esp_err_to_name(err));
+        return;
+    }
+
+    char hint_text[96];
+    snprintf(hint_text, sizeof(hint_text),
+             "Saved startup page: %s",
+             settings_service_startup_page_text());
+    display_service_refresh_settings_locked(hint_text);
+}
+
 static esp_err_t display_service_start_lcd_without_touch(void)
 {
     const bsp_display_cfg_t cfg = {
@@ -461,24 +612,57 @@ static esp_err_t display_service_render_bootstrap(void)
     lv_obj_t *title = lv_label_create(screen);
     lv_label_set_text(title, "p4home");
     lv_obj_set_style_text_color(title, lv_color_white(), LV_PART_MAIN);
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 40, 32);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 40, 24);
 
-    lv_obj_t *summary = lv_label_create(screen);
+    lv_obj_t *subtitle = lv_label_create(screen);
+    lv_label_set_text(subtitle, "Local hardware bring-up dashboard");
+    lv_obj_set_style_text_color(subtitle, lv_color_hex(0x8b949e), LV_PART_MAIN);
+    lv_obj_align(subtitle, LV_ALIGN_TOP_LEFT, 40, 58);
+
+    s_home_nav_button = lv_button_create(screen);
+    lv_obj_set_size(s_home_nav_button, 120, 44);
+    lv_obj_align(s_home_nav_button, LV_ALIGN_TOP_RIGHT, -168, 28);
+    lv_obj_add_event_cb(s_home_nav_button, display_service_nav_button_event_cb, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)DISPLAY_PAGE_HOME);
+    lv_obj_t *home_nav_label = lv_label_create(s_home_nav_button);
+    lv_label_set_text(home_nav_label, "Home");
+    lv_obj_set_style_text_color(home_nav_label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_center(home_nav_label);
+
+    s_settings_nav_button = lv_button_create(screen);
+    lv_obj_set_size(s_settings_nav_button, 120, 44);
+    lv_obj_align(s_settings_nav_button, LV_ALIGN_TOP_RIGHT, -40, 28);
+    lv_obj_add_event_cb(s_settings_nav_button, display_service_nav_button_event_cb, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)DISPLAY_PAGE_SETTINGS);
+    lv_obj_t *settings_nav_label = lv_label_create(s_settings_nav_button);
+    lv_label_set_text(settings_nav_label, "Settings");
+    lv_obj_set_style_text_color(settings_nav_label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_center(settings_nav_label);
+
+    s_home_page = lv_obj_create(screen);
+    lv_obj_set_size(s_home_page, 944, 456);
+    lv_obj_align(s_home_page, LV_ALIGN_TOP_LEFT, 40, 104);
+    lv_obj_set_style_bg_opa(s_home_page, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_home_page, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_home_page, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(s_home_page, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *summary = lv_label_create(s_home_page);
     lv_label_set_text_fmt(summary,
                           "ESP32-P4 EVB V1.4\n"
                           "Display %dx%d\n"
                           "IDF %s\n"
-                          "LVGL bootstrap ready",
+                          "Diagnostics page ready",
                           BSP_LCD_H_RES,
                           BSP_LCD_V_RES,
                           esp_get_idf_version());
     lv_obj_set_style_text_color(summary, lv_color_hex(0xd0d7de), LV_PART_MAIN);
     lv_obj_set_style_text_line_space(summary, 10, LV_PART_MAIN);
-    lv_obj_align(summary, LV_ALIGN_TOP_LEFT, 40, 96);
+    lv_obj_align(summary, LV_ALIGN_TOP_LEFT, 0, 0);
 
-    lv_obj_t *touch_button = lv_button_create(screen);
+    lv_obj_t *touch_button = lv_button_create(s_home_page);
     lv_obj_set_size(touch_button, 280, 72);
-    lv_obj_align(touch_button, LV_ALIGN_CENTER, 0, 10);
+    lv_obj_align(touch_button, LV_ALIGN_TOP_LEFT, 0, 124);
     lv_obj_set_style_bg_color(touch_button, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN);
     lv_obj_add_event_cb(touch_button, display_service_touch_demo_event_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(touch_button, display_service_touch_demo_event_cb, LV_EVENT_CLICKED, NULL);
@@ -488,9 +672,9 @@ static esp_err_t display_service_render_bootstrap(void)
     lv_obj_set_style_text_color(touch_button_label, lv_color_white(), LV_PART_MAIN);
     lv_obj_center(touch_button_label);
 
-    lv_obj_t *tone_button = lv_button_create(screen);
-    lv_obj_set_size(tone_button, 240, 64);
-    lv_obj_align(tone_button, LV_ALIGN_CENTER, -140, 110);
+    lv_obj_t *tone_button = lv_button_create(s_home_page);
+    lv_obj_set_size(tone_button, 224, 64);
+    lv_obj_align(tone_button, LV_ALIGN_TOP_LEFT, 0, 228);
     lv_obj_set_style_bg_color(tone_button, lv_palette_main(LV_PALETTE_GREEN), LV_PART_MAIN);
     lv_obj_add_event_cb(tone_button, display_service_audio_button_event_cb, LV_EVENT_CLICKED,
                         (void *)(intptr_t)DISPLAY_AUDIO_ACTION_TONE);
@@ -500,9 +684,9 @@ static esp_err_t display_service_render_bootstrap(void)
     lv_obj_set_style_text_color(tone_button_label, lv_color_white(), LV_PART_MAIN);
     lv_obj_center(tone_button_label);
 
-    lv_obj_t *mic_button = lv_button_create(screen);
-    lv_obj_set_size(mic_button, 240, 64);
-    lv_obj_align(mic_button, LV_ALIGN_CENTER, 140, 110);
+    lv_obj_t *mic_button = lv_button_create(s_home_page);
+    lv_obj_set_size(mic_button, 224, 64);
+    lv_obj_align(mic_button, LV_ALIGN_TOP_LEFT, 248, 228);
     lv_obj_set_style_bg_color(mic_button, lv_palette_main(LV_PALETTE_ORANGE), LV_PART_MAIN);
     lv_obj_add_event_cb(mic_button, display_service_audio_button_event_cb, LV_EVENT_CLICKED,
                         (void *)(intptr_t)DISPLAY_AUDIO_ACTION_MIC_CAPTURE);
@@ -512,9 +696,9 @@ static esp_err_t display_service_render_bootstrap(void)
     lv_obj_set_style_text_color(mic_button_label, lv_color_white(), LV_PART_MAIN);
     lv_obj_center(mic_button_label);
 
-    lv_obj_t *meter_button = lv_button_create(screen);
-    lv_obj_set_size(meter_button, 240, 64);
-    lv_obj_align(meter_button, LV_ALIGN_CENTER, 0, 190);
+    lv_obj_t *meter_button = lv_button_create(s_home_page);
+    lv_obj_set_size(meter_button, 224, 64);
+    lv_obj_align(meter_button, LV_ALIGN_TOP_LEFT, 496, 228);
     lv_obj_set_style_bg_color(meter_button, lv_palette_main(LV_PALETTE_RED), LV_PART_MAIN);
     lv_obj_add_event_cb(meter_button, display_service_audio_meter_button_event_cb, LV_EVENT_CLICKED, NULL);
 
@@ -523,46 +707,124 @@ static esp_err_t display_service_render_bootstrap(void)
     lv_obj_set_style_text_color(s_audio_meter_button_label, lv_color_white(), LV_PART_MAIN);
     lv_obj_center(s_audio_meter_button_label);
 
-    s_audio_meter_label = lv_label_create(screen);
+    s_audio_meter_label = lv_label_create(s_home_page);
     lv_label_set_text(s_audio_meter_label, "Mic level");
     lv_obj_set_style_text_color(s_audio_meter_label, lv_color_hex(0xd0d7de), LV_PART_MAIN);
-    lv_obj_align(s_audio_meter_label, LV_ALIGN_BOTTOM_LEFT, 40, -118);
+    lv_obj_align(s_audio_meter_label, LV_ALIGN_BOTTOM_LEFT, 0, -118);
 
-    s_audio_meter_bar = lv_bar_create(screen);
+    s_audio_meter_bar = lv_bar_create(s_home_page);
     lv_obj_set_size(s_audio_meter_bar, 320, 12);
     lv_bar_set_range(s_audio_meter_bar, 0, 100);
     lv_bar_set_value(s_audio_meter_bar, 0, LV_ANIM_OFF);
-    lv_obj_align(s_audio_meter_bar, LV_ALIGN_BOTTOM_LEFT, 110, -112);
+    lv_obj_align(s_audio_meter_bar, LV_ALIGN_BOTTOM_LEFT, 70, -112);
 
-    s_touch_status_label = lv_label_create(screen);
+    s_touch_status_label = lv_label_create(s_home_page);
     lv_label_set_text(s_touch_status_label, "Touch pending: indev not attached");
     lv_obj_set_style_text_color(s_touch_status_label, lv_color_hex(0xd0d7de), LV_PART_MAIN);
-    lv_obj_align(s_touch_status_label, LV_ALIGN_BOTTOM_LEFT, 40, -148);
+    lv_obj_align(s_touch_status_label, LV_ALIGN_BOTTOM_LEFT, 0, -148);
 
-    s_touch_hint_label = lv_label_create(screen);
+    s_touch_hint_label = lv_label_create(s_home_page);
     lv_label_set_text(s_touch_hint_label, "Touch connected: validate center and corner orientation.");
     lv_obj_set_style_text_color(s_touch_hint_label, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN);
-    lv_obj_align(s_touch_hint_label, LV_ALIGN_BOTTOM_LEFT, 40, -120);
+    lv_obj_align(s_touch_hint_label, LV_ALIGN_BOTTOM_LEFT, 0, -120);
 
-    s_voice_status_label = lv_label_create(screen);
+    s_voice_status_label = lv_label_create(s_home_page);
     lv_label_set_text(s_voice_status_label, "Voice standby: waiting for ESP-SR runtime.");
     lv_obj_set_style_text_color(s_voice_status_label, lv_color_hex(0xffd866), LV_PART_MAIN);
-    lv_obj_align(s_voice_status_label, LV_ALIGN_BOTTOM_LEFT, 40, -92);
+    lv_obj_align(s_voice_status_label, LV_ALIGN_BOTTOM_LEFT, 0, -92);
 
-    s_voice_metrics_label = lv_label_create(screen);
+    s_voice_metrics_label = lv_label_create(s_home_page);
     lv_label_set_text(s_voice_metrics_label, "voice_state=inactive command=none backlight=on");
     lv_obj_set_style_text_color(s_voice_metrics_label, lv_color_hex(0xffa657), LV_PART_MAIN);
-    lv_obj_align(s_voice_metrics_label, LV_ALIGN_BOTTOM_LEFT, 40, -64);
+    lv_obj_align(s_voice_metrics_label, LV_ALIGN_BOTTOM_LEFT, 0, -64);
 
-    s_audio_status_label = lv_label_create(screen);
+    s_audio_status_label = lv_label_create(s_home_page);
     lv_label_set_text(s_audio_status_label, "Audio ready: use the buttons below to trigger diagnostics.");
     lv_obj_set_style_text_color(s_audio_status_label, lv_color_hex(0xd0d7de), LV_PART_MAIN);
-    lv_obj_align(s_audio_status_label, LV_ALIGN_BOTTOM_LEFT, 40, -36);
+    lv_obj_align(s_audio_status_label, LV_ALIGN_BOTTOM_LEFT, 0, -36);
 
-    s_audio_metrics_label = lv_label_create(screen);
+    s_audio_metrics_label = lv_label_create(s_home_page);
     lv_label_set_text(s_audio_metrics_label, "speaker_ready=no microphone_ready=no tone_played=no mic_capture_ready=no");
     lv_obj_set_style_text_color(s_audio_metrics_label, lv_color_hex(0x58a6ff), LV_PART_MAIN);
-    lv_obj_align(s_audio_metrics_label, LV_ALIGN_BOTTOM_LEFT, 40, -12);
+    lv_obj_align(s_audio_metrics_label, LV_ALIGN_BOTTOM_LEFT, 0, -12);
+
+    s_settings_page = lv_obj_create(screen);
+    lv_obj_set_size(s_settings_page, 944, 456);
+    lv_obj_align(s_settings_page, LV_ALIGN_TOP_LEFT, 40, 104);
+    lv_obj_set_style_bg_opa(s_settings_page, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_settings_page, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_settings_page, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(s_settings_page, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *settings_title = lv_label_create(s_settings_page);
+    lv_label_set_text(settings_title, "Local Settings");
+    lv_obj_set_style_text_color(settings_title, lv_color_white(), LV_PART_MAIN);
+    lv_obj_align(settings_title, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t *settings_summary = lv_label_create(s_settings_page);
+    lv_label_set_text(settings_summary,
+                      "Persist one safe local setting in NVS so the hardware bring-up UI "
+                      "has a real settings entrypoint.");
+    lv_obj_set_width(settings_summary, 720);
+    lv_label_set_long_mode(settings_summary, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(settings_summary, lv_color_hex(0xd0d7de), LV_PART_MAIN);
+    lv_obj_align(settings_summary, LV_ALIGN_TOP_LEFT, 0, 42);
+
+    s_settings_boot_count_label = lv_label_create(s_settings_page);
+    lv_obj_set_style_text_color(s_settings_boot_count_label, lv_color_hex(0x58a6ff), LV_PART_MAIN);
+    lv_obj_align(s_settings_boot_count_label, LV_ALIGN_TOP_LEFT, 0, 108);
+
+    s_settings_startup_page_label = lv_label_create(s_settings_page);
+    lv_obj_set_style_text_color(s_settings_startup_page_label, lv_color_hex(0x7ee787), LV_PART_MAIN);
+    lv_obj_align(s_settings_startup_page_label, LV_ALIGN_TOP_LEFT, 0, 140);
+
+    s_settings_runtime_label = lv_label_create(s_settings_page);
+    lv_obj_set_width(s_settings_runtime_label, 820);
+    lv_label_set_long_mode(s_settings_runtime_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(s_settings_runtime_label, lv_color_hex(0xffd866), LV_PART_MAIN);
+    lv_obj_align(s_settings_runtime_label, LV_ALIGN_TOP_LEFT, 0, 184);
+
+    lv_obj_t *save_home_button = lv_button_create(s_settings_page);
+    lv_obj_set_size(save_home_button, 220, 64);
+    lv_obj_align(save_home_button, LV_ALIGN_TOP_LEFT, 0, 268);
+    lv_obj_set_style_bg_color(save_home_button, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN);
+    lv_obj_add_event_cb(save_home_button, display_service_save_startup_page_event_cb, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)DISPLAY_PAGE_HOME);
+    lv_obj_t *save_home_label = lv_label_create(save_home_button);
+    lv_label_set_text(save_home_label, "Save Home");
+    lv_obj_set_style_text_color(save_home_label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_center(save_home_label);
+
+    lv_obj_t *save_settings_button = lv_button_create(s_settings_page);
+    lv_obj_set_size(save_settings_button, 220, 64);
+    lv_obj_align(save_settings_button, LV_ALIGN_TOP_LEFT, 244, 268);
+    lv_obj_set_style_bg_color(save_settings_button, lv_palette_main(LV_PALETTE_DEEP_ORANGE), LV_PART_MAIN);
+    lv_obj_add_event_cb(save_settings_button, display_service_save_startup_page_event_cb, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)DISPLAY_PAGE_SETTINGS);
+    lv_obj_t *save_settings_label = lv_label_create(save_settings_button);
+    lv_label_set_text(save_settings_label, "Save Settings");
+    lv_obj_set_style_text_color(save_settings_label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_center(save_settings_label);
+
+    s_settings_hint_label = lv_label_create(s_settings_page);
+    lv_obj_set_width(s_settings_hint_label, 840);
+    lv_label_set_long_mode(s_settings_hint_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(s_settings_hint_label, lv_color_hex(0x8b949e), LV_PART_MAIN);
+    lv_obj_align(s_settings_hint_label, LV_ALIGN_TOP_LEFT, 0, 352);
+
+    lv_obj_t *settings_device_label = lv_label_create(s_settings_page);
+    lv_label_set_text_fmt(settings_device_label,
+                          "Board: ESP32-P4 EV Board\n"
+                          "Display: %dx%d\n"
+                          "Touch/Audio/Voice diagnostics remain on the Home page.",
+                          BSP_LCD_H_RES,
+                          BSP_LCD_V_RES);
+    lv_obj_set_style_text_color(settings_device_label, lv_color_hex(0x8b949e), LV_PART_MAIN);
+    lv_obj_align(settings_device_label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    display_service_refresh_settings_locked(NULL);
+    display_service_show_page_locked(display_service_startup_page_to_display_page(
+        settings_service_startup_page()));
 
     bsp_display_unlock();
     return ESP_OK;
@@ -615,6 +877,8 @@ esp_err_t display_service_set_touch_state(bool attached)
                                    : "Touch pending: indev not attached");
     }
 
+    s_touch_attached = attached;
+
     bsp_display_unlock();
     return ESP_OK;
 }
@@ -637,6 +901,9 @@ esp_err_t display_service_record_touch_sample(uint16_t x, uint16_t y, uint32_t c
         lv_label_set_text(s_touch_hint_label,
                           "Touch connected: verify center and corner orientation.");
     }
+    if (s_current_page == DISPLAY_PAGE_SETTINGS) {
+        display_service_refresh_settings_locked(NULL);
+    }
 
     bsp_display_unlock();
     return ESP_OK;
@@ -653,7 +920,14 @@ esp_err_t display_service_set_audio_state(bool speaker_ready, bool microphone_re
              audio_service_tone_played() ? "yes" : "no",
              audio_service_microphone_capture_ready() ? "yes" : "no");
 
-    return display_service_update_meter_ui(NULL, -1, metrics_text, s_audio_meter_running);
+    esp_err_t err = display_service_update_meter_ui(NULL, -1, metrics_text, s_audio_meter_running);
+    if (err == ESP_OK && s_current_page == DISPLAY_PAGE_SETTINGS) {
+        ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
+                            "failed to lock LVGL");
+        display_service_refresh_settings_locked(NULL);
+        bsp_display_unlock();
+    }
+    return err;
 }
 
 esp_err_t display_service_set_voice_state(const char *status_text, const char *metrics_text)
@@ -666,6 +940,13 @@ esp_err_t display_service_set_backlight_enabled(bool enabled)
     esp_err_t err = enabled ? bsp_display_backlight_on() : bsp_display_backlight_off();
     ESP_RETURN_ON_ERROR(err, TAG, "failed to change display backlight");
     s_backlight_enabled = enabled;
+
+    if (s_display_ready && s_current_page == DISPLAY_PAGE_SETTINGS) {
+        ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
+                            "failed to lock LVGL");
+        display_service_refresh_settings_locked(NULL);
+        bsp_display_unlock();
+    }
     return ESP_OK;
 }
 
@@ -681,7 +962,7 @@ void display_service_log_summary(void)
              BSP_LCD_H_RES,
              BSP_LCD_V_RES,
              (void *)s_display,
-             bsp_display_get_input_dev() != NULL ? "yes" : "no",
+             s_touch_attached ? "yes" : "no",
              s_backlight_enabled ? "on" : "off",
              (void *)s_lcd_handles.panel,
              (void *)s_lcd_handles.io);

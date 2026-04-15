@@ -195,6 +195,16 @@ p4home/
 
 只有这 7 项稳定后，才建议进入 HA 联调。
 
+### 当前状态（2026-04-15）
+
+- 上述 7 项已经全部在本地 `ESP32-P4 EVB` 上打通
+- `settings_service` 已接入 `NVS`，可持久化 `boot_count` 与 `startup_page`
+- `display_service` 已具备 `Home / Settings` 双页导航，触摸可切换页面
+- 冷启动串口日志已验证 `VERIFY:settings:nvs:PASS`、`VERIFY:display:bootstrap:PASS`、`VERIFY:touch:*`、`VERIFY:audio:*`、`VERIFY:sr:*`
+- 当前残余问题是 `esp_codec_dev` / `I2S_IF` 初始化路径仍会打印少量 `i2s_channel_disable(...): the channel has not been enabled yet`，但未阻塞音频自检、`ESP-SR` runtime 或 UI 启动
+
+因此当前建议是：在进入 `M4` 之前，只继续处理“底座稳定性噪音”和少量本地系统能力补齐，不要再回退到单页或占位式设置实现。
+
 ## 5. 技术实现建议
 
 ## 显示
@@ -292,4 +302,3 @@ p4home/
 - `sdkconfig.defaults`
 - `partitions.csv`
 - 一个最小 `LVGL` 首页 demo
-

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 
@@ -8,6 +9,9 @@ esp_err_t board_support_init(void);
 const char *board_support_get_name(void);
 void board_support_log_summary(void);
 bool board_support_display_ready(void);
+bool board_support_settings_ready(void);
+uint32_t board_support_boot_count(void);
+const char *board_support_startup_page_text(void);
 bool board_support_touch_ready(void);
 bool board_support_touch_detected(void);
 bool board_support_touch_indev_ready(void);

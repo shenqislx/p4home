@@ -1,3 +1,6 @@
+#include <stdbool.h>
+#include <inttypes.h>
+
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -24,6 +27,10 @@ void app_main(void)
     diagnostics_service_log_memory_summary();
 
     ESP_LOGI(TAG, "boot diagnostics baseline active");
+    ESP_LOGI(TAG, "settings service ready=%s boot_count=%" PRIu32 " startup_page=%s",
+             board_support_settings_ready() ? "yes" : "no",
+             board_support_boot_count(),
+             board_support_startup_page_text());
     ESP_LOGI(TAG, "display bootstrap ready=%s",
              board_support_display_ready() ? "yes" : "no");
     ESP_LOGI(TAG, "touch diagnostics gt911_detected=%s bsp_touch_ready=%s lvgl_indev_ready=%s",
@@ -55,6 +62,7 @@ void app_main(void)
              board_support_sr_status_text());
 
     log_verify_marker("boot", "board_init", true);
+    log_verify_marker("settings", "nvs", board_support_settings_ready());
     log_verify_marker("display", "bootstrap", board_support_display_ready());
     log_verify_marker("touch", "detect", board_support_touch_detected());
     log_verify_marker("touch", "lvgl_indev", board_support_touch_indev_ready());

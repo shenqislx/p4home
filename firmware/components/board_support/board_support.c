@@ -6,6 +6,7 @@
 #include "display_service.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
+#include "settings_service.h"
 #include "sr_service.h"
 #include "touch_service.h"
 
@@ -20,6 +21,11 @@ esp_err_t board_support_init(void)
     }
 
     ESP_LOGI(TAG, "starting minimal board initialization");
+
+    esp_err_t settings_ret = settings_service_init();
+    if (settings_ret != ESP_OK) {
+        ESP_LOGW(TAG, "settings service init failed: %s", esp_err_to_name(settings_ret));
+    }
 
     ESP_ERROR_CHECK(display_service_init());
     esp_err_t touch_ret = touch_service_run_diagnostics();
@@ -68,6 +74,7 @@ void board_support_log_summary(void)
              board_support_get_name(),
              CONFIG_IDF_TARGET,
              s_board_initialized ? "yes" : "no");
+    settings_service_log_summary();
     display_service_log_summary();
     touch_service_log_summary();
     audio_service_log_summary();
@@ -77,6 +84,21 @@ void board_support_log_summary(void)
 bool board_support_display_ready(void)
 {
     return display_service_is_ready();
+}
+
+bool board_support_settings_ready(void)
+{
+    return settings_service_is_ready();
+}
+
+uint32_t board_support_boot_count(void)
+{
+    return settings_service_boot_count();
+}
+
+const char *board_support_startup_page_text(void)
+{
+    return settings_service_startup_page_text();
 }
 
 bool board_support_touch_ready(void)
