@@ -32,7 +32,7 @@
 
 ### `/.codex`
 
-Codex 扩展目录；已固化 skill：`esp-idf-v5.5.4`、`p4home-hardware-validation`。
+Codex 扩展目录；当前固化 skill：`esp-idf-v5.5.4`。
 
 ### `/scripts`
 
@@ -55,11 +55,16 @@ Codex 扩展目录；已固化 skill：`esp-idf-v5.5.4`、`p4home-hardware-valid
 - `sdkconfig`：本地生成，通常 gitignore
 - `partitions.csv`：分区表
 
-## CI / 工作流（`.github/workflows`）
+## 开发与验证
 
-- `firmware-self-hosted-build.yml`：`workflow_dispatch`，自托管 macOS ARM64 上 `idf.py build`
-- `firmware-self-hosted-flash-serial.yml`：手动刷机 + 串口采集 + `VERIFY:` 行不得含 `FAIL` + artifact
-- `firmware-pr-check.yml`：对 `firmware/**` 的 **PR** 与 **main** push 触发同上构建；环境变量 `EXTRA_CFLAGS=-Werror`
+仓库当前默认采用本地开发机完成固件开发、构建、烧录与串口验证，不再维护 self-hosted runner 相关 GitHub Actions workflow。
+
+建议本地最小闭环：
+
+- 激活 `ESP-IDF v5.5.4`
+- 在 `firmware/` 下执行 `idf.py build`
+- 按当前开发板串口执行 `idf.py -p <serial_port> flash monitor`
+- 依据串口日志中的 `VERIFY:` 标记与功能现象做本地验收
 
 ## 固件组件（`firmware/components/`）
 
@@ -104,4 +109,4 @@ Codex 扩展目录；已固化 skill：`esp-idf-v5.5.4`、`p4home-hardware-valid
 
 ### 文档与流程模块
 
-`/docs` 与 plan 模板；硬件验证见 `docs/cloud-codex-hardware-validation.md` 与 `.codex/skills/p4home-hardware-validation`。
+`/docs` 与 plan 模板；开发与验证流程以本地环境为准。

@@ -1,7 +1,0 @@
-interface:
-  display_name: "P4Home Hardware Validation"
-  short_description: "Validate p4home hardware runs"
-  default_prompt: "Use $p4home-hardware-validation to validate p4home firmware changes through the self-hosted ESP32-P4 workflow and uploaded serial artifacts."
-
-policy:
-  allow_implicit_invocation: true
