@@ -1,11 +1,5 @@
 # ui_pages
 
-页面实现模块占位目录。
+LVGL 页面与控件实现：`ui_pages.c` 负责 Home / Settings / Gateway 三页 UI、音频/触摸/网关相关回调，以及仪表条等运行时更新。
 
-后续负责：
-
-- 首页
-- 房间页
-- 语音页
-- 设置页
-
+`display_service` 仅负责 DSI/LVGL 显示初始化与对外的 `display_service_*` API，具体页面内容由本组件渲染。

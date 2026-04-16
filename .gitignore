@@ -1,8 +1,39 @@
 .DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
 
-# ESP-IDF local build artifacts
+# Python (scripts, CI helpers)
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
+
+# IDE / tooling (keep repo-specific VS Code recommendations if you add them)
+.idea/
+*.code-workspace
+
+# -----------------------------------------------------------------------------
+# ESP-IDF — main firmware (`firmware/`)
+# docs/sdkconfig-file-roles.md: commit sdkconfig.defaults; do not commit sdkconfig.
+# -----------------------------------------------------------------------------
 firmware/build/
 firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/dependencies.lock
 firmware/managed_components/
+
+# Self-hosted flash / serial capture (local or CI checkout artifacts under firmware/)
+firmware/monitor.log
+firmware/hardware-validation-manifest.json
+
+# -----------------------------------------------------------------------------
+# ESP-IDF — separate app (`firmware/host_test/`)
+# -----------------------------------------------------------------------------
+firmware/host_test/build/
+firmware/host_test/sdkconfig
+firmware/host_test/sdkconfig.old
+firmware/host_test/dependencies.lock
+firmware/host_test/managed_components/

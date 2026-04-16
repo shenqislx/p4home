@@ -140,13 +140,22 @@ jobs:
         run: |
           test -s monitor.log
 
+      - name: Assert all VERIFY markers pass
+        run: |
+          grep 'VERIFY:' monitor.log
+          if grep -q 'VERIFY:.*:FAIL' monitor.log; then
+            echo "::error::Hardware verification markers contain FAIL"
+            grep 'VERIFY:.*:FAIL' monitor.log
+            exit 1
+          fi
+
       - name: Write job summary
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
           ## ESP32-P4 hardware validation artifact
 
-          This workflow only performs build, flash, serial capture, and artifact upload.
-          Functional PASS/FAIL is owned by cloud Codex after it reads the artifact.
+          Build, flash, serial capture, VERIFY line checks, and artifact upload completed.
+          Additional review may still use \`monitor.log\` for diagnostics beyond VERIFY markers.
 
           Files:
           - \`firmware/monitor.log\`

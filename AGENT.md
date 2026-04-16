@@ -4,9 +4,9 @@
 
 `p4home` 是一个基于 `ESP32-P4` 的原生 `Home Assistant Smart Panel` 项目，当前主线是：
 
-- 面板路线：`ESP32-P4 原生面板`
-- 固件基座：`ESP-IDF`
-- 图形栈：`LVGL`
+- 面板路线：`ESP32-P4` 原生面板
+- 固件基座：`ESP-IDF` **v5.5.4**
+- 图形栈：`LVGL` **v9**
 - 本地语音前端：`ESP-SR`
 - 后续集成：`Home Assistant`、米家生态、本地语音/LLM 节点
 
@@ -20,162 +20,88 @@
 
 ### `/docs`
 
-项目文档目录，保存：
-
-- 总体技术方案
-- 本地验证计划
-- 功能计划文件
-- 功能完成后的技术文档
-- 模板和流程说明
+项目文档目录：总体技术方案、本地验证计划、功能计划、模板与流程说明。
 
 ### `/docs/plans`
 
-功能计划目录。
-
-用途：
-
-- 每个新增功能都先创建一个 plan
-- plan 必须包含实现方案与测试方案
-- 功能完成并经 review 后，plan 会被沉淀为正式技术文档，再删除原 plan 文件
+功能计划目录（先写 plan，实现与测试方案，沉淀后可删原 plan）。
 
 ### `/docs/templates`
 
 文档模板目录。
 
-用途：
-
-- 功能计划模板
-- 技术文档模板
-
 ### `/.codex`
 
-项目内 Codex 扩展目录。
-
-用途：
-
-- 保存供后续 agent 复用的本地 skill
-- 固化项目特定的环境切换、构建入口和上下文约束
-
-当前预留结构：
-
-- `skills/`
-
-当前项目内已固化的 skill：
-
-- `esp-idf-v5.5.4`
-- `p4home-hardware-validation`
+Codex 扩展目录；已固化 skill：`esp-idf-v5.5.4`、`p4home-hardware-validation`。
 
 ### `/scripts`
 
-本地辅助脚本目录。
-
-用途：
-
-- 创建 plan
-- 完成功能后归档计划
-- 自动化 commit
-- 自动化 push
-- 安装或启用本地 hook
-- 项目内环境激活入口
+本地辅助脚本：IDF 激活、plan 生命周期、git/hook 等。
 
 ### `/.githooks`
 
 本地 git hook 模板目录。
 
-用途：
-
-- 对直接 `git push` 增加约束
-- 提醒先完成 review 再推送
-- 在未来扩展轻量检查逻辑
-
 ### `/firmware`
 
-固件主工程目录。
+固件主工程目录（ESP-IDF）。
 
-当前已初始化为最小 `ESP-IDF` 工程骨架。
+结构要点：
 
-当前结构：
-
-- `main/`：启动入口
-- `components/`：按模块拆分的业务组件
+- `main/`：入口 `app_main.c`，启动后输出 `VERIFY:area:check:PASS|FAIL` 供 CI/串口解析
+- `components/`：业务组件（见下）
+- `host_test/`：独立 Unity 冒烟测试工程（可选构建）
 - `sdkconfig.defaults`：人工维护的默认配置基线
-- `sdkconfig`：`ESP-IDF` 自动生成的完整配置快照
+- `sdkconfig`：本地生成，通常 gitignore
 - `partitions.csv`：分区表
 
-当前已落地的最小组件：
+## CI / 工作流（`.github/workflows`）
 
-- `diagnostics_service`
+- `firmware-self-hosted-build.yml`：`workflow_dispatch`，自托管 macOS ARM64 上 `idf.py build`
+- `firmware-self-hosted-flash-serial.yml`：手动刷机 + 串口采集 + `VERIFY:` 行不得含 `FAIL` + artifact
+- `firmware-pr-check.yml`：对 `firmware/**` 的 **PR** 与 **main** push 触发同上构建；环境变量 `EXTRA_CFLAGS=-Werror`
 
-预留目录：
+## 固件组件（`firmware/components/`）
 
-- `board_support`
-- `display_service`
-- `touch_service`
-- `ui_core`
-- `ui_pages`
-- `audio_service`
-- `sr_service`
-- `settings_service`
-- `network_service`
+已实现并参与链接的典型组件：
 
-## 功能模块说明
+| 组件 | 职责 |
+|------|------|
+| `board_support` | 板级编排：初始化各 service、网关状态发布、命令处理 |
+| `diagnostics_service` | 启动信息、芯片/分区/内存、心跳 |
+| `display_service` | DSI/LVGL 显示初始化、对外 API；页面 UI 委托 `ui_pages` |
+| `ui_pages` | 三页 LVGL UI、音频/触摸/网关控件与运行时标签更新 |
+| `touch_service` | GT911 / LVGL 触摸 |
+| `audio_service` | Codec、提示音、采集 |
+| `sr_service` | ESP-SR（AFE / WakeNet / MultiNet）与运行时任务 |
+| `network_service` | `esp_netif`、STA、hostname/device_id |
+| `gateway_service` | 本地网关状态与命令邮箱（脚手架） |
+| `settings_service` | NVS：启动页、启动计数等 |
+
+`ui_core/`：预留（导航壳/主题），当前逻辑主要在 `ui_pages`。
+
+## 功能模块说明（概念）
 
 ### 板级支持模块
 
-负责硬件初始化与抽象，包括：
-
-- 屏幕
-- 触摸
-- 背光
-- 音频输入输出
-- 存储
-- 网络基础能力
+硬件初始化与编排：`board_support` 聚合各 service。
 
 ### UI 模块
 
-负责原生图形界面，包括：
-
-- 页面框架
-- 主题系统
-- 卡片组件
-- 状态展示
-- 导航与交互
+`display_service` + `ui_pages`：显示链路、页面与交互控件。
 
 ### 语音前端模块
 
-负责本地语音输入链路，包括：
-
-- 麦克风采集
-- 音频前处理
-- 唤醒词
-- 固定命令词
-- 语音会话状态管理
+`sr_service` + `audio_service`：采集、AFE、唤醒与固定命令。
 
 ### 网关接入模块
 
-负责面板与外部系统通信，包括：
-
-- Home Assistant 数据同步
-- 设备状态更新
-- 命令下发
-- 后续语音网关接入
+`gateway_service`：本地注册/状态/命令邮箱契约（后续可接真实网关）。
 
 ### 系统基础设施模块
 
-负责长期维护所需的基础能力，包括：
-
-- 配置存储
-- 日志
-- 诊断
-- OTA
-- 版本信息
-- 崩溃恢复
+`settings_service`、`diagnostics_service`、分区与 OTA 配置在 `sdkconfig.defaults` / `partitions.csv` 中体现。
 
 ### 文档与流程模块
 
-负责支撑长期维护的工程约定，包括：
-
-- 功能计划
-- 测试方案
-- 技术文档沉淀
-- review 后推送
+`/docs` 与 plan 模板；硬件验证见 `docs/cloud-codex-hardware-validation.md` 与 `.codex/skills/p4home-hardware-validation`。
