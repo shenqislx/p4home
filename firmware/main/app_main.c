@@ -1,9 +1,11 @@
 #include <stdbool.h>
 #include <inttypes.h>
 
+#include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
 #include "board_support.h"
 #include "diagnostics_service.h"
@@ -27,6 +29,17 @@ void app_main(void)
     diagnostics_service_log_memory_summary();
 
     ESP_LOGW(TAG, "boot diagnostics baseline active");
+
+    const uint32_t wifi_verify_wait_ms = (uint32_t)CONFIG_P4HOME_WIFI_VERIFY_WAIT_MS;
+    if (wifi_verify_wait_ms > 0U) {
+        esp_err_t wifi_wait_err = board_support_wifi_wait_connected(wifi_verify_wait_ms);
+        if (wifi_wait_err != ESP_OK) {
+            ESP_LOGW(TAG,
+                     "wifi not ready after %" PRIu32 "ms wait: %s",
+                     wifi_verify_wait_ms, esp_err_to_name(wifi_wait_err));
+        }
+    }
+
     ESP_LOGW(TAG, "network ready=%s stack_ready=%s event_loop_ready=%s sta_netif_ready=%s hostname=%s device_id=%s mac=%s",
              board_support_network_ready() ? "yes" : "no",
              board_support_network_stack_ready() ? "yes" : "no",
@@ -35,6 +48,13 @@ void app_main(void)
              board_support_network_hostname(),
              board_support_network_device_id(),
              board_support_network_mac_text());
+    ESP_LOGW(TAG, "wifi started=%s connected=%s has_ip=%s ip=%s retry=%" PRIu32 " last_disconnect=%s",
+             board_support_wifi_started() ? "yes" : "no",
+             board_support_wifi_connected() ? "yes" : "no",
+             board_support_wifi_has_ip() ? "yes" : "no",
+             board_support_wifi_ip_text(),
+             board_support_wifi_retry_count(),
+             board_support_wifi_last_disconnect_reason());
     ESP_LOGW(TAG, "gateway ready=%s registered=%s state_synced=%s command_mailbox_ready=%s last_sync_reason=%s last_command=%s/%s",
              board_support_gateway_ready() ? "yes" : "no",
              board_support_gateway_registered() ? "yes" : "no",
@@ -81,6 +101,9 @@ void app_main(void)
     log_verify_marker("network", "stack", board_support_network_stack_ready());
     log_verify_marker("network", "event_loop", board_support_network_event_loop_ready());
     log_verify_marker("network", "sta_netif", board_support_network_sta_netif_ready());
+    log_verify_marker("network", "wifi_started", board_support_wifi_started());
+    log_verify_marker("network", "wifi_connected", board_support_wifi_connected());
+    log_verify_marker("network", "ip_acquired", board_support_wifi_has_ip());
     log_verify_marker("gateway", "registration", board_support_gateway_registered());
     log_verify_marker("gateway", "state_sync", board_support_gateway_state_synced());
     log_verify_marker("gateway", "command_mailbox", board_support_gateway_command_selftest_passed());

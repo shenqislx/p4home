@@ -266,6 +266,41 @@ const char *board_support_network_mac_text(void)
     return network_service_mac_text();
 }
 
+bool board_support_wifi_started(void)
+{
+    return network_service_wifi_started();
+}
+
+bool board_support_wifi_connected(void)
+{
+    return network_service_wifi_connected();
+}
+
+bool board_support_wifi_has_ip(void)
+{
+    return network_service_wifi_has_ip();
+}
+
+const char *board_support_wifi_ip_text(void)
+{
+    return network_service_ip_text();
+}
+
+const char *board_support_wifi_last_disconnect_reason(void)
+{
+    return network_service_last_disconnect_reason();
+}
+
+uint32_t board_support_wifi_retry_count(void)
+{
+    return network_service_wifi_retry_count();
+}
+
+esp_err_t board_support_wifi_wait_connected(uint32_t timeout_ms)
+{
+    return network_service_wait_connected(timeout_ms);
+}
+
 bool board_support_settings_ready(void)
 {
     return settings_service_is_ready();

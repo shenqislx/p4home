@@ -1,0 +1,42 @@
+menu "P4home Wi-Fi"
+
+    config P4HOME_WIFI_AUTOSTART
+        bool "Automatically start Wi-Fi STA during network_service init"
+        default y
+        help
+          If enabled, network_service_init() starts Wi-Fi in STA mode using
+          the SSID/password below and attempts to connect automatically.
+          Disable for bring-up scenarios where Wi-Fi should stay idle.
+
+    config P4HOME_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+        help
+          Home Wi-Fi SSID. Empty string disables auto-connect even when
+          P4HOME_WIFI_AUTOSTART is enabled.
+
+    config P4HOME_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+        help
+          Home Wi-Fi password (WPA2-PSK). Empty is allowed for open APs.
+
+    config P4HOME_WIFI_MAX_RETRY
+        int "Exponential-backoff retries before entering slow-retry mode"
+        default 10
+        range 1 100
+        help
+          After this many consecutive connection failures, network_service
+          switches from exponential backoff (1s..30s) to slow retry
+          (about 60s) rather than giving up entirely.
+
+    config P4HOME_WIFI_VERIFY_WAIT_MS
+        int "app_main wait for Wi-Fi GOT_IP before logging VERIFY markers (ms)"
+        default 3000
+        range 0 30000
+        help
+          Number of milliseconds app_main waits for Wi-Fi to reach the
+          GOT_IP state before recording Wi-Fi VERIFY markers. 0 disables
+          the wait and records whatever state is visible at boot time.
+
+endmenu
