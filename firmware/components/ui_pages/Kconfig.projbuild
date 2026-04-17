@@ -1,0 +1,25 @@
+menu "P4Home UI Pages"
+
+config P4HOME_DASHBOARD_COLUMNS
+    int "Dashboard columns"
+    range 1 6
+    default 3
+
+config P4HOME_DASHBOARD_DEFAULT_PAGE
+    string "Default dashboard group"
+    default ""
+
+config P4HOME_DASHBOARD_STALE_VISUAL
+    bool "Dim stale dashboard cards"
+    default y
+
+config P4HOME_UI_STATUS_BANNER_HEIGHT
+    int "Dashboard status banner height"
+    range 24 72
+    default 36
+
+config P4HOME_UI_STATUS_BANNER_ENABLE_IP_SUFFIX
+    bool "Show IP suffix in banner"
+    default y
+
+endmenu

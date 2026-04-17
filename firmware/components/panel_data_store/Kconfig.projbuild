@@ -1,0 +1,26 @@
+menu "P4Home Panel Data Store"
+
+config P4HOME_PANEL_STORE_MAX_ENTITIES
+    int "Max panel entities"
+    range 1 128
+    default 32
+
+config P4HOME_PANEL_STORE_STALE_MS
+    int "Stale threshold (ms)"
+    range 1000 3600000
+    default 300000
+
+config P4HOME_PANEL_STORE_AUTOSTART
+    bool "Autoregister HA callback on init"
+    default y
+
+config P4HOME_ENTITY_WHITELIST_EMBEDDED
+    bool "Use embedded panel whitelist JSON"
+    default y
+
+config P4HOME_ENTITY_WHITELIST_MAX_ENTITIES
+    int "Max whitelist entries"
+    range 1 128
+    default 32
+
+endmenu

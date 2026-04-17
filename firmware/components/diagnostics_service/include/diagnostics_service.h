@@ -5,3 +5,4 @@ void diagnostics_service_log_chip_summary(void);
 void diagnostics_service_log_partition_summary(void);
 void diagnostics_service_log_memory_summary(void);
 void diagnostics_service_log_runtime_heartbeat(void);
+void diagnostics_service_log_ha_summary(void);

@@ -1,2 +1,2 @@
 dependencies:
-  espressif/esp_wifi_remote: "*"
+  espressif/esp_wifi_remote: "1.5.1"

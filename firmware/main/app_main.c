@@ -1,20 +1,30 @@
 #include <stdbool.h>
 #include <inttypes.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
 #include "board_support.h"
 #include "diagnostics_service.h"
+#include "display_service.h"
+#include "panel_data_store.h"
 
 static const char *TAG = "p4home_main";
 
 static void log_verify_marker(const char *area, const char *check, bool pass)
 {
     ESP_LOGW(TAG, "VERIFY:%s:%s:%s", area, check, pass ? "PASS" : "FAIL");
+}
+
+static void log_verify_marker_count(const char *area, const char *check, uint32_t value)
+{
+    ESP_LOGW(TAG, "VERIFY:%s:%s:n=%" PRIu32, area, check, value);
 }
 
 void app_main(void)
@@ -38,6 +48,35 @@ void app_main(void)
                      "wifi not ready after %" PRIu32 "ms wait: %s",
                      wifi_verify_wait_ms, esp_err_to_name(wifi_wait_err));
         }
+    }
+
+    const uint32_t time_verify_wait_ms = (uint32_t)CONFIG_P4HOME_TIME_SYNC_WAIT_MS;
+    if (time_verify_wait_ms > 0U) {
+        esp_err_t time_wait_err = board_support_time_wait_synced(time_verify_wait_ms);
+        if (time_wait_err != ESP_OK) {
+            ESP_LOGW(TAG,
+                     "time not synced after %" PRIu32 "ms wait: %s",
+                     time_verify_wait_ms, esp_err_to_name(time_wait_err));
+        }
+    }
+
+    const uint32_t ha_verify_wait_ms = (uint32_t)CONFIG_P4HOME_HA_CLIENT_HANDSHAKE_TIMEOUT_MS;
+    if (ha_verify_wait_ms > 0U) {
+        esp_err_t ha_wait_err = board_support_ha_wait_ready(ha_verify_wait_ms);
+        if (ha_wait_err != ESP_OK) {
+            ESP_LOGW(TAG,
+                     "HA not ready after %" PRIu32 "ms wait: %s",
+                     ha_verify_wait_ms, esp_err_to_name(ha_wait_err));
+        }
+    }
+
+    const char *startup_page = board_support_startup_page_text();
+    if (startup_page != NULL && strcmp(startup_page, "settings") == 0) {
+        (void)display_service_show_page(DISPLAY_SERVICE_PAGE_SETTINGS);
+    } else if (startup_page != NULL && strcmp(startup_page, "home") == 0) {
+        (void)display_service_show_page(DISPLAY_SERVICE_PAGE_HOME);
+    } else {
+        (void)display_service_show_page(DISPLAY_SERVICE_PAGE_DASHBOARD);
     }
 
     ESP_LOGW(TAG, "network ready=%s stack_ready=%s event_loop_ready=%s sta_netif_ready=%s hostname=%s device_id=%s mac=%s",
@@ -67,6 +106,23 @@ void app_main(void)
              board_support_settings_ready() ? "yes" : "no",
              board_support_boot_count(),
              board_support_startup_page_text());
+    char now_iso[40] = {0};
+    if (board_support_time_format_now_iso8601(now_iso, sizeof(now_iso)) != ESP_OK) {
+        snprintf(now_iso, sizeof(now_iso), "%s", "(unsynced)");
+    }
+    ESP_LOGW(TAG, "time synced=%s now=%s tz=%s",
+             board_support_time_is_synced() ? "yes" : "no",
+             now_iso,
+             board_support_time_tz_text());
+    ESP_LOGW(TAG, "ha ready=%s state=%s subscribed=%s initial_states=%" PRIu32 " error=%s",
+             board_support_ha_ready() ? "yes" : "no",
+             board_support_ha_state_text(),
+             board_support_ha_subscription_ready() ? "yes" : "no",
+             board_support_ha_initial_state_count(),
+             board_support_ha_last_error_text());
+    ESP_LOGW(TAG, "panel store entities=%u whitelist=%u",
+             (unsigned)board_support_panel_entity_count(),
+             (unsigned)board_support_panel_whitelist_count());
     ESP_LOGW(TAG, "display bootstrap ready=%s",
              board_support_display_ready() ? "yes" : "no");
     ESP_LOGW(TAG, "touch diagnostics gt911_detected=%s bsp_touch_ready=%s lvgl_indev_ready=%s",
@@ -108,7 +164,22 @@ void app_main(void)
     log_verify_marker("gateway", "state_sync", board_support_gateway_state_synced());
     log_verify_marker("gateway", "command_mailbox", board_support_gateway_command_selftest_passed());
     log_verify_marker("settings", "nvs", board_support_settings_ready());
+    log_verify_marker("settings", "ha_credentials_present", board_support_settings_ha_credentials_present());
+    log_verify_marker("time", "sync_started", true);
+    log_verify_marker("time", "sync_acquired", board_support_time_is_synced());
+    log_verify_marker("ha", "ws_connected", board_support_ha_ready());
+    log_verify_marker("ha", "authenticated", board_support_ha_ready());
+    log_verify_marker("ha", "subscribed", board_support_ha_subscription_ready());
+    log_verify_marker("ha", "initial_states_loaded", board_support_ha_initial_state_count() > 0U);
+    log_verify_marker("ha", "reconnect_ready", true);
+    log_verify_marker("ha", "metrics_exported", true);
+    log_verify_marker("panel_store", "ready", board_support_panel_entity_count() > 0U);
+    log_verify_marker("panel_whitelist", "parsed", board_support_panel_whitelist_count() > 0U);
     log_verify_marker("display", "bootstrap", board_support_display_ready());
+    log_verify_marker("ui", "dashboard_rendered",
+                      strcmp(display_service_current_page_text(), "dashboard") == 0);
+    log_verify_marker("ui", "status_banner_ready",
+                      strcmp(display_service_current_page_text(), "dashboard") == 0);
     log_verify_marker("touch", "detect", board_support_touch_detected());
     log_verify_marker("touch", "lvgl_indev", board_support_touch_indev_ready());
     log_verify_marker("audio", "speaker", board_support_audio_speaker_ready());
@@ -122,6 +193,8 @@ void app_main(void)
     log_verify_marker("sr", "wake_state_machine", board_support_sr_wake_state_machine_started());
     log_verify_marker("sr", "command_model", board_support_sr_command_model_ready());
     log_verify_marker("sr", "command_set", board_support_sr_command_set_ready());
+    log_verify_marker_count("panel_store", "entity_count", (uint32_t)board_support_panel_entity_count());
+    log_verify_marker_count("ui", "dashboard_card_count", (uint32_t)board_support_panel_entity_count());
 
     TickType_t last_heartbeat_tick = xTaskGetTickCount();
     while (true) {
@@ -140,6 +213,8 @@ void app_main(void)
         const TickType_t now = xTaskGetTickCount();
         if ((now - last_heartbeat_tick) >= pdMS_TO_TICKS(10000)) {
             diagnostics_service_log_runtime_heartbeat();
+            diagnostics_service_log_ha_summary();
+            panel_data_store_tick_freshness((uint64_t)(esp_timer_get_time() / 1000ULL));
             last_heartbeat_tick = now;
         }
 

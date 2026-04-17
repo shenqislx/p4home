@@ -13,12 +13,14 @@
 #include "freertos/task.h"
 #include "gateway_service.h"
 #include "settings_service.h"
+#include "ui_page_dashboard.h"
 
 static const char *TAG = "ui_pages";
 static bool s_display_ready;
 static lv_obj_t *s_home_page;
 static lv_obj_t *s_settings_page;
 static lv_obj_t *s_gateway_page;
+static lv_obj_t *s_dashboard_nav_button;
 static lv_obj_t *s_home_nav_button;
 static lv_obj_t *s_settings_nav_button;
 static lv_obj_t *s_gateway_nav_button;
@@ -50,7 +52,7 @@ typedef enum {
     DISPLAY_AUDIO_ACTION_MIC_CAPTURE,
 } display_audio_action_t;
 
-static ui_pages_page_t s_current_page = UI_PAGES_PAGE_HOME;
+static ui_pages_page_t s_current_page = UI_PAGES_PAGE_DASHBOARD;
 
 const char *ui_pages_page_to_text(ui_pages_page_t page)
 {
@@ -61,6 +63,8 @@ const char *ui_pages_page_to_text(ui_pages_page_t page)
         return "settings";
     case UI_PAGES_PAGE_GATEWAY:
         return "gateway";
+    case UI_PAGES_PAGE_DASHBOARD:
+        return "dashboard";
     default:
         return "unknown";
     }
@@ -70,13 +74,15 @@ static ui_pages_page_t ui_pages_startup_page_to_display_page(settings_service_st
 {
     return page == SETTINGS_SERVICE_STARTUP_PAGE_SETTINGS
                ? UI_PAGES_PAGE_SETTINGS
-               : UI_PAGES_PAGE_HOME;
+               : (page == SETTINGS_SERVICE_STARTUP_PAGE_DASHBOARD ? UI_PAGES_PAGE_DASHBOARD
+                                                                  : UI_PAGES_PAGE_HOME);
 }
 
 static settings_service_startup_page_t ui_pages_page_to_startup_page(ui_pages_page_t page)
 {
     return page == UI_PAGES_PAGE_SETTINGS ? SETTINGS_SERVICE_STARTUP_PAGE_SETTINGS
-                                                 : SETTINGS_SERVICE_STARTUP_PAGE_HOME;
+         : (page == UI_PAGES_PAGE_DASHBOARD ? SETTINGS_SERVICE_STARTUP_PAGE_DASHBOARD
+                                            : SETTINGS_SERVICE_STARTUP_PAGE_HOME);
 }
 
 static void ui_pages_style_nav_button_locked(lv_obj_t *button, bool selected)
@@ -574,9 +580,19 @@ void ui_pages_show_page_locked(ui_pages_page_t page)
         }
     }
 
+    if (ui_page_dashboard_root() != NULL) {
+        if (page == UI_PAGES_PAGE_DASHBOARD) {
+            lv_obj_clear_flag(ui_page_dashboard_root(), LV_OBJ_FLAG_HIDDEN);
+            ui_page_dashboard_show();
+        } else {
+            lv_obj_add_flag(ui_page_dashboard_root(), LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
     ui_pages_style_nav_button_locked(s_home_nav_button, page == UI_PAGES_PAGE_HOME);
     ui_pages_style_nav_button_locked(s_settings_nav_button, page == UI_PAGES_PAGE_SETTINGS);
     ui_pages_style_nav_button_locked(s_gateway_nav_button, page == UI_PAGES_PAGE_GATEWAY);
+    ui_pages_style_nav_button_locked(s_dashboard_nav_button, page == UI_PAGES_PAGE_DASHBOARD);
 }
 
 static void ui_pages_nav_button_event_cb(lv_event_t *event)
@@ -663,6 +679,16 @@ esp_err_t ui_pages_render_bootstrap(void)
     lv_label_set_text(subtitle, "Local hardware bring-up dashboard");
     lv_obj_set_style_text_color(subtitle, lv_color_hex(0x8b949e), LV_PART_MAIN);
     lv_obj_align(subtitle, LV_ALIGN_TOP_LEFT, 40, 58);
+
+    s_dashboard_nav_button = lv_button_create(screen);
+    lv_obj_set_size(s_dashboard_nav_button, 120, 44);
+    lv_obj_align(s_dashboard_nav_button, LV_ALIGN_TOP_RIGHT, -424, 28);
+    lv_obj_add_event_cb(s_dashboard_nav_button, ui_pages_nav_button_event_cb, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)UI_PAGES_PAGE_DASHBOARD);
+    lv_obj_t *dashboard_nav_label = lv_label_create(s_dashboard_nav_button);
+    lv_label_set_text(dashboard_nav_label, "Dashboard");
+    lv_obj_set_style_text_color(dashboard_nav_label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_center(dashboard_nav_label);
 
     s_home_nav_button = lv_button_create(screen);
     lv_obj_set_size(s_home_nav_button, 120, 44);
@@ -861,6 +887,17 @@ esp_err_t ui_pages_render_bootstrap(void)
     lv_obj_set_style_text_color(save_settings_label, lv_color_white(), LV_PART_MAIN);
     lv_obj_center(save_settings_label);
 
+    lv_obj_t *save_dashboard_button = lv_button_create(s_settings_page);
+    lv_obj_set_size(save_dashboard_button, 220, 64);
+    lv_obj_align(save_dashboard_button, LV_ALIGN_TOP_LEFT, 488, 268);
+    lv_obj_set_style_bg_color(save_dashboard_button, lv_palette_main(LV_PALETTE_GREEN), LV_PART_MAIN);
+    lv_obj_add_event_cb(save_dashboard_button, ui_pages_save_startup_page_event_cb, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)UI_PAGES_PAGE_DASHBOARD);
+    lv_obj_t *save_dashboard_label = lv_label_create(save_dashboard_button);
+    lv_label_set_text(save_dashboard_label, "Save Dashboard");
+    lv_obj_set_style_text_color(save_dashboard_label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_center(save_dashboard_label);
+
     s_settings_hint_label = lv_label_create(s_settings_page);
     lv_obj_set_width(s_settings_hint_label, 840);
     lv_label_set_long_mode(s_settings_hint_label, LV_LABEL_LONG_WRAP);
@@ -954,6 +991,11 @@ esp_err_t ui_pages_render_bootstrap(void)
     lv_label_set_long_mode(s_gateway_hint_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(s_gateway_hint_label, lv_color_hex(0x8b949e), LV_PART_MAIN);
     lv_obj_align(s_gateway_hint_label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    ESP_RETURN_ON_ERROR(ui_page_dashboard_init(), TAG, "failed to init dashboard page");
+    if (ui_page_dashboard_root() != NULL) {
+        lv_obj_add_flag(ui_page_dashboard_root(), LV_OBJ_FLAG_HIDDEN);
+    }
 
     ui_pages_refresh_settings_locked(NULL);
     ui_pages_refresh_gateway_locked(NULL);

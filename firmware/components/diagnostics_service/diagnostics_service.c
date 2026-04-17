@@ -12,6 +12,7 @@
 #include "esp_psram.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "ha_client.h"
 
 static const char *TAG = "diagnostics";
 static int64_t s_last_heartbeat_us;
@@ -153,4 +154,25 @@ void diagnostics_service_log_runtime_heartbeat(void)
     ESP_LOGI(TAG, "heartbeat uptime_ms=%" PRIi64 " delta_ms=%" PRIi64,
              uptime_us / 1000,
              delta_us / 1000);
+}
+
+void diagnostics_service_log_ha_summary(void)
+{
+    ha_client_metrics_t metrics = {0};
+    if (ha_client_get_metrics(&metrics) != ESP_OK) {
+        return;
+    }
+
+    ESP_LOGI(TAG,
+             "ha_summary state=%s reconnect=%" PRIu32 " initial=%" PRIu32 " events=%" PRIu32 " epm=%" PRIu32
+             " connected_ms=%" PRIu64 " last_ready_ms=%" PRIu64 " last_event_ms=%" PRIu64 " error=%s",
+             ha_client_state_text(),
+             metrics.reconnect_count,
+             metrics.initial_state_count,
+             metrics.total_event_count,
+             metrics.events_per_minute,
+             metrics.connected_duration_ms,
+             metrics.last_ready_at_ms,
+             metrics.last_event_at_ms,
+             metrics.last_error_text != NULL ? metrics.last_error_text : "(none)");
 }

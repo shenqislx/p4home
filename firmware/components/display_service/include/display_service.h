@@ -10,6 +10,7 @@ typedef enum {
     DISPLAY_SERVICE_PAGE_HOME = 0,
     DISPLAY_SERVICE_PAGE_SETTINGS = 1,
     DISPLAY_SERVICE_PAGE_GATEWAY = 2,
+    DISPLAY_SERVICE_PAGE_DASHBOARD = 3,
 } display_service_page_t;
 
 esp_err_t display_service_init(void);

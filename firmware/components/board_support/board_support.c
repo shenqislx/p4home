@@ -1,6 +1,8 @@
 #include "board_support.h"
 
 #include <stdbool.h>
+#include <inttypes.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "audio_service.h"
@@ -8,10 +10,14 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "gateway_service.h"
+#include "ha_client.h"
 #include "network_service.h"
+#include "panel_data_store.h"
+#include "panel_entity_whitelist.h"
 #include "sdkconfig.h"
 #include "settings_service.h"
 #include "sr_service.h"
+#include "time_service.h"
 #include "touch_service.h"
 
 static const char *TAG = "board_support";
@@ -127,6 +133,26 @@ esp_err_t board_support_init(void)
         ESP_LOGW(TAG, "network service init failed: %s", esp_err_to_name(network_ret));
     }
 
+    esp_err_t time_ret = time_service_init();
+    if (time_ret != ESP_OK) {
+        ESP_LOGW(TAG, "time service init failed: %s", esp_err_to_name(time_ret));
+    }
+
+    esp_err_t panel_ret = panel_data_store_init();
+    if (panel_ret != ESP_OK) {
+        ESP_LOGW(TAG, "panel data store init failed: %s", esp_err_to_name(panel_ret));
+    } else {
+        panel_ret = panel_entity_whitelist_load();
+        if (panel_ret != ESP_OK) {
+            ESP_LOGW(TAG, "panel whitelist load failed: %s", esp_err_to_name(panel_ret));
+        }
+    }
+
+    esp_err_t ha_ret = ha_client_init();
+    if (ha_ret != ESP_OK) {
+        ESP_LOGW(TAG, "ha client init failed: %s", esp_err_to_name(ha_ret));
+    }
+
     esp_err_t gateway_ret = gateway_service_init();
     if (gateway_ret != ESP_OK) {
         ESP_LOGW(TAG, "gateway service init failed: %s", esp_err_to_name(gateway_ret));
@@ -175,6 +201,13 @@ esp_err_t board_support_init(void)
         ESP_LOGW(TAG, "sr service init failed: %s", esp_err_to_name(sr_ret));
     }
 
+    if (ha_ret == ESP_OK) {
+        ha_ret = ha_client_start();
+        if (ha_ret != ESP_OK) {
+            ESP_LOGW(TAG, "ha client start failed: %s", esp_err_to_name(ha_ret));
+        }
+    }
+
     if (gateway_service_is_ready()) {
         gateway_ret = board_support_publish_gateway_state_internal("board-init");
         if (gateway_ret != ESP_OK) {
@@ -214,11 +247,77 @@ void board_support_log_summary(void)
              s_board_initialized ? "yes" : "no");
     settings_service_log_summary();
     network_service_log_summary();
+    char now_iso[40] = {0};
+    if (time_service_format_now_iso8601(now_iso, sizeof(now_iso)) != ESP_OK) {
+        snprintf(now_iso, sizeof(now_iso), "%s", "(unsynced)");
+    }
+    ESP_LOGI(TAG, "time=%s tz=%s synced=%s",
+             now_iso,
+             time_service_tz_text(),
+             time_service_is_synced() ? "yes" : "no");
+    ESP_LOGI(TAG, "ha state=%s ready=%s subscribed=%s initial_states=%" PRIu32 " error=%s",
+             ha_client_state_text(),
+             ha_client_ready() ? "yes" : "no",
+             ha_client_subscription_ready() ? "yes" : "no",
+             ha_client_initial_state_count(),
+             ha_client_last_error_text());
+    panel_data_store_log_summary();
+    ESP_LOGI(TAG, "panel_whitelist count=%u", (unsigned)panel_entity_whitelist_count());
     gateway_service_log_summary();
     display_service_log_summary();
     touch_service_log_summary();
     audio_service_log_summary();
     sr_service_log_summary();
+}
+
+bool board_support_ha_ready(void)
+{
+    return ha_client_ready();
+}
+
+const char *board_support_ha_state_text(void)
+{
+    return ha_client_state_text();
+}
+
+const char *board_support_ha_last_error_text(void)
+{
+    return ha_client_last_error_text();
+}
+
+esp_err_t board_support_ha_wait_ready(uint32_t timeout_ms)
+{
+    return ha_client_wait_ready(timeout_ms);
+}
+
+bool board_support_ha_subscription_ready(void)
+{
+    return ha_client_subscription_ready();
+}
+
+uint32_t board_support_ha_initial_state_count(void)
+{
+    return ha_client_initial_state_count();
+}
+
+bool board_support_time_is_synced(void)
+{
+    return time_service_is_synced();
+}
+
+esp_err_t board_support_time_wait_synced(uint32_t timeout_ms)
+{
+    return time_service_wait_synced(timeout_ms);
+}
+
+const char *board_support_time_tz_text(void)
+{
+    return time_service_tz_text();
+}
+
+esp_err_t board_support_time_format_now_iso8601(char *buffer, size_t buffer_len)
+{
+    return time_service_format_now_iso8601(buffer, buffer_len);
 }
 
 bool board_support_display_ready(void)
@@ -314,6 +413,21 @@ uint32_t board_support_boot_count(void)
 const char *board_support_startup_page_text(void)
 {
     return settings_service_startup_page_text();
+}
+
+bool board_support_settings_ha_credentials_present(void)
+{
+    return settings_service_ha_credentials_present();
+}
+
+size_t board_support_panel_entity_count(void)
+{
+    return panel_data_store_entity_count();
+}
+
+size_t board_support_panel_whitelist_count(void)
+{
+    return panel_entity_whitelist_count();
 }
 
 bool board_support_touch_ready(void)

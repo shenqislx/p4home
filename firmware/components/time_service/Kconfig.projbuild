@@ -1,0 +1,38 @@
+menu "P4Home Time Service"
+
+config P4HOME_TIME_ENABLE
+    bool "Enable time service"
+    default y
+
+config P4HOME_TIME_TZ
+    string "Time zone"
+    default "CST-8"
+
+config P4HOME_TIME_WAIT_WIFI_MS
+    int "Wi-Fi wait before SNTP start (ms)"
+    range 1000 300000
+    default 60000
+
+config P4HOME_TIME_SYNC_WAIT_MS
+    int "Startup time sync wait (ms)"
+    range 0 60000
+    default 5000
+
+config P4HOME_TIME_SYNC_RETRY_MS
+    int "Retry delay after SNTP startup failure (ms)"
+    range 1000 60000
+    default 5000
+
+config P4HOME_TIME_NTP_SERVER_0
+    string "NTP server 0"
+    default "pool.ntp.org"
+
+config P4HOME_TIME_NTP_SERVER_1
+    string "NTP server 1"
+    default "ntp.ntsc.ac.cn"
+
+config P4HOME_TIME_NTP_SERVER_2
+    string "NTP server 2"
+    default "cn.pool.ntp.org"
+
+endmenu

@@ -1,0 +1,19 @@
+menu "P4Home Settings Service"
+
+config P4HOME_HA_URL
+    string "Home Assistant base URL"
+    default ""
+
+config P4HOME_HA_TOKEN
+    string "Home Assistant long-lived token"
+    default ""
+
+config P4HOME_HA_VERIFY_TLS
+    bool "Verify Home Assistant TLS certificate"
+    default y
+
+config P4HOME_HA_SEED_NVS_ON_BOOT
+    bool "Seed HA config from Kconfig into NVS on boot"
+    default y
+
+endmenu

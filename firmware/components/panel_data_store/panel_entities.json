@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "entities": [
+    {
+      "entity_id": "sensor.living_room_temperature",
+      "label": "客厅温度",
+      "unit": "°C",
+      "icon": "thermometer",
+      "group": "客厅",
+      "kind": "numeric"
+    },
+    {
+      "entity_id": "sensor.living_room_humidity",
+      "label": "客厅湿度",
+      "unit": "%",
+      "icon": "water",
+      "group": "客厅",
+      "kind": "numeric"
+    },
+    {
+      "entity_id": "sensor.home_energy_today",
+      "label": "今日能耗",
+      "unit": "kWh",
+      "icon": "flash",
+      "group": "能耗",
+      "kind": "numeric"
+    },
+    {
+      "entity_id": "binary_sensor.door_front",
+      "label": "大门",
+      "icon": "door",
+      "group": "门窗",
+      "kind": "binary"
+    },
+    {
+      "entity_id": "binary_sensor.motion_hallway",
+      "label": "走廊人体",
+      "icon": "motion",
+      "group": "门窗",
+      "kind": "binary"
+    },
+    {
+      "entity_id": "weather.home",
+      "label": "天气",
+      "icon": "weather",
+      "group": "默认",
+      "kind": "text"
+    },
+    {
+      "entity_id": "sensor.last_motion_time",
+      "label": "最近活动",
+      "icon": "clock",
+      "group": "门窗",
+      "kind": "timestamp"
+    }
+  ]
+}

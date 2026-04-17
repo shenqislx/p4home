@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -8,6 +9,16 @@
 esp_err_t board_support_init(void);
 const char *board_support_get_name(void);
 void board_support_log_summary(void);
+bool board_support_ha_ready(void);
+const char *board_support_ha_state_text(void);
+const char *board_support_ha_last_error_text(void);
+esp_err_t board_support_ha_wait_ready(uint32_t timeout_ms);
+bool board_support_ha_subscription_ready(void);
+uint32_t board_support_ha_initial_state_count(void);
+bool board_support_time_is_synced(void);
+esp_err_t board_support_time_wait_synced(uint32_t timeout_ms);
+const char *board_support_time_tz_text(void);
+esp_err_t board_support_time_format_now_iso8601(char *buffer, size_t buffer_len);
 bool board_support_display_ready(void);
 bool board_support_display_backlight_enabled(void);
 bool board_support_network_ready(void);
@@ -27,6 +38,9 @@ esp_err_t board_support_wifi_wait_connected(uint32_t timeout_ms);
 bool board_support_settings_ready(void);
 uint32_t board_support_boot_count(void);
 const char *board_support_startup_page_text(void);
+bool board_support_settings_ha_credentials_present(void);
+size_t board_support_panel_entity_count(void);
+size_t board_support_panel_whitelist_count(void);
 bool board_support_touch_ready(void);
 bool board_support_touch_detected(void);
 bool board_support_touch_indev_ready(void);
