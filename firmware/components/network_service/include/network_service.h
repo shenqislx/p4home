@@ -4,15 +4,19 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "esp_netif.h"
 
 typedef struct {
     bool ready;
     bool esp_netif_ready;
     bool event_loop_ready;
     bool sta_netif_ready;
+    bool hosted_transport_up;
+    bool netif_up;
     bool wifi_started;
     bool wifi_connected;
     bool wifi_has_ip;
+    esp_netif_dhcp_status_t dhcp_client_status;
     uint32_t retry_count;
     const char *hostname;
     const char *device_id;

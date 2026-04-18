@@ -6,10 +6,14 @@
 
 #include "esp_check.h"
 #include "esp_event.h"
+#include "esp_hosted.h"
+#include "esp_hosted_event.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
+#include "esp_netif_ip_addr.h"
 #include "esp_wifi.h"
+#include "esp_wifi_default.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/portmacro.h"
@@ -23,16 +27,19 @@ static const char *DEFAULT_HOSTNAME_PREFIX = "p4home-p4";
 #define NETWORK_SERVICE_CONNECTED_BIT   BIT0
 #define NETWORK_SERVICE_GOT_IP_BIT      BIT1
 #define NETWORK_SERVICE_FAIL_BIT        BIT2
+#define NETWORK_SERVICE_TRANSPORT_BIT   BIT3
 
 #define NETWORK_SERVICE_BACKOFF_MIN_MS  1000U
 #define NETWORK_SERVICE_BACKOFF_MAX_MS  30000U
 #define NETWORK_SERVICE_SLOW_RETRY_MS   60000U
+#define NETWORK_SERVICE_TRANSPORT_WAIT_MS 5000U
 
 typedef struct {
     bool initialized;
     bool esp_netif_ready;
     bool event_loop_ready;
     bool sta_netif_ready;
+    bool hosted_transport_up;
     bool wifi_started;
     bool wifi_connected;
     bool wifi_has_ip;
@@ -49,10 +56,103 @@ typedef struct {
     TimerHandle_t reconnect_timer;
     esp_event_handler_instance_t wifi_handler;
     esp_event_handler_instance_t ip_handler;
+    esp_event_handler_instance_t lost_ip_handler;
+    esp_event_handler_instance_t hosted_handler;
 } network_service_state_t;
 
 static network_service_state_t s_state;
 static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static bool network_service_netif_is_up(void)
+{
+    return s_state.sta_netif != NULL && esp_netif_is_netif_up(s_state.sta_netif);
+}
+
+static esp_netif_dhcp_status_t network_service_dhcp_status(void)
+{
+    esp_netif_dhcp_status_t dhcp_status = ESP_NETIF_DHCP_STOPPED;
+    if (s_state.sta_netif == NULL) {
+        return dhcp_status;
+    }
+
+    if (esp_netif_dhcpc_get_status(s_state.sta_netif, &dhcp_status) != ESP_OK) {
+        return ESP_NETIF_DHCP_STOPPED;
+    }
+    return dhcp_status;
+}
+
+static void network_service_log_netif_ip_state(const char *prefix)
+{
+    if (s_state.sta_netif == NULL) {
+        ESP_LOGW(TAG, "%s netif unavailable", prefix);
+        return;
+    }
+
+    esp_netif_ip_info_t ip_info = {0};
+    esp_netif_dns_info_t dns_info = {0};
+    esp_netif_dhcp_status_t dhcp_status = ESP_NETIF_DHCP_STOPPED;
+    esp_err_t ip_err = esp_netif_get_ip_info(s_state.sta_netif, &ip_info);
+    esp_err_t dns_err = esp_netif_get_dns_info(s_state.sta_netif, ESP_NETIF_DNS_MAIN, &dns_info);
+    esp_err_t dhcp_err = esp_netif_dhcpc_get_status(s_state.sta_netif, &dhcp_status);
+
+    if (ip_err == ESP_OK && dns_err == ESP_OK && dhcp_err == ESP_OK) {
+        ESP_LOGW(TAG,
+                 "%s dhcp=%d ip=" IPSTR " netmask=" IPSTR " gw=" IPSTR " dns1=" IPSTR,
+                 prefix,
+                 (int)dhcp_status,
+                 IP2STR(&ip_info.ip),
+                 IP2STR(&ip_info.netmask),
+                 IP2STR(&ip_info.gw),
+                 IP2STR(&dns_info.ip.u_addr.ip4));
+        return;
+    }
+
+    ESP_LOGW(TAG,
+             "%s failed to read ip state ip_err=%s dns_err=%s dhcp_err=%s",
+             prefix,
+             esp_err_to_name(ip_err),
+             esp_err_to_name(dns_err),
+             esp_err_to_name(dhcp_err));
+}
+
+static esp_err_t network_service_apply_static_ip(void)
+{
+#if CONFIG_P4HOME_WIFI_STATIC_IP_ENABLE
+    esp_netif_ip_info_t ip_info = {0};
+    esp_netif_dns_info_t dns1 = {0};
+    esp_netif_dns_info_t dns2 = {0};
+
+    bool ok = ip4addr_aton(CONFIG_P4HOME_WIFI_STATIC_IP_ADDR, &ip_info.ip);
+    ok = ok && ip4addr_aton(CONFIG_P4HOME_WIFI_STATIC_IP_NETMASK, &ip_info.netmask);
+    ok = ok && ip4addr_aton(CONFIG_P4HOME_WIFI_STATIC_IP_GATEWAY, &ip_info.gw);
+    ok = ok && ip4addr_aton(CONFIG_P4HOME_WIFI_STATIC_IP_DNS1, &dns1.ip.u_addr.ip4);
+    ok = ok && ip4addr_aton(CONFIG_P4HOME_WIFI_STATIC_IP_DNS2, &dns2.ip.u_addr.ip4);
+    ESP_RETURN_ON_FALSE(ok, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid static ip configuration");
+
+    esp_err_t err = esp_netif_dhcpc_stop(s_state.sta_netif);
+    if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+        return err;
+    }
+    ESP_RETURN_ON_ERROR(esp_netif_set_ip_info(s_state.sta_netif, &ip_info), TAG,
+                        "failed to set static ip info");
+    ESP_RETURN_ON_ERROR(esp_netif_set_dns_info(s_state.sta_netif, ESP_NETIF_DNS_MAIN, &dns1), TAG,
+                        "failed to set primary dns");
+    ESP_RETURN_ON_ERROR(esp_netif_set_dns_info(s_state.sta_netif, ESP_NETIF_DNS_BACKUP, &dns2), TAG,
+                        "failed to set secondary dns");
+
+    ESP_LOGW(TAG,
+             "static ip enabled for debug ip=%s netmask=%s gw=%s dns1=%s dns2=%s",
+             CONFIG_P4HOME_WIFI_STATIC_IP_ADDR,
+             CONFIG_P4HOME_WIFI_STATIC_IP_NETMASK,
+             CONFIG_P4HOME_WIFI_STATIC_IP_GATEWAY,
+             CONFIG_P4HOME_WIFI_STATIC_IP_DNS1,
+             CONFIG_P4HOME_WIFI_STATIC_IP_DNS2);
+    return ESP_OK;
+#else
+    return ESP_OK;
+#endif
+}
 
 static const char *network_service_disconnect_reason_to_text(uint8_t reason)
 {
@@ -126,10 +226,9 @@ static esp_err_t network_service_init_identity(void)
 
 static esp_err_t network_service_init_sta_netif(void)
 {
-    esp_netif_config_t sta_cfg = ESP_NETIF_DEFAULT_WIFI_STA();
-    s_state.sta_netif = esp_netif_new(&sta_cfg);
+    s_state.sta_netif = esp_netif_create_default_wifi_sta();
     ESP_RETURN_ON_FALSE(s_state.sta_netif != NULL, ESP_FAIL, TAG,
-                        "failed to create wifi sta-shaped esp_netif");
+                        "failed to create default wifi sta netif");
 
     esp_err_t err = esp_netif_set_hostname(s_state.sta_netif, s_state.hostname);
     ESP_RETURN_ON_ERROR(err, TAG, "failed to set wifi sta hostname");
@@ -189,7 +288,7 @@ static void network_service_wifi_event_handler(void *arg,
 
     switch (id) {
     case WIFI_EVENT_STA_START: {
-        ESP_LOGI(TAG, "wifi sta started, connecting");
+        ESP_LOGW(TAG, "wifi sta started, connecting");
         esp_err_t err = esp_wifi_connect();
         if (err != ESP_OK && err != ESP_ERR_WIFI_CONN) {
             ESP_LOGW(TAG, "esp_wifi_connect() failed: %s", esp_err_to_name(err));
@@ -204,7 +303,8 @@ static void network_service_wifi_event_handler(void *arg,
         if (s_state.event_group != NULL) {
             xEventGroupSetBits(s_state.event_group, NETWORK_SERVICE_CONNECTED_BIT);
         }
-        ESP_LOGI(TAG, "wifi connected (waiting for ip)");
+        ESP_LOGW(TAG, "wifi connected (waiting for ip)");
+        network_service_log_netif_ip_state("post-connect");
         break;
     }
     case WIFI_EVENT_STA_DISCONNECTED: {
@@ -244,6 +344,46 @@ static void network_service_wifi_event_handler(void *arg,
     }
 }
 
+static void network_service_hosted_event_handler(void *arg,
+                                                 esp_event_base_t base,
+                                                 int32_t id,
+                                                 void *data)
+{
+    (void)arg;
+    (void)base;
+
+    switch (id) {
+    case ESP_HOSTED_EVENT_TRANSPORT_UP:
+        taskENTER_CRITICAL(&s_state_lock);
+        s_state.hosted_transport_up = true;
+        taskEXIT_CRITICAL(&s_state_lock);
+        if (s_state.event_group != NULL) {
+            xEventGroupSetBits(s_state.event_group, NETWORK_SERVICE_TRANSPORT_BIT);
+        }
+        ESP_LOGW(TAG, "hosted transport up");
+        break;
+    case ESP_HOSTED_EVENT_TRANSPORT_DOWN:
+    case ESP_HOSTED_EVENT_TRANSPORT_FAILURE:
+        taskENTER_CRITICAL(&s_state_lock);
+        s_state.hosted_transport_up = false;
+        taskEXIT_CRITICAL(&s_state_lock);
+        if (s_state.event_group != NULL) {
+            xEventGroupClearBits(s_state.event_group, NETWORK_SERVICE_TRANSPORT_BIT);
+        }
+        ESP_LOGW(TAG, "hosted transport %s",
+                 id == ESP_HOSTED_EVENT_TRANSPORT_DOWN ? "down" : "failure");
+        break;
+    case ESP_HOSTED_EVENT_CP_INIT: {
+        const esp_hosted_event_init_t *ev = (const esp_hosted_event_init_t *)data;
+        ESP_LOGW(TAG, "hosted coprocessor init reason=%" PRIu16,
+                 ev != NULL ? ev->reason : 0U);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 static void network_service_ip_event_handler(void *arg,
                                              esp_event_base_t base,
                                              int32_t id,
@@ -251,6 +391,19 @@ static void network_service_ip_event_handler(void *arg,
 {
     (void)arg;
     (void)base;
+
+    if (id == IP_EVENT_STA_LOST_IP) {
+        taskENTER_CRITICAL(&s_state_lock);
+        s_state.wifi_has_ip = false;
+        s_state.ip_text[0] = '\0';
+        taskEXIT_CRITICAL(&s_state_lock);
+        if (s_state.event_group != NULL) {
+            xEventGroupClearBits(s_state.event_group, NETWORK_SERVICE_GOT_IP_BIT);
+        }
+        ESP_LOGW(TAG, "wifi lost ip");
+        network_service_log_netif_ip_state("post-lost-ip");
+        return;
+    }
 
     if (id != IP_EVENT_STA_GOT_IP) {
         return;
@@ -277,20 +430,57 @@ static void network_service_ip_event_handler(void *arg,
         xEventGroupSetBits(s_state.event_group,
                            NETWORK_SERVICE_CONNECTED_BIT | NETWORK_SERVICE_GOT_IP_BIT);
     }
-    ESP_LOGI(TAG, "wifi got ip=%s", ip_text);
+    ESP_LOGW(TAG, "wifi got ip=%s", ip_text);
+    network_service_log_netif_ip_state("post-got-ip");
 }
 
 static esp_err_t network_service_register_event_handlers(void)
 {
-    esp_err_t err = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
-                                                        &network_service_wifi_event_handler,
-                                                        NULL, &s_state.wifi_handler);
+    esp_err_t err = esp_event_handler_instance_register(ESP_HOSTED_EVENT, ESP_EVENT_ANY_ID,
+                                                        &network_service_hosted_event_handler,
+                                                        NULL, &s_state.hosted_handler);
+    ESP_RETURN_ON_ERROR(err, TAG, "failed to register hosted event handler");
+
+    err = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                              &network_service_wifi_event_handler,
+                                              NULL, &s_state.wifi_handler);
     ESP_RETURN_ON_ERROR(err, TAG, "failed to register wifi event handler");
 
     err = esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
                                               &network_service_ip_event_handler,
                                               NULL, &s_state.ip_handler);
     ESP_RETURN_ON_ERROR(err, TAG, "failed to register ip event handler");
+    err = esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_LOST_IP,
+                                              &network_service_ip_event_handler,
+                                              NULL, &s_state.lost_ip_handler);
+    ESP_RETURN_ON_ERROR(err, TAG, "failed to register lost ip event handler");
+    return ESP_OK;
+}
+
+static esp_err_t network_service_prepare_hosted_transport(uint32_t timeout_ms)
+{
+    ESP_RETURN_ON_FALSE(s_state.event_group != NULL, ESP_ERR_INVALID_STATE, TAG,
+                        "hosted transport wait requires event group");
+
+    taskENTER_CRITICAL(&s_state_lock);
+    bool transport_up = s_state.hosted_transport_up;
+    taskEXIT_CRITICAL(&s_state_lock);
+    if (transport_up) {
+        xEventGroupSetBits(s_state.event_group, NETWORK_SERVICE_TRANSPORT_BIT);
+        ESP_LOGW(TAG, "hosted transport already up");
+        return ESP_OK;
+    }
+
+    ESP_RETURN_ON_ERROR(esp_hosted_connect_to_slave(), TAG,
+                        "failed to connect hosted transport to slave");
+
+    EventBits_t bits = xEventGroupWaitBits(s_state.event_group,
+                                           NETWORK_SERVICE_TRANSPORT_BIT,
+                                           pdFALSE, pdTRUE,
+                                           pdMS_TO_TICKS(timeout_ms));
+    if ((bits & NETWORK_SERVICE_TRANSPORT_BIT) == 0U) {
+        return ESP_ERR_TIMEOUT;
+    }
     return ESP_OK;
 }
 
@@ -315,6 +505,8 @@ static esp_err_t network_service_wifi_start_internal(void)
 
     ESP_RETURN_ON_ERROR(network_service_register_event_handlers(), TAG,
                         "event handler register failed");
+    ESP_RETURN_ON_ERROR(network_service_prepare_hosted_transport(NETWORK_SERVICE_TRANSPORT_WAIT_MS),
+                        TAG, "hosted transport not ready");
 
     wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init_cfg), TAG, "esp_wifi_init failed");
@@ -322,6 +514,8 @@ static esp_err_t network_service_wifi_start_internal(void)
                         "esp_wifi_set_storage failed");
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG,
                         "esp_wifi_set_mode failed");
+    ESP_RETURN_ON_ERROR(network_service_apply_static_ip(), TAG,
+                        "failed to apply network addressing");
 
     wifi_config_t cfg = {0};
     strncpy((char *)cfg.sta.ssid, CONFIG_P4HOME_WIFI_SSID, sizeof(cfg.sta.ssid) - 1);
@@ -415,6 +609,14 @@ bool network_service_wifi_started(void)
     return started;
 }
 
+static bool network_service_hosted_transport_up(void)
+{
+    taskENTER_CRITICAL(&s_state_lock);
+    bool transport_up = s_state.hosted_transport_up;
+    taskEXIT_CRITICAL(&s_state_lock);
+    return transport_up;
+}
+
 bool network_service_wifi_connected(void)
 {
     taskENTER_CRITICAL(&s_state_lock);
@@ -487,6 +689,9 @@ void network_service_get_snapshot(network_service_snapshot_t *snapshot)
     snapshot->esp_netif_ready = s_state.esp_netif_ready;
     snapshot->event_loop_ready = s_state.event_loop_ready;
     snapshot->sta_netif_ready = s_state.sta_netif_ready;
+    snapshot->hosted_transport_up = network_service_hosted_transport_up();
+    snapshot->netif_up = network_service_netif_is_up();
+    snapshot->dhcp_client_status = network_service_dhcp_status();
     taskENTER_CRITICAL(&s_state_lock);
     snapshot->wifi_started = s_state.wifi_started;
     snapshot->wifi_connected = s_state.wifi_connected;
@@ -503,11 +708,14 @@ void network_service_get_snapshot(network_service_snapshot_t *snapshot)
 void network_service_log_summary(void)
 {
     ESP_LOGI(TAG,
-             "network ready=%s esp_netif_ready=%s event_loop_ready=%s sta_netif_ready=%s hostname=%s device_id=%s mac=%s",
+             "network ready=%s esp_netif_ready=%s event_loop_ready=%s sta_netif_ready=%s hosted_transport_up=%s netif_up=%s dhcp_status=%d hostname=%s device_id=%s mac=%s",
              s_state.initialized ? "yes" : "no",
              s_state.esp_netif_ready ? "yes" : "no",
              s_state.event_loop_ready ? "yes" : "no",
              s_state.sta_netif_ready ? "yes" : "no",
+             network_service_hosted_transport_up() ? "yes" : "no",
+             network_service_netif_is_up() ? "yes" : "no",
+             (int)network_service_dhcp_status(),
              network_service_hostname(),
              network_service_device_id(),
              network_service_mac_text());

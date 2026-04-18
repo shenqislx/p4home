@@ -22,4 +22,32 @@ config P4HOME_WIFI_VERIFY_WAIT_MS
     range 0 60000
     default 3000
 
+config P4HOME_WIFI_STATIC_IP_ENABLE
+    bool "Enable static IPv4 for Wi-Fi STA debug"
+    default n
+
+if P4HOME_WIFI_STATIC_IP_ENABLE
+
+config P4HOME_WIFI_STATIC_IP_ADDR
+    string "Static IPv4 address"
+    default "192.168.1.50"
+
+config P4HOME_WIFI_STATIC_IP_NETMASK
+    string "Static IPv4 netmask"
+    default "255.255.255.0"
+
+config P4HOME_WIFI_STATIC_IP_GATEWAY
+    string "Static IPv4 gateway"
+    default "192.168.1.1"
+
+config P4HOME_WIFI_STATIC_IP_DNS1
+    string "Static IPv4 primary DNS"
+    default "192.168.1.1"
+
+config P4HOME_WIFI_STATIC_IP_DNS2
+    string "Static IPv4 secondary DNS"
+    default "8.8.8.8"
+
+endif
+
 endmenu
