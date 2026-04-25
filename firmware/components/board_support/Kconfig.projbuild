@@ -1,0 +1,11 @@
+menu "P4Home Runtime Scope"
+
+config P4HOME_SR_ENABLE
+    bool "Enable speech recognition runtime"
+    default n
+
+config P4HOME_GATEWAY_RUNTIME_POLL_ENABLE
+    bool "Enable gateway runtime polling loop"
+    default n
+
+endmenu

@@ -10,9 +10,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "audio_service";
 static const char *AUDIO_SERVICE_OWNER_NONE = "none";
+
+#ifndef CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST
+#define CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST 0
+#endif
 
 typedef struct {
     bool initialized;
@@ -409,10 +414,14 @@ esp_err_t audio_service_init(void)
     }
 
     s_state.initialized = true;
+#if CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST
     esp_err_t selftest_ret = audio_service_run_startup_selftest();
     if (selftest_ret != ESP_OK) {
         ESP_LOGW(TAG, "startup selftest completed with warnings: %s", esp_err_to_name(selftest_ret));
     }
+#else
+    ESP_LOGW(TAG, "startup selftest skipped by config");
+#endif
     audio_service_log_summary();
     return ESP_OK;
 }

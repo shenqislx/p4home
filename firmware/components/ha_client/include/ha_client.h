@@ -49,6 +49,7 @@ bool ha_client_ready(void);
 ha_client_state_t ha_client_state(void);
 const char *ha_client_state_text(void);
 const char *ha_client_last_error_text(void);
+esp_err_t ha_client_set_initial_state_entities(const char *const *entity_ids, size_t count);
 esp_err_t ha_client_set_state_change_callback(ha_client_state_change_cb_t callback, void *user_data);
 bool ha_client_subscription_ready(void);
 uint32_t ha_client_initial_state_count(void);

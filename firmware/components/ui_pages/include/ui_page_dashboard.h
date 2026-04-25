@@ -13,3 +13,5 @@ void ui_page_dashboard_on_sensor_update(const panel_sensor_t *sensor);
 lv_obj_t *ui_page_dashboard_root(void);
 bool ui_page_dashboard_ready(void);
 size_t ui_page_dashboard_card_count(void);
+size_t ui_page_dashboard_grid_child_count(void);
+bool ui_page_dashboard_visible(void);

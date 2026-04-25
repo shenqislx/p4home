@@ -10,6 +10,16 @@ config P4HOME_PANEL_STORE_STALE_MS
     range 1000 3600000
     default 300000
 
+config P4HOME_PANEL_STORE_HISTORY_POINTS
+    int "Numeric history points per panel entity"
+    range 4 48
+    default 12
+
+config P4HOME_PANEL_STORE_SAMPLE_INTERVAL_MS
+    int "Numeric history sample interval (ms)"
+    range 1000 86400000
+    default 3600000
+
 config P4HOME_PANEL_STORE_AUTOSTART
     bool "Autoregister HA callback on init"
     default y

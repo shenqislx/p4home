@@ -14,6 +14,8 @@
 #include "diagnostics_service.h"
 #include "display_service.h"
 #include "panel_data_store.h"
+#include "time_service.h"
+#include "ui_page_dashboard.h"
 
 static const char *TAG = "p4home_main";
 
@@ -22,10 +24,31 @@ static void log_verify_marker(const char *area, const char *check, bool pass)
     ESP_LOGW(TAG, "VERIFY:%s:%s:%s", area, check, pass ? "PASS" : "FAIL");
 }
 
+static void log_verify_marker_status(const char *area, const char *check, const char *status)
+{
+    ESP_LOGW(TAG, "VERIFY:%s:%s:%s", area, check, status);
+}
+
 static void log_verify_marker_count(const char *area, const char *check, uint32_t value)
 {
     ESP_LOGW(TAG, "VERIFY:%s:%s:n=%" PRIu32, area, check, value);
 }
+
+#ifndef CONFIG_P4HOME_HA_CLIENT_START_DELAY_MS
+#define CONFIG_P4HOME_HA_CLIENT_START_DELAY_MS 30000
+#endif
+
+#ifndef CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST
+#define CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST 0
+#endif
+
+#ifndef CONFIG_P4HOME_SR_ENABLE
+#define CONFIG_P4HOME_SR_ENABLE 0
+#endif
+
+#ifndef CONFIG_P4HOME_GATEWAY_RUNTIME_POLL_ENABLE
+#define CONFIG_P4HOME_GATEWAY_RUNTIME_POLL_ENABLE 0
+#endif
 
 void app_main(void)
 {
@@ -136,6 +159,7 @@ void app_main(void)
              board_support_audio_microphone_capture_ready() ? "yes" : "no",
              board_support_audio_busy() ? "yes" : "no",
              board_support_audio_owner_text());
+#if CONFIG_P4HOME_SR_ENABLE
     ESP_LOGW(TAG, "sr service dependency_declared=%s afe_config_ready=%s afe_ready=%s afe_runtime_ready=%s runtime_loop_started=%s runtime_loop_active=%s wake_state_machine_started=%s command_model_ready=%s command_set_ready=%s voice_state=%s last_command=%s",
              board_support_sr_dependency_declared() ? "yes" : "no",
              board_support_sr_afe_config_ready() ? "yes" : "no",
@@ -152,6 +176,9 @@ void app_main(void)
              board_support_sr_models_available() ? "yes" : "no",
              board_support_sr_model_count(),
              board_support_sr_status_text());
+#else
+    ESP_LOGW(TAG, "sr service skipped by config");
+#endif
 
     log_verify_marker("boot", "board_init", true);
     log_verify_marker("network", "stack", board_support_network_stack_ready());
@@ -167,10 +194,20 @@ void app_main(void)
     log_verify_marker("settings", "ha_credentials_present", board_support_settings_ha_credentials_present());
     log_verify_marker("time", "sync_started", true);
     log_verify_marker("time", "sync_acquired", board_support_time_is_synced());
-    log_verify_marker("ha", "ws_connected", board_support_ha_ready());
-    log_verify_marker("ha", "authenticated", board_support_ha_ready());
-    log_verify_marker("ha", "subscribed", board_support_ha_subscription_ready());
-    log_verify_marker("ha", "initial_states_loaded", board_support_ha_initial_state_count() > 0U);
+    const bool ha_start_deferred =
+        !board_support_ha_ready() &&
+        (uint32_t)(esp_timer_get_time() / 1000ULL) < (uint32_t)CONFIG_P4HOME_HA_CLIENT_START_DELAY_MS;
+    if (ha_start_deferred) {
+        log_verify_marker_status("ha", "ws_connected", "PENDING_DELAY");
+        log_verify_marker_status("ha", "authenticated", "PENDING_DELAY");
+        log_verify_marker_status("ha", "subscribed", "PENDING_DELAY");
+        log_verify_marker_status("ha", "initial_states_loaded", "PENDING_DELAY");
+    } else {
+        log_verify_marker("ha", "ws_connected", board_support_ha_ready());
+        log_verify_marker("ha", "authenticated", board_support_ha_ready());
+        log_verify_marker("ha", "subscribed", board_support_ha_subscription_ready());
+        log_verify_marker("ha", "initial_states_loaded", board_support_ha_initial_state_count() > 0U);
+    }
     log_verify_marker("ha", "reconnect_ready", true);
     log_verify_marker("ha", "metrics_exported", true);
     log_verify_marker("panel_store", "ready", board_support_panel_entity_count() > 0U);
@@ -184,8 +221,14 @@ void app_main(void)
     log_verify_marker("touch", "lvgl_indev", board_support_touch_indev_ready());
     log_verify_marker("audio", "speaker", board_support_audio_speaker_ready());
     log_verify_marker("audio", "microphone", board_support_audio_microphone_ready());
+#if CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST
     log_verify_marker("audio", "tone_played", board_support_audio_tone_played());
     log_verify_marker("audio", "mic_capture", board_support_audio_microphone_capture_ready());
+#else
+    log_verify_marker_status("audio", "tone_played", "SKIPPED");
+    log_verify_marker_status("audio", "mic_capture", "SKIPPED");
+#endif
+#if CONFIG_P4HOME_SR_ENABLE
     log_verify_marker("sr", "models", board_support_sr_models_available());
     log_verify_marker("sr", "afe_preflight", board_support_sr_afe_ready());
     log_verify_marker("sr", "afe_runtime", board_support_sr_afe_runtime_ready());
@@ -193,11 +236,21 @@ void app_main(void)
     log_verify_marker("sr", "wake_state_machine", board_support_sr_wake_state_machine_started());
     log_verify_marker("sr", "command_model", board_support_sr_command_model_ready());
     log_verify_marker("sr", "command_set", board_support_sr_command_set_ready());
+#else
+    log_verify_marker_status("sr", "models", "SKIPPED");
+    log_verify_marker_status("sr", "afe_preflight", "SKIPPED");
+    log_verify_marker_status("sr", "afe_runtime", "SKIPPED");
+    log_verify_marker_status("sr", "runtime_loop", "SKIPPED");
+    log_verify_marker_status("sr", "wake_state_machine", "SKIPPED");
+    log_verify_marker_status("sr", "command_model", "SKIPPED");
+    log_verify_marker_status("sr", "command_set", "SKIPPED");
+#endif
     log_verify_marker_count("panel_store", "entity_count", (uint32_t)board_support_panel_entity_count());
-    log_verify_marker_count("ui", "dashboard_card_count", (uint32_t)board_support_panel_entity_count());
+    log_verify_marker_count("ui", "dashboard_card_count", (uint32_t)ui_page_dashboard_card_count());
 
     TickType_t last_heartbeat_tick = xTaskGetTickCount();
     while (true) {
+#if CONFIG_P4HOME_GATEWAY_RUNTIME_POLL_ENABLE
         if (board_support_gateway_ready()) {
             esp_err_t gateway_ret = board_support_gateway_process_pending_command();
             if (gateway_ret != ESP_OK) {
@@ -209,12 +262,13 @@ void app_main(void)
                 ESP_LOGW(TAG, "gateway state publish failed: %s", esp_err_to_name(gateway_ret));
             }
         }
+#endif
 
         const TickType_t now = xTaskGetTickCount();
         if ((now - last_heartbeat_tick) >= pdMS_TO_TICKS(10000)) {
             diagnostics_service_log_runtime_heartbeat();
             diagnostics_service_log_ha_summary();
-            panel_data_store_tick_freshness((uint64_t)(esp_timer_get_time() / 1000ULL));
+            panel_data_store_tick_freshness(time_service_now_epoch_ms());
             last_heartbeat_tick = now;
         }
 

@@ -2,56 +2,50 @@
   "version": 1,
   "entities": [
     {
-      "entity_id": "sensor.living_room_temperature",
-      "label": "客厅温度",
-      "unit": "°C",
+      "entity_id": "sensor.xiaomi_cn_2102782855_w2_temperature_p_2_7",
+      "label": "点位温度",
+      "unit": "C",
       "icon": "thermometer",
-      "group": "客厅",
+      "group": "起居",
       "kind": "numeric"
     },
     {
-      "entity_id": "sensor.living_room_humidity",
-      "label": "客厅湿度",
-      "unit": "%",
+      "entity_id": "sensor.xiaomi_cn_2103924239_w3_temperature_p_2_7",
+      "label": "展示温度",
+      "unit": "C",
+      "icon": "thermometer",
+      "group": "起居",
+      "kind": "numeric"
+    },
+    {
+      "entity_id": "sensor.xiaomi_cn_2102549075_w2_temperature_p_2_7",
+      "label": "食室温度",
+      "unit": "C",
+      "icon": "thermometer",
+      "group": "食室",
+      "kind": "numeric"
+    },
+    {
+      "entity_id": "sensor.linp_cn_blt_3_1ofn3nec8cc02_es4b_illumination_p_2_1005",
+      "label": "光度",
+      "unit": "lx",
+      "icon": "light",
+      "group": "起居",
+      "kind": "numeric"
+    },
+    {
+      "entity_id": "sensor.yunmi_cn_410910914_lx14_tds_out_p_4_2",
+      "label": "水TDS",
       "icon": "water",
-      "group": "客厅",
+      "group": "水机",
       "kind": "numeric"
     },
     {
-      "entity_id": "sensor.home_energy_today",
-      "label": "今日能耗",
-      "unit": "kWh",
-      "icon": "flash",
-      "group": "能耗",
-      "kind": "numeric"
-    },
-    {
-      "entity_id": "binary_sensor.door_front",
-      "label": "大门",
-      "icon": "door",
-      "group": "门窗",
-      "kind": "binary"
-    },
-    {
-      "entity_id": "binary_sensor.motion_hallway",
-      "label": "走廊人体",
-      "icon": "motion",
-      "group": "门窗",
-      "kind": "binary"
-    },
-    {
-      "entity_id": "weather.home",
+      "entity_id": "weather.forecast_wo_de_jia",
       "label": "天气",
       "icon": "weather",
-      "group": "默认",
+      "group": "室外",
       "kind": "text"
-    },
-    {
-      "entity_id": "sensor.last_motion_time",
-      "label": "最近活动",
-      "icon": "clock",
-      "group": "门窗",
-      "kind": "timestamp"
     }
   ]
 }

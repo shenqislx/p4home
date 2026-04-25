@@ -23,6 +23,10 @@
 static const char *TAG = "board_support";
 static bool s_board_initialized;
 
+#ifndef CONFIG_P4HOME_SR_ENABLE
+#define CONFIG_P4HOME_SR_ENABLE 0
+#endif
+
 static esp_err_t board_support_publish_gateway_state_internal(const char *reason)
 {
     gateway_service_panel_state_t panel_state = {
@@ -151,6 +155,22 @@ esp_err_t board_support_init(void)
     esp_err_t ha_ret = ha_client_init();
     if (ha_ret != ESP_OK) {
         ESP_LOGW(TAG, "ha client init failed: %s", esp_err_to_name(ha_ret));
+    } else {
+        const char *initial_entities[CONFIG_P4HOME_ENTITY_WHITELIST_MAX_ENTITIES] = {0};
+        size_t initial_entity_count = panel_entity_whitelist_count();
+        if (initial_entity_count > CONFIG_P4HOME_ENTITY_WHITELIST_MAX_ENTITIES) {
+            initial_entity_count = CONFIG_P4HOME_ENTITY_WHITELIST_MAX_ENTITIES;
+        }
+        for (size_t i = 0; i < initial_entity_count; ++i) {
+            const panel_sensor_t *sensor = panel_entity_whitelist_at(i);
+            if (sensor != NULL) {
+                initial_entities[i] = sensor->entity_id;
+            }
+        }
+        esp_err_t initial_ret = ha_client_set_initial_state_entities(initial_entities, initial_entity_count);
+        if (initial_ret != ESP_OK) {
+            ESP_LOGW(TAG, "ha initial entity filter failed: %s", esp_err_to_name(initial_ret));
+        }
     }
 
     esp_err_t gateway_ret = gateway_service_init();
@@ -163,7 +183,11 @@ esp_err_t board_support_init(void)
             .device_id = network_service_device_id(),
             .hostname = network_service_hostname(),
             .app_version = app_desc != NULL ? app_desc->version : "unknown",
+#if CONFIG_P4HOME_SR_ENABLE
             .capabilities = "display,touch,audio,sr,settings,network",
+#else
+            .capabilities = "display,touch,audio,settings,network",
+#endif
         };
         gateway_ret = gateway_service_register_device(&registration);
         if (gateway_ret != ESP_OK) {
@@ -196,10 +220,14 @@ esp_err_t board_support_init(void)
         }
     }
 
+#if CONFIG_P4HOME_SR_ENABLE
     esp_err_t sr_ret = sr_service_init();
     if (sr_ret != ESP_OK) {
         ESP_LOGW(TAG, "sr service init failed: %s", esp_err_to_name(sr_ret));
     }
+#else
+    ESP_LOGW(TAG, "sr service skipped by config");
+#endif
 
     if (ha_ret == ESP_OK) {
         ha_ret = ha_client_start();

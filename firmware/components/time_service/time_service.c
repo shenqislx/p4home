@@ -155,3 +155,16 @@ uint64_t time_service_last_sync_epoch_ms(void)
     taskEXIT_CRITICAL(&s_state_lock);
     return epoch_ms;
 }
+
+uint64_t time_service_now_epoch_ms(void)
+{
+    if (!time_service_is_synced()) {
+        return 0U;
+    }
+
+    struct timeval tv = {0};
+    if (gettimeofday(&tv, NULL) != 0 || tv.tv_sec <= 0) {
+        return 0U;
+    }
+    return ((uint64_t)tv.tv_sec * 1000ULL) + ((uint64_t)tv.tv_usec / 1000ULL);
+}

@@ -1,0 +1,7 @@
+menu "P4Home Audio Service"
+
+config P4HOME_AUDIO_STARTUP_SELFTEST
+    bool "Run audio startup tone and microphone selftest"
+    default n
+
+endmenu

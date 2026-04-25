@@ -13,6 +13,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "ha_client.h"
+#include "panel_data_store.h"
 
 static const char *TAG = "diagnostics";
 static int64_t s_last_heartbeat_us;
@@ -156,16 +157,45 @@ void diagnostics_service_log_runtime_heartbeat(void)
              delta_us / 1000);
 }
 
+typedef struct {
+    uint32_t total;
+    uint32_t stale;
+    uint32_t unknown;
+    uint32_t offline;
+} diagnostics_panel_counts_t;
+
+static bool diagnostics_count_panel_sensor(const panel_sensor_t *sensor, void *user_data)
+{
+    diagnostics_panel_counts_t *counts = (diagnostics_panel_counts_t *)user_data;
+    if (sensor == NULL || counts == NULL) {
+        return false;
+    }
+    counts->total++;
+    if (sensor->freshness == PANEL_SENSOR_FRESHNESS_STALE) {
+        counts->stale++;
+    } else if (sensor->freshness == PANEL_SENSOR_FRESHNESS_UNKNOWN) {
+        counts->unknown++;
+    }
+    if (!sensor->available) {
+        counts->offline++;
+    }
+    return true;
+}
+
 void diagnostics_service_log_ha_summary(void)
 {
     ha_client_metrics_t metrics = {0};
     if (ha_client_get_metrics(&metrics) != ESP_OK) {
         return;
     }
+    diagnostics_panel_counts_t panel = {0};
+    panel_data_store_iterate(diagnostics_count_panel_sensor, &panel);
 
-    ESP_LOGI(TAG,
+    ESP_LOGW(TAG,
              "ha_summary state=%s reconnect=%" PRIu32 " initial=%" PRIu32 " events=%" PRIu32 " epm=%" PRIu32
-             " connected_ms=%" PRIu64 " last_ready_ms=%" PRIu64 " last_event_ms=%" PRIu64 " error=%s",
+             " connected_ms=%" PRIu64 " last_ready_ms=%" PRIu64 " last_event_ms=%" PRIu64
+             " entities=%" PRIu32 " stale=%" PRIu32 " unknown=%" PRIu32 " offline=%" PRIu32
+             " rejected=%u error=%s",
              ha_client_state_text(),
              metrics.reconnect_count,
              metrics.initial_state_count,
@@ -174,5 +204,10 @@ void diagnostics_service_log_ha_summary(void)
              metrics.connected_duration_ms,
              metrics.last_ready_at_ms,
              metrics.last_event_at_ms,
+             panel.total,
+             panel.stale,
+             panel.unknown,
+             panel.offline,
+             (unsigned)panel_data_store_rejected_count(),
              metrics.last_error_text != NULL ? metrics.last_error_text : "(none)");
 }

@@ -15,10 +15,25 @@ config P4HOME_HA_CLIENT_TIME_WAIT_MS
     range 0 60000
     default 10000
 
+config P4HOME_HA_CLIENT_START_DELAY_MS
+    int "Delay before first HA dial after boot (ms)"
+    range 0 120000
+    default 30000
+
 config P4HOME_HA_CLIENT_BUFFER_SIZE
     int "WebSocket buffer size"
     range 1024 32768
     default 4096
+
+config P4HOME_HA_CLIENT_WORKER_STACK
+    int "HA worker task stack size"
+    range 8192 32768
+    default 12288
+
+config P4HOME_HA_CLIENT_WS_TASK_STACK
+    int "HA WebSocket internal task stack size"
+    range 6144 32768
+    default 8192
 
 config P4HOME_HA_CLIENT_INITIAL_STATES_TIMEOUT_MS
     int "Initial states timeout (ms)"

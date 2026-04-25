@@ -72,7 +72,7 @@ esp_err_t panel_entity_whitelist_load(void)
         if (cJSON_IsString(group)) {
             snprintf(sensor.group, sizeof(sensor.group), "%s", group->valuestring);
         } else {
-            snprintf(sensor.group, sizeof(sensor.group), "%s", "默认");
+            snprintf(sensor.group, sizeof(sensor.group), "%s", "家中");
         }
         sensor.kind = panel_entity_kind_from_text(cJSON_IsString(kind) ? kind->valuestring : NULL);
         sensor.freshness = PANEL_SENSOR_FRESHNESS_UNKNOWN;
