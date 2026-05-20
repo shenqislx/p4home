@@ -3,48 +3,48 @@
   "entities": [
     {
       "entity_id": "sensor.xiaomi_cn_2102782855_w2_temperature_p_2_7",
-      "label": "点位温度",
+      "label": "Point Temp",
       "unit": "C",
       "icon": "thermometer",
-      "group": "起居",
+      "group": "Living",
       "kind": "numeric"
     },
     {
       "entity_id": "sensor.xiaomi_cn_2103924239_w3_temperature_p_2_7",
-      "label": "展示温度",
+      "label": "Display Temp",
       "unit": "C",
       "icon": "thermometer",
-      "group": "起居",
+      "group": "Living",
       "kind": "numeric"
     },
     {
       "entity_id": "sensor.xiaomi_cn_2102549075_w2_temperature_p_2_7",
-      "label": "食室温度",
+      "label": "Dining Temp",
       "unit": "C",
       "icon": "thermometer",
-      "group": "食室",
+      "group": "Dining",
       "kind": "numeric"
     },
     {
       "entity_id": "sensor.linp_cn_blt_3_1ofn3nec8cc02_es4b_illumination_p_2_1005",
-      "label": "光度",
+      "label": "Illuminance",
       "unit": "lx",
       "icon": "light",
-      "group": "起居",
+      "group": "Living",
       "kind": "numeric"
     },
     {
       "entity_id": "sensor.yunmi_cn_410910914_lx14_tds_out_p_4_2",
-      "label": "水TDS",
+      "label": "Water TDS",
       "icon": "water",
-      "group": "水机",
+      "group": "Water",
       "kind": "numeric"
     },
     {
       "entity_id": "weather.forecast_wo_de_jia",
-      "label": "天气",
+      "label": "Weather",
       "icon": "weather",
-      "group": "室外",
+      "group": "Outdoor",
       "kind": "text"
     }
   ]

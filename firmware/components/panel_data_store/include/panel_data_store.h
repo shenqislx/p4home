@@ -28,7 +28,7 @@ typedef struct {
     char group[16];
     panel_sensor_kind_t kind;
     double value_numeric;
-    char value_text[192];
+    char value_text[384];
     uint64_t updated_at_ms;
     panel_sensor_freshness_t freshness;
     bool available;

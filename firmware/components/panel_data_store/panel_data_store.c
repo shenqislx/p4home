@@ -14,6 +14,10 @@
 
 static const char *TAG = "panel_store";
 
+#ifndef CONFIG_P4HOME_WEATHER_ENABLE
+#define CONFIG_P4HOME_WEATHER_ENABLE 0
+#endif
+
 typedef struct {
     panel_sensor_sample_t samples[CONFIG_P4HOME_PANEL_STORE_HISTORY_POINTS];
     size_t count;
@@ -58,6 +62,32 @@ static uint64_t panel_data_store_sample_time_ms(const panel_sensor_t *sensor, ui
         return sensor->updated_at_ms;
     }
     return time_service_last_sync_epoch_ms();
+}
+
+static const char *panel_data_store_weather_condition_text(const char *condition)
+{
+    if (condition == NULL || condition[0] == '\0') {
+        return "--";
+    }
+    if (strcmp(condition, "sunny") == 0 || strcmp(condition, "clear-night") == 0) {
+        return "Sunny";
+    }
+    if (strcmp(condition, "cloudy") == 0 || strcmp(condition, "partlycloudy") == 0) {
+        return "Cloudy";
+    }
+    if (strcmp(condition, "fog") == 0) {
+        return "Fog";
+    }
+    if (strcmp(condition, "rainy") == 0 || strcmp(condition, "pouring") == 0) {
+        return "Rain";
+    }
+    if (strcmp(condition, "snowy") == 0 || strcmp(condition, "snowy-rainy") == 0) {
+        return "Snow";
+    }
+    if (strcmp(condition, "lightning") == 0 || strcmp(condition, "lightning-rainy") == 0) {
+        return "Thunderstorm";
+    }
+    return condition;
 }
 
 static void panel_data_store_append_sample_locked(size_t index,
@@ -220,21 +250,28 @@ static bool panel_data_store_format_weather_summary(const ha_client_state_change
                                      wind_speed_unit, "");
     char state_text[32] = {0};
     panel_data_store_ascii_state(change, state_text, sizeof(state_text));
-    char now_line[72] = {0};
+    const char *condition_text = panel_data_store_weather_condition_text(state_text);
+    const char *temperature_unit_display =
+        (strcmp(temperature_unit_ascii, "C") == 0 || strcmp(temperature_unit_ascii, "°C") == 0)
+            ? "C"
+            : temperature_unit_ascii;
+    char now_line[96] = {0};
     if (has_temperature && has_humidity && has_wind_speed) {
-        snprintf(now_line, sizeof(now_line), "当前 %.16s %.1f%.4s H%.0f%% W%.1f%.8s",
-                 state_text, temperature, temperature_unit_ascii, humidity, wind_speed, wind_speed_unit_ascii);
+        snprintf(now_line, sizeof(now_line), "Now %.1f%s Hum %.0f%% Wind %.1f%s",
+                 temperature, temperature_unit_display, humidity, wind_speed, wind_speed_unit_ascii);
     } else if (has_temperature && has_humidity) {
-        snprintf(now_line, sizeof(now_line), "当前 %.16s %.1f%.4s H%.0f%%",
-                 state_text, temperature, temperature_unit_ascii, humidity);
+        snprintf(now_line, sizeof(now_line), "Now %.1f%s Hum %.0f%%",
+                 temperature, temperature_unit_display, humidity);
     } else if (has_temperature) {
-        snprintf(now_line, sizeof(now_line), "当前 %.16s %.1f%.4s", state_text, temperature, temperature_unit_ascii);
+        snprintf(now_line, sizeof(now_line), "Now %.1f%s", temperature, temperature_unit_display);
     } else {
-        snprintf(now_line, sizeof(now_line), "当前 %.16s", state_text);
+        snprintf(now_line, sizeof(now_line), "Now --");
     }
 
-    char today_line[56] = "今日 晴雨-- 最高-- 最低-- 雨-- AQI--";
-    char tomorrow_line[56] = "明日 晴雨-- 最高-- 最低-- 雨-- AQI--";
+    char today_line[192] = {0};
+    char tomorrow_line[192] = {0};
+    snprintf(today_line, sizeof(today_line), "Today|%.15s|%s|Rain --|AQI --", condition_text, now_line);
+    snprintf(tomorrow_line, sizeof(tomorrow_line), "Tomorrow|--|High -- Low --|Rain --|AQI --");
     cJSON *forecast = panel_data_store_json_array(attrs, "forecast");
     for (int i = 0; forecast != NULL && i < 2; ++i) {
         cJSON *item = cJSON_GetArrayItem(forecast, i);
@@ -270,16 +307,17 @@ static bool panel_data_store_format_weather_summary(const ha_client_state_change
         }
         char *line = i == 0 ? today_line : tomorrow_line;
         size_t line_len = i == 0 ? sizeof(today_line) : sizeof(tomorrow_line);
-        snprintf(line, line_len, "%s %.12s %.6s/%.6s 雨%.6s AQI%.6s",
-                 i == 0 ? "今日" : "明日",
-                 condition != NULL ? condition : "--",
+        snprintf(line, line_len, "%s|%.15s|%sHigh %s Low %s|Rain %s|AQI %s",
+                 i == 0 ? "Today" : "Tomorrow",
+                 panel_data_store_weather_condition_text(condition),
+                 i == 0 ? now_line : "",
                  high_text,
                  low_text,
                  rain_text,
                  aqi_text);
     }
 
-    snprintf(buffer, buffer_len, "%s\n%s\n%s", now_line, today_line, tomorrow_line);
+    snprintf(buffer, buffer_len, "%s\n%s", today_line, tomorrow_line);
 
     cJSON_Delete(attrs);
     return true;
@@ -521,6 +559,13 @@ void panel_data_store_on_ha_state_change(const ha_client_state_change_t *change,
         xSemaphoreGive(s_store.mutex);
         return;
     }
+
+#if CONFIG_P4HOME_WEATHER_ENABLE
+    if (sensor.kind == PANEL_SENSOR_KIND_TEXT && strcmp(sensor.icon, "weather") == 0 &&
+        sensor.available && sensor.value_text[0] != '\0') {
+        return;
+    }
+#endif
 
     sensor.updated_at_ms = change->updated_at_ms;
     sensor.available = change->available;

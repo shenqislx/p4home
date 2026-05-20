@@ -13,15 +13,15 @@ static const char *ui_card_binary_safe_text(const char *text, const char *fallba
 static const char *ui_card_binary_status_text(const panel_sensor_t *sensor)
 {
     if (!sensor->available) {
-        return "offline";
+        return "Offline";
     }
     if (sensor->freshness == PANEL_SENSOR_FRESHNESS_UNKNOWN) {
-        return "loading";
+        return "Loading";
     }
     if (sensor->freshness == PANEL_SENSOR_FRESHNESS_STALE) {
-        return "stale";
+        return "Stale";
     }
-    return "available";
+    return "Online";
 }
 
 static void ui_card_binary_set_labels(lv_obj_t *card, const panel_sensor_t *sensor)
@@ -33,9 +33,9 @@ static void ui_card_binary_set_labels(lv_obj_t *card, const panel_sensor_t *sens
     bool on = strcmp(sensor->value_text, "on") == 0 || strcmp(sensor->value_text, "open") == 0 ||
               strcmp(sensor->value_text, "detected") == 0;
     lv_label_set_text(title, ui_card_binary_safe_text(sensor->label, sensor->entity_id));
-    lv_label_set_text(value, !sensor->available ? "Offline" : (on ? "Active" : "Idle"));
+    lv_label_set_text(value, !sensor->available ? "Offline" : (on ? "Triggered" : "Idle"));
     snprintf(meta_text, sizeof(meta_text), "%s | %s",
-             ui_card_binary_safe_text(sensor->group, "default"),
+             ui_card_binary_safe_text(sensor->group, "Default"),
              ui_card_binary_status_text(sensor));
     lv_label_set_text(meta, meta_text);
     uint32_t color = on ? 0x16331f : 0x2a1f24;

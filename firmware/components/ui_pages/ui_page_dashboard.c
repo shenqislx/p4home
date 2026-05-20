@@ -113,25 +113,22 @@ static void ui_page_dashboard_apply_snapshot_locked(const panel_sensor_t *sensor
 
     s_apply_count++;
     if (s_apply_count <= 8U || (s_apply_count % 16U) == 0U) {
-        ESP_LOGW(TAG, "dashboard_apply count=%" PRIu32 " cards=%u children=%u ha=%s id=%.*s value=%.*s",
+        ESP_LOGW(TAG, "dashboard_apply count=%" PRIu32 " cards=%u children=%u ha=%s id=%.*s value_present=%s",
                  s_apply_count,
                  (unsigned)s_slot_count,
                  (unsigned)ui_page_dashboard_grid_child_count(),
                  ha_client_ready() ? "ready" : "not_ready",
                  24,
                  display_sensor.entity_id,
-                 16,
-                 display_sensor.value_text);
+                 display_sensor.value_text[0] != '\0' ? "yes" : "no");
     }
     if (index >= 0 && ha_client_ready() && display_sensor.value_text[0] != '\0' &&
         !s_slots[index].logged_ready_value) {
         s_slots[index].logged_ready_value = true;
-        ESP_LOGW(TAG, "dashboard_value_ready slot=%d id=%.*s value=%.*s unit=%.*s",
+        ESP_LOGW(TAG, "dashboard_value_ready slot=%d id=%.*s value_present=yes unit=%.*s",
                  index,
                  32,
                  display_sensor.entity_id,
-                 20,
-                 display_sensor.value_text,
                  8,
                  display_sensor.unit);
     }

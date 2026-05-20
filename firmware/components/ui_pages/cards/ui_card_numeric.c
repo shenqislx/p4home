@@ -12,15 +12,15 @@ static const char *ui_card_numeric_safe_text(const char *text, const char *fallb
 static const char *ui_card_numeric_status_text(const panel_sensor_t *sensor)
 {
     if (!sensor->available) {
-        return "offline";
+        return "Offline";
     }
     if (sensor->freshness == PANEL_SENSOR_FRESHNESS_UNKNOWN) {
-        return "loading";
+        return "Loading";
     }
     if (sensor->freshness == PANEL_SENSOR_FRESHNESS_STALE) {
-        return "stale";
+        return "Stale";
     }
-    return "live";
+    return "Online";
 }
 
 static void ui_card_numeric_apply_visual(lv_obj_t *card, const panel_sensor_t *sensor)
@@ -57,7 +57,7 @@ static void ui_card_numeric_set_labels(lv_obj_t *card, const panel_sensor_t *sen
         snprintf(value_text, sizeof(value_text), "%.1f", sensor->value_numeric);
     }
     snprintf(meta_text, sizeof(meta_text), "%s | %s",
-             ui_card_numeric_safe_text(sensor->group, "default"),
+             ui_card_numeric_safe_text(sensor->group, "Default"),
              ui_card_numeric_status_text(sensor));
     lv_label_set_text(value, value_text);
     lv_label_set_text(meta, meta_text);

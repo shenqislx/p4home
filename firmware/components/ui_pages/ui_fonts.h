@@ -10,3 +10,8 @@ static inline const lv_font_t *ui_pages_text_font(void)
     return LV_FONT_DEFAULT;
 #endif
 }
+
+static inline const lv_font_t *ui_pages_weather_font(void)
+{
+    return ui_pages_text_font();
+}

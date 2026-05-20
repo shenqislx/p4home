@@ -19,6 +19,7 @@
 #include "sr_service.h"
 #include "time_service.h"
 #include "touch_service.h"
+#include "weather_service.h"
 
 static const char *TAG = "board_support";
 static bool s_board_initialized;
@@ -173,6 +174,11 @@ esp_err_t board_support_init(void)
         }
     }
 
+    esp_err_t weather_ret = weather_service_init();
+    if (weather_ret != ESP_OK) {
+        ESP_LOGW(TAG, "weather service init failed: %s", esp_err_to_name(weather_ret));
+    }
+
     esp_err_t gateway_ret = gateway_service_init();
     if (gateway_ret != ESP_OK) {
         ESP_LOGW(TAG, "gateway service init failed: %s", esp_err_to_name(gateway_ret));
@@ -233,6 +239,13 @@ esp_err_t board_support_init(void)
         ha_ret = ha_client_start();
         if (ha_ret != ESP_OK) {
             ESP_LOGW(TAG, "ha client start failed: %s", esp_err_to_name(ha_ret));
+        }
+    }
+
+    if (weather_ret == ESP_OK) {
+        weather_ret = weather_service_start();
+        if (weather_ret != ESP_OK) {
+            ESP_LOGW(TAG, "weather service start failed: %s", esp_err_to_name(weather_ret));
         }
     }
 

@@ -53,15 +53,15 @@ static void ui_card_trend_append_text(char *dst, size_t dst_len, const char *tex
 static const char *ui_card_trend_status_text(const panel_sensor_t *sensor)
 {
     if (!sensor->available) {
-        return "offline";
+        return "Offline";
     }
     if (sensor->freshness == PANEL_SENSOR_FRESHNESS_UNKNOWN) {
-        return "loading";
+        return "Loading";
     }
     if (sensor->freshness == PANEL_SENSOR_FRESHNESS_STALE) {
-        return "stale";
+        return "Stale";
     }
-    return "live";
+    return "Online";
 }
 
 static lv_color_t ui_card_trend_accent(const panel_sensor_t *sensor)
@@ -69,7 +69,7 @@ static lv_color_t ui_card_trend_accent(const panel_sensor_t *sensor)
     if (strcmp(sensor->icon, "thermometer") == 0) {
         return lv_color_hex(0x38bdf8);
     }
-    if (strcmp(sensor->icon, "water") == 0 || strcmp(sensor->group, "水机") == 0) {
+    if (strcmp(sensor->icon, "water") == 0 || strcmp(sensor->group, "Water") == 0) {
         return lv_color_hex(0x2dd4bf);
     }
     if (strcmp(sensor->icon, "battery") == 0) {
@@ -91,7 +91,7 @@ static void ui_card_trend_apply_visual(lv_obj_t *card, const panel_sensor_t *sen
     uint32_t bg = 0x101827;
     uint32_t grad = 0x0f2a38;
     uint32_t border = 0x1d4ed8;
-    if (strcmp(sensor->icon, "water") == 0 || strcmp(sensor->group, "水机") == 0) {
+    if (strcmp(sensor->icon, "water") == 0 || strcmp(sensor->group, "Water") == 0) {
         grad = 0x0d342f;
         border = 0x0f766e;
     } else if (strcmp(sensor->icon, "battery") == 0) {
@@ -127,7 +127,13 @@ static void ui_card_trend_format_value(const panel_sensor_t *sensor, char *buffe
         return;
     }
     if (sensor->unit[0] != '\0') {
-        snprintf(buffer, buffer_len, "%.1f %s", sensor->value_numeric, sensor->unit);
+        const char *unit = sensor->unit;
+        if (strcmp(unit, "C") == 0 || strcmp(unit, "°C") == 0) {
+            unit = "C";
+        } else if (strcmp(unit, "lx") == 0) {
+            unit = "lux";
+        }
+        snprintf(buffer, buffer_len, "%.1f %s", sensor->value_numeric, unit);
     } else {
         snprintf(buffer, buffer_len, "%.1f", sensor->value_numeric);
     }
@@ -193,27 +199,27 @@ lv_obj_t *ui_card_trend_create(lv_obj_t *parent, const panel_sensor_t *sensor)
     lv_obj_t *card = lv_obj_create(parent);
     lv_obj_set_user_data(card, ctx);
     lv_obj_add_event_cb(card, ui_card_trend_delete_cb, LV_EVENT_DELETE, ctx);
-    lv_obj_set_size(card, 220, 180);
+    lv_obj_set_size(card, 176, 180);
     lv_obj_set_style_radius(card, 16, LV_PART_MAIN);
     lv_obj_set_style_pad_all(card, 14, LV_PART_MAIN);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
     ctx->title = lv_label_create(card);
-    lv_obj_set_width(ctx->title, 118);
+    lv_obj_set_width(ctx->title, 94);
     lv_label_set_long_mode(ctx->title, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(ctx->title, ui_pages_text_font(), LV_PART_MAIN);
     lv_obj_set_style_text_color(ctx->title, lv_color_hex(0xeaf2ff), LV_PART_MAIN);
     lv_obj_align(ctx->title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     ctx->value = lv_label_create(card);
-    lv_obj_set_width(ctx->value, 82);
+    lv_obj_set_width(ctx->value, 58);
     lv_label_set_long_mode(ctx->value, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(ctx->value, ui_pages_text_font(), LV_PART_MAIN);
     lv_obj_set_style_text_color(ctx->value, lv_color_white(), LV_PART_MAIN);
     lv_obj_align(ctx->value, LV_ALIGN_TOP_RIGHT, 0, 0);
 
     ctx->chart = lv_chart_create(card);
-    lv_obj_set_size(ctx->chart, 192, 92);
+    lv_obj_set_size(ctx->chart, 148, 92);
     lv_obj_align(ctx->chart, LV_ALIGN_TOP_LEFT, 0, 36);
     lv_chart_set_type(ctx->chart, LV_CHART_TYPE_LINE);
     lv_chart_set_point_count(ctx->chart, UI_CARD_TREND_POINTS);
@@ -229,7 +235,7 @@ lv_obj_t *ui_card_trend_create(lv_obj_t *parent, const panel_sensor_t *sensor)
     ctx->series = lv_chart_add_series(ctx->chart, ui_card_trend_accent(sensor), LV_CHART_AXIS_PRIMARY_Y);
 
     ctx->meta = lv_label_create(card);
-    lv_obj_set_width(ctx->meta, 192);
+    lv_obj_set_width(ctx->meta, 148);
     lv_label_set_long_mode(ctx->meta, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(ctx->meta, ui_pages_text_font(), LV_PART_MAIN);
     lv_obj_set_style_text_color(ctx->meta, lv_color_hex(0x9fb4c8), LV_PART_MAIN);
@@ -249,14 +255,12 @@ void ui_card_trend_apply_locked(lv_obj_t *card, const panel_sensor_t *sensor)
     char title_text[56];
     char value_text[80];
     char meta_text[80];
-    ui_card_trend_copy_text(title_text, sizeof(title_text), ui_card_trend_safe_text(sensor->group, "位置"));
+    ui_card_trend_copy_text(title_text, sizeof(title_text), ui_card_trend_safe_text(sensor->group, "Location"));
     ui_card_trend_append_text(title_text, sizeof(title_text), " / ");
     ui_card_trend_append_text(title_text, sizeof(title_text),
                               ui_card_trend_safe_text(sensor->label, sensor->entity_id));
     ui_card_trend_format_value(sensor, value_text, sizeof(value_text));
-    snprintf(meta_text, sizeof(meta_text), "%s | 每小时 | %s",
-             ui_card_trend_safe_text(sensor->icon, "sensor"),
-             ui_card_trend_status_text(sensor));
+    snprintf(meta_text, sizeof(meta_text), "Hourly | %s", ui_card_trend_status_text(sensor));
 
     lv_label_set_text(ctx->title, title_text);
     lv_label_set_text(ctx->value, value_text);
