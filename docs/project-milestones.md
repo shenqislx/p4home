@@ -12,10 +12,11 @@
 
 ## 2. 当前主线
 
-项目当前主线已调整为：
+项目当前主线状态：
 
-- **优先目标**：连接 `Home Assistant`，以图形化方式展示家庭传感器数据
-- **暂缓目标**：本地语音对话、米家直接联动、本地 LLM 节点
+- **已落地目标**：连接 `Home Assistant`，以图形化方式展示家庭传感器数据
+- **下一阶段目标**：控制回写与米家联动
+- **暂缓目标**：本地语音对话、绕过 HA 的米家直接联动、本地 LLM 节点
 
 对应的关键决策（`2026-04-17` 定版）：
 
@@ -36,9 +37,9 @@
 - `M1`：本地底座 bring-up —— 已完成
 - `M2`：原生 UI 骨架 —— 已完成
 - `M3`：音频与本地语音前端 —— 骨架已完成，主线暂停
-- `M4`：网络联网与 `Home Assistant` WebSocket 接入（读侧）—— **当前主线**
-- `M5`：图形化传感器仪表盘 UI —— **当前主线**
-- `M6`：控制回写与米家联动
+- `M4`：网络联网与 `Home Assistant` WebSocket 接入（读侧）—— 已实现，环境可用时完成读侧闭环
+- `M5`：图形化传感器仪表盘 UI —— 已完成
+- `M6`：控制回写与米家联动 —— **下一阶段主线**
 - `M7`：本地语音对话与 AI 节点（延后启用）
 - `M8`：产品化打磨与发布准备
 
@@ -175,7 +176,7 @@
 
 ### 交付物
 
-- `network_service` 完成 Wi‑Fi STA 真正连接与重连（目前仅有 `esp_netif`/STA netif 骨架）
+- `network_service` 完成 Wi‑Fi STA 真正连接与重连
 - `time_service`：`SNTP` 时间同步，用于状态时间戳与 UI 时钟
 - `settings_service` 扩展：
   - `ha_url`
@@ -218,6 +219,13 @@
 - 米家集成（归 `M6`）
 - SoftAP/BLE 配网（推后到 `M8` 打磨阶段）
 
+### 状态
+
+- 已实现：
+  - Wi‑Fi STA、IP 获取、SNTP、HA 凭证读取、HA WebSocket client、状态订阅、重连指标、`panel_data_store`、实体白名单
+  - 启动日志已包含 `VERIFY:network:*`、`VERIFY:time:*`、`VERIFY:ha:reconnect_ready`、`VERIFY:ha:metrics_exported`、`VERIFY:panel_store:ready`、`VERIFY:panel_whitelist:parsed`
+- 当前硬件验证中，Wi‑Fi / SNTP / panel store / whitelist 均通过；HA `ws_connected/authenticated/subscribed/initial_states_loaded` 在 `CONFIG_P4HOME_HA_CLIENT_START_DELAY_MS` 延迟窗口内会报告 `PENDING_DELAY`，HA 不可用时不作为 UI 主线阻塞项。
+
 ## M5：图形化传感器仪表盘 UI
 
 ### 目标
@@ -228,9 +236,10 @@
 
 - 新增 `ui_page_dashboard`，作为首页替代现有自检首页
 - 至少三种卡片形态：
-  - 数值卡：温度 / 湿度 / 功率 / 照度等
+  - 数值趋势卡：温度 / 照度 / 水质等
   - 二值卡：门窗 / 人体 / 在家
-  - 多行卡：天气摘要 / 能耗摘要
+  - 多行卡：普通文本摘要
+  - 天气卡：Open-Meteo 两日天气与空气质量摘要
 - UI 状态机：`loading / ready / stale / disconnected / empty`
 - 顶部状态栏：Wi‑Fi、HA 连接、时间
 - 分组展示（如 客厅 / 卧室 / 门窗 / 能耗）
@@ -248,8 +257,17 @@
 
 ### 范围外
 
-- 趋势图 / 历史曲线（可选特性，归 `M8` 或单独立 plan）
+- HA 历史 API 查询与长期历史曲线
 - 控制类控件（归 `M6`）
+
+### 状态
+
+- 已完成：
+  - `ui_page_dashboard` 已作为默认业务首页，启动页默认为 `dashboard`
+  - 顶部状态栏已接入 Wi‑Fi / HA / 时间
+  - 数值趋势卡、二值卡、多行卡、天气卡均已接入
+  - 白名单当前渲染 6 张卡片，启动日志输出 `VERIFY:ui:dashboard_rendered:PASS` 与 `VERIFY:ui:dashboard_card_count:n=6`
+  - UI 显示文本已统一为英文
 
 ## M6：控制回写与米家联动
 
@@ -345,15 +363,15 @@
 
 1. `M0` / `M1` / `M2` 已完成
 2. `M3` 骨架已完成，本轮主线暂停
-3. 当前聚焦 `M4` → `M5`，完成“HA 传感器图形化展示”MVP
-4. 再进入 `M6`（控制回写 / 米家）
+3. `M4` → `M5` 已完成“家庭传感器图形化展示”MVP
+4. 下一步进入 `M6`（控制回写 / 米家）
 5. 待 `M6` 稳定后重启 `M7` 本地语音对话
 6. 最后统一进入 `M8` 产品化打磨与发布
 
 关键门槛：
 
-- `M4` 的 `ha_client` 若做不抽象，UI/业务会反复重写
-- `M5` 的数据绑定若直连 HA，未来换 Panel Gateway 会重做
+- `M4` 的 `ha_client` 已保持组件边界；后续 `M6` 扩展控制回写时继续避免 UI 直连协议细节
+- `M5` 的数据绑定已经通过 `panel_data_store`，后续换 Panel Gateway 时优先保持 store API 稳定
 - `M7` 在 `M5/M6` 不稳之前重启，只会互相干扰
 - `M3` 骨架在 `M7` 启用前应保持最小维护，不因主线推进而回归
 
@@ -363,7 +381,7 @@
 
 - `所属 Milestone: Mx`
 
-当前主线（`M4` → `M5`）对应的 plan 优先级序列：
+已落地的 `M4` → `M5` plan 序列：
 
 | 序号 | plan 名称                                   | milestone | 依赖              |
 |------|---------------------------------------------|-----------|-------------------|
@@ -377,6 +395,9 @@
 | 8    | `ui-dashboard-sensor-cards`                 | `M5`      | 6, 7              |
 | 9    | `ui-connection-status-banner`               | `M5`      | 6                 |
 | 10   | `ha-client-reconnect-and-diagnostics`       | `M5`/`M8` | 4, 5              |
-| 11   | `ha-history-mini-chart`（可选）              | `M5`/`M8` | 4, 8              |
+
+已删除的过时计划项：
+
+- 原 HA 历史图表计划不再属于当前主线序列。当前固件已在数值卡内使用本地 `panel_data_store` 采样渲染短趋势线；HA 历史 API 查询与长期历史曲线不再是 `M5` 验收项，后续如需要应在 `M8` 重新立独立 plan。
 
 后续里程碑（`M6` 之后）的 plan 序列在进入对应阶段前再细化，避免提前锁死设计。

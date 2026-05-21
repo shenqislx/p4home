@@ -289,21 +289,21 @@
 - 种子策略四条路径（空种子、Kconfig==NVS、Kconfig!=NVS、`SEED_NVS_ON_BOOT=n`）的行为与 §6.2 描述一致
 - `README.md` 描述已同步更新
 
-## 9. review 准备
-
-在邀请用户 review 前补充：
-
-- 已完成的实现项
-- 已完成的验证项
-- 待用户重点查看的文件
+## 9. review 结果
 
 ### 已完成的实现项
 
-（待实现后补充）
+- `settings_service` 已扩展 HA URL、token、TLS 校验配置与启动页配置。
+- `board_support` / `app_main` 已接入 HA 凭证存在性验证。
+- dashboard 启动页已落到 `settings_service` 的 startup page 路径。
 
 ### 已完成的验证项
 
-（待实现后补充）
+- 本地 EVB 启动摘要显示 `settings service ready=yes`。
+- 启动日志包含：
+  - `VERIFY:settings:nvs:PASS`
+  - `VERIFY:settings:ha_credentials_present:PASS`
+- 启动页当前为 `dashboard`，与业务首页现状一致。
 
 ### 待重点查看的文件
 

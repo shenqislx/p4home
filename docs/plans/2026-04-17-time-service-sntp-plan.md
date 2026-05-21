@@ -259,21 +259,21 @@
 - 现有 `VERIFY:` 全部不回归；`factory` 分区剩余不低于 `1.5%`
 - `time_service/README.md` 描述职责与 `Kconfig` / `VERIFY` 清单
 
-## 9. review 准备
-
-在邀请用户 review 前补充：
-
-- 已完成的实现项
-- 已完成的验证项
-- 待用户重点查看的文件
+## 9. review 结果
 
 ### 已完成的实现项
 
-（待实现后补充）
+- `time_service` 已接入 SNTP 启动、首次同步等待、ISO8601 格式化与同步状态查询。
+- `board_support` / `app_main` 已接入 `VERIFY:time:sync_started` 与 `VERIFY:time:sync_acquired`。
+- 顶部状态栏已消费 `time_service_format_now_iso8601()` 显示当前时间。
 
 ### 已完成的验证项
 
-（待实现后补充）
+- 本地 EVB 烧录启动后，最终日志显示 `time synced=yes`，本地时间可格式化输出。
+- 启动日志包含：
+  - `VERIFY:time:sync_started:PASS`
+  - `VERIFY:time:sync_acquired:PASS`
+- 最新一次启动中首次 5s 等待曾超时，但后续启动摘要显示已同步；这是异步 SNTP 收敛行为，不影响 UI 主线。
 
 ### 待重点查看的文件
 

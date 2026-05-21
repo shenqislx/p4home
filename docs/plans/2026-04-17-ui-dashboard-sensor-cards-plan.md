@@ -53,7 +53,7 @@
 不包含：
 
 - 顶部 Wi‑Fi / HA / 时间连接状态栏（归 plan 9 `ui-connection-status-banner`）
-- 历史曲线 / `lv_chart` 卡片（归 plan 11 `ha-history-mini-chart`，可选）
+- HA 历史 API 曲线（当前主线不做；实际数值卡已使用本地 `panel_data_store` 采样趋势线）
 - 控制类控件（开关、亮度、场景调用）：归 `M6` `control-writeback`
 - 语音页：归 `M7`
 - HA 重连策略、metrics 打点：归 plan 10
@@ -285,22 +285,33 @@ slot 遍历 → freshness 变化 → card_apply_visual_state_locked(STALE)
 - plan 8 ICD 三个符号 `ui_page_dashboard_init` / `_show` / `_on_sensor_update` 完整导出
 - `ui_pages/README.md` 与 `display_service.h` 注释已同步更新，线程模型警告显式写明
 
-## 9. review 准备
-
-在邀请用户 review 前补充：
-
-- 已完成的实现项
-- 已完成的验证项
-- 待用户重点查看的文件
+## 9. review 结果
 
 ### 已完成的实现项
 
-（待实现后补充）
+- `ui_page_dashboard` 已作为默认 dashboard 页面接入 `ui_pages`。
+- 已实现并接入：
+  - 数值趋势卡 `ui_card_trend`
+  - 二值卡 `ui_card_binary`
+  - 多行文本卡 `ui_card_multiline`
+  - 天气卡 `ui_card_weather`
+- dashboard 从 `panel_data_store` 构建卡片，支持后续 observer 更新。
+- UI 显示文案已统一为英文。
 
 ### 已完成的验证项
 
-（待实现后补充）
+- `idf.py build` 通过。
+- 本地烧录启动日志包含：
+  - `ui_dashboard: dashboard_visible=yes cards=6 children=6`
+  - `VERIFY:ui:dashboard_rendered:PASS`
+  - `VERIFY:ui:dashboard_card_count:n=6`
+- Open-Meteo 天气服务已更新天气卡：`weather_ready source=open-meteo ... air=ok`。
 
 ### 待重点查看的文件
 
-（待实现后补充）
+- `firmware/components/ui_pages/ui_page_dashboard.c`
+- `firmware/components/ui_pages/cards/ui_card_trend.c`
+- `firmware/components/ui_pages/cards/ui_card_binary.c`
+- `firmware/components/ui_pages/cards/ui_card_multiline.c`
+- `firmware/components/ui_pages/cards/ui_card_weather.c`
+- `firmware/components/panel_data_store/panel_entities.json`

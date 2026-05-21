@@ -209,7 +209,7 @@ const char   *ha_client_last_error_text(void);
    - 在既有 Wi‑Fi 短等之后，调用 `board_support_ha_wait_ready(CONFIG_P4HOME_HA_CLIENT_HANDSHAKE_TIMEOUT_MS)`
    - 追加 `VERIFY:ha:ws_connected` / `VERIFY:ha:authenticated` 两条 marker；标记 PASS 判定条件见 §4.5
 9. `firmware/components/ha_client/README.md`：写清「本 plan 只负责握手到 `READY`，订阅在 plan 5，重连在 plan 10」、URL 归一化规则、Kconfig 键、VERIFY 列表
-10. 保留本地自测钩子：在 `ha_client.c` 顶部加 `// TODO(plan-5): subscribe_events` / `// TODO(plan-10): reconnect policy` 注释，防止下游 plan 把逻辑塞错位置
+10. 保留本地自测钩子：订阅与重连策略已经分别由后续 plan 落地，review 时确认职责仍停留在 `ha_client` 内部，未泄漏到 UI 层
 
 用户本机侧（agent 给命令，用户在本机 IDF 环境执行）：
 
@@ -295,7 +295,7 @@ const char   *ha_client_last_error_text(void);
 - **事件回调不能阻塞**：`WEBSOCKET_EVENT_DATA` 回调运行在 `esp_websocket_client` 内部任务；JSON 解析必须 O(text-frame-size) 并立即返回，禁止在回调里 `wait_ready` / `settings_service_*` 重活
 - **凭证敏感日志**：token 必须全程 `***<last4>` 脱敏，对齐 plan 3 的 `settings_service_ha_log_summary`；review 时需要抽查串口日志与 `ESP_LOGD` 路径，避免 DEBUG 级误打 token 全文
 - **`board_support_init` 阻塞时间**：`ha_client_init` / `ha_client_start` 都设计为非阻塞；但如果 future 改成同步等 `READY`，会把 `board_support_init` 整体拖到 ≥ 10s，影响 UI 早期渲染。当前实现必须保持「start 返回即走，wait 留给 `app_main`」的边界
-- **one-shot retry 与 plan 10 的职责边界**：本 plan 的简单 retry 只是为了减少「握手第一次失败就直接 `VERIFY:FAIL`」的概率；plan 10 落地后 **必须把这段 retry 挪走或改写**，否则会跟指数退避打架。实现阶段在注释里留好 `// TODO(plan-10)` 钩子
+- **one-shot retry 与 plan 10 的职责边界**：本 plan 的简单 retry 只是为了减少「握手第一次失败就直接 `VERIFY:FAIL`」的概率；后续重连策略已由 plan 10 承接，review 时应确认不会和指数退避路径重复调度
 - **`auth_ok` 之后的沉默期**：本 plan 不发 `subscribe_events` / `get_states`，因此 HA 侧会看到一个「登录但什么都不订阅」的 session。联调时如果 HA 侧做 session 审计，可能出现告警日志，属预期
 
 ## 8. 完成定义
@@ -312,21 +312,19 @@ const char   *ha_client_last_error_text(void);
 - `ha_client/README.md` 描述已同步更新，说明 WebSocket 接入路线、URL 归一化规则、与下游 plan 的职责边界
 - 现有 `M0`~`M3`、plan 1/2/3 的 `VERIFY:` 标记全部不回归
 
-## 9. review 准备
-
-在邀请用户 review 前补充：
-
-- 已完成的实现项
-- 已完成的验证项
-- 待用户重点查看的文件
+## 9. review 结果
 
 ### 已完成的实现项
 
-（待实现后补充）
+- `ha_client` 组件已建立 WebSocket client、鉴权状态机、等待接口与状态查询。
+- `settings_service` 的 HA URL/token/TLS 配置已作为上游输入。
+- `board_support` / `app_main` 已接入 HA ready 等待与 `VERIFY:ha:ws_connected/authenticated` 标记。
 
 ### 已完成的验证项
 
-（待实现后补充）
+- 固件构建通过，`esp_websocket_client` 已纳入组件依赖。
+- 本地启动日志会输出 HA 状态摘要；在 HA 启动延迟窗口内，`ws_connected/authenticated` 以 `PENDING_DELAY` 标记而非误报失败。
+- HA 不可用时 dashboard 和其它子系统仍正常启动，Wi‑Fi、time、panel store、UI 验证不受阻塞。
 
 ### 待重点查看的文件
 

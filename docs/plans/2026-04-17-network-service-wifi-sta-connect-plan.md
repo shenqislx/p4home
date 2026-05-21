@@ -238,21 +238,24 @@
 - `network_service` 对外暴露 `wait_connected` 接口，可被后续 `time_service` / `ha_client` 调用
 - `network_service/README.md` 描述已同步更新，说明 ESP-Hosted + C6 路线
 
-## 9. review 准备
-
-在邀请用户 review 前补充：
-
-- 已完成的实现项
-- 已完成的验证项
-- 待用户重点查看的文件
+## 9. review 结果
 
 ### 已完成的实现项
 
-（待实现后补充）
+- `network_service` 已接入 ESP-Hosted Wi‑Fi STA 启动、连接、IP 获取与状态查询。
+- `board_support` / `app_main` 已接入网络启动摘要与 `VERIFY:network:*` 标记。
+- 状态栏与 dashboard 可直接消费 `network_service_wifi_has_ip()` / `network_service_ip_text()`。
 
 ### 已完成的验证项
 
-（待实现后补充）
+- 本地 EVB 烧录后 Wi‑Fi 成功获取 IP：`192.168.110.43`。
+- 启动日志包含并通过：
+  - `VERIFY:network:stack:PASS`
+  - `VERIFY:network:event_loop:PASS`
+  - `VERIFY:network:sta_netif:PASS`
+  - `VERIFY:network:wifi_started:PASS`
+  - `VERIFY:network:wifi_connected:PASS`
+  - `VERIFY:network:ip_acquired:PASS`
 
 ### 待重点查看的文件
 

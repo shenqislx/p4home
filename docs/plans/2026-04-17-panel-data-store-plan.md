@@ -53,7 +53,7 @@
 - `cJSON` 对 `attributes_json` 的深度解析（store 只做透传/节选，UI 需要更多字段时在 plan 8 里扩展 `panel_sensor_t` 或增加 getter）
 - UI 渲染、卡片、状态栏（归 plan 8/9）
 - `ha_client` 重连、metrics、断线判定（归 plan 10）
-- 历史曲线、时序数据（归 plan 11 可选）
+- HA 历史 API 查询与长期曲线（当前主线不做；数值卡只使用本地短采样趋势）
 - 持久化到 NVS（store 本身是易失；重启后由 `get_states` 全量恢复）
 - 多 observer 订阅（本 plan 只做单槽；如未来 plan 9 也要监听，再扩展为小型数组）
 
@@ -256,22 +256,25 @@ ha_client_set_state_change_callback(&panel_data_store_on_ha_state_change, NULL);
 - `board_support_log_summary` 输出包含 store 行；现有 `VERIFY:` 基线全部不回归
 - `README.md` 描述线程模型、stale/disconnected 区分、entity_id 长度约束
 
-## 9. review 准备
-
-在邀请用户 review 前补充：
-
-- 已完成的实现项
-- 已完成的验证项
-- 待用户重点查看的文件
+## 9. review 结果
 
 ### 已完成的实现项
 
-（待实现后补充）
+- `panel_data_store` 已实现 register/update/snapshot/iterate/history samples/freshness tick/observer。
+- HA state change 可转为 `panel_sensor_t`，并支持天气摘要格式化。
+- 数值卡使用 store 的本地 sample history 渲染短趋势线。
 
 ### 已完成的验证项
 
-（待实现后补充）
+- 本地启动日志包含：
+  - `VERIFY:panel_store:ready:PASS`
+  - `VERIFY:panel_store:entity_count:n=6`
+- dashboard 启动时显示 `cards=6 children=6`，与 store / whitelist 数量一致。
+- 在 HA 未 ready 时，store 仍可提供白名单 seed 与 weather service 更新。
 
 ### 待重点查看的文件
 
-（待实现后补充）
+- `firmware/components/panel_data_store/include/panel_data_store.h`
+- `firmware/components/panel_data_store/panel_data_store.c`
+- `firmware/components/ui_pages/ui_page_dashboard.c`
+- `firmware/components/ui_pages/cards/ui_card_trend.c`

@@ -200,22 +200,24 @@
 - `firmware/components/ui_pages/README.md` 已更新，包含 banner 接入方式与 API 描述
 - `idf.py size` 与接入前对比记录在 review 附件
 
-## 9. review 准备
-
-在邀请用户 review 前补充：
-
-- 已完成的实现项
-- 已完成的验证项
-- 待用户重点查看的文件
+## 9. review 结果
 
 ### 已完成的实现项
 
-（待实现后补充）
+- `ui_status_banner` 已接入 dashboard 顶部。
+- 状态栏每秒刷新 Wi‑Fi、HA、时间三段文本，并做文本缓存避免无效重绘。
+- 状态栏文案已统一为英文。
 
 ### 已完成的验证项
 
-（待实现后补充）
+- 本地启动日志包含：
+  - `VERIFY:ui:status_banner_ready:PASS`
+  - `VERIFY:ui:dashboard_rendered:PASS`
+- 最新硬件验证中 Wi‑Fi 已显示真实 IP，time service 后续同步成功，HA 未 ready 时状态栏走降级路径。
 
 ### 待重点查看的文件
 
-（待实现后补充）
+- `firmware/components/ui_pages/ui_status_banner.c`
+- `firmware/components/ui_pages/include/ui_status_banner.h`
+- `firmware/components/ui_pages/ui_page_dashboard.c`
+- `firmware/components/ui_pages/Kconfig.projbuild`

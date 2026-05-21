@@ -266,22 +266,24 @@
 - 所有现有 `VERIFY:` 标记不回归
 - 新增的 `P4HOME_ENTITY_WHITELIST_EMBEDDED` / `_MAX_ENTITIES` 两项 Kconfig 可在 `menuconfig` 见到并有合理默认
 
-## 9. review 准备
-
-在邀请用户 review 前补充：
-
-- 已完成的实现项
-- 已完成的验证项
-- 待用户重点查看的文件
+## 9. review 结果
 
 ### 已完成的实现项
 
-（待实现后补充）
+- `panel_entities.json` 已打包进固件并在启动时解析。
+- 白名单条目已包含英文 `label/group`、`unit`、`icon`、`kind`，供 dashboard 卡片选择与显示。
+- 默认白名单当前覆盖 6 个实体：温度、照度、水质和天气。
 
 ### 已完成的验证项
 
-（待实现后补充）
+- 本地启动日志包含：
+  - `VERIFY:panel_whitelist:parsed:PASS`
+  - `VERIFY:panel_store:entity_count:n=6`
+  - `VERIFY:ui:dashboard_card_count:n=6`
+- UI 数据源中已无中文 label/group，卡片显示文本统一为英文。
 
 ### 待重点查看的文件
 
-（待实现后补充）
+- `firmware/components/panel_data_store/panel_entities.json`
+- `firmware/components/panel_data_store/panel_entity_whitelist.c`
+- `firmware/components/panel_data_store/include/panel_entity_whitelist.h`

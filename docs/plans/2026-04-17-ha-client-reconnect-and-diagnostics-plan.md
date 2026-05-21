@@ -286,22 +286,24 @@ agent 侧（实现阶段由后续 agent 执行）：
 - 2 小时长跑：`ha_summary` 每 10s 一行、`heap` 无持续增长、串口无丢行。
 - README（`ha_client` / `diagnostics_service`）记录新能力与边界（`restart` 使用建议、Kconfig 键位、metrics 字段语义）。
 
-## 9. review 准备
-
-在邀请用户 review 前补充：
-
-- 已完成的实现项
-- 已完成的验证项
-- 待用户重点查看的文件
+## 9. review 结果
 
 ### 已完成的实现项
 
-（待实现后补充）
+- `ha_client` 已暴露 metrics / reconnect ready 相关状态，`app_main` 输出 `VERIFY:ha:reconnect_ready` 与 `VERIFY:ha:metrics_exported`。
+- HA 不可用或延迟启动时，系统保持 dashboard、network、time、panel store 可用，不因 HA 阻塞主 UI。
+- 顶部状态栏已接入 HA ready 与事件速率展示。
 
 ### 已完成的验证项
 
-（待实现后补充）
+- 本地烧录启动日志包含：
+  - `VERIFY:ha:reconnect_ready:PASS`
+  - `VERIFY:ha:metrics_exported:PASS`
+- HA 当前未 ready 时，启动摘要显示 `ha ready=no state=IDLE subscribed=no initial_states=0 error=idle`，其它 VERIFY 不回归。
 
 ### 待重点查看的文件
 
-（待实现后补充）
+- `firmware/components/ha_client/include/ha_client.h`
+- `firmware/components/ha_client/ha_client.c`
+- `firmware/main/app_main.c`
+- `firmware/components/ui_pages/ui_status_banner.c`

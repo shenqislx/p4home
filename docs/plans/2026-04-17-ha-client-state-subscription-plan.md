@@ -64,7 +64,7 @@
 - 实体白名单过滤（归 plan 7 `panel-entity-whitelist-config`）
 - UI 侧任何渲染、状态栏、卡片（归 plan 8 / plan 9）
 - `call_service` 等控制回写（归 `M6`）
-- 历史数据查询（归可选 plan 11 `ha-history-mini-chart`）
+- HA 历史数据查询（当前主线不做；如需要长期曲线，后续在 `M8` 重新立独立 plan）
 
 ## 4. 设计方案
 
@@ -284,21 +284,19 @@ SUB_STEADY
 - `firmware/components/ha_client/README.md` 已更新，明确：订阅子状态机、cJSON 内存边界、回调线程契约、新 `VERIFY` 标记含义
 - plan 6 `panel-data-store` 可以**只依赖**本 plan 的 5 个导出符号完成数据接入，不需要触碰 `ha_client` 内部
 
-## 9. review 准备
-
-在邀请用户 review 前补充：
-
-- 已完成的实现项
-- 已完成的验证项
-- 待用户重点查看的文件
+## 9. review 结果
 
 ### 已完成的实现项
 
-（待实现后补充）
+- `ha_client` 已实现 state_changed 订阅、初始 states 拉取、订阅 ready 状态与 initial state count。
+- `panel_data_store` 已通过 callback 消费 HA state change，并把白名单实体转为 UI snapshot。
+- `app_main` 已接入 `VERIFY:ha:subscribed` 与 `VERIFY:ha:initial_states_loaded`。
 
 ### 已完成的验证项
 
-（待实现后补充）
+- 固件构建通过，HA 订阅路径与 panel store 能同时链接运行。
+- 当前硬件验证环境下 HA 会进入启动延迟/不可用路径，因此 `subscribed` / `initial_states_loaded` 可见 `PENDING_DELAY`；这和当前 HA 环境状态一致，不再作为 dashboard 渲染阻塞。
+- dashboard 在 HA 未 ready 时仍可渲染白名单卡片和 Open-Meteo 天气卡，不崩溃。
 
 ### 待重点查看的文件
 
