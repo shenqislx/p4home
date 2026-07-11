@@ -12,6 +12,7 @@ typedef enum {
     PANEL_SENSOR_KIND_BINARY,
     PANEL_SENSOR_KIND_TEXT,
     PANEL_SENSOR_KIND_TIMESTAMP,
+    PANEL_SENSOR_KIND_ACTION,
 } panel_sensor_kind_t;
 
 typedef enum {
@@ -26,6 +27,9 @@ typedef struct {
     char unit[8];
     char icon[24];
     char group[16];
+    char control_domain[16];
+    char control_on_service[24];
+    char control_off_service[24];
     panel_sensor_kind_t kind;
     double value_numeric;
     char value_text[384];

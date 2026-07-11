@@ -18,6 +18,7 @@
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "network_service.h"
 #include "settings_service.h"
@@ -31,6 +32,7 @@ static const char *TAG = "ha_client";
 #define HA_CLIENT_SUB_READY_BIT     BIT3
 #define HA_CLIENT_INITIAL_DONE_BIT  BIT4
 #define HA_CLIENT_STOP_BIT          BIT5
+#define HA_CLIENT_CALL_DONE_BIT     BIT6
 #define HA_CLIENT_MAX_INITIAL_ENTITIES 32U
 #define HA_CLIENT_ENTITY_ID_MAX_LEN 128U
 
@@ -42,6 +44,9 @@ static const char *TAG = "ha_client";
 #endif
 #ifndef CONFIG_P4HOME_HA_CLIENT_WS_TASK_STACK
 #define CONFIG_P4HOME_HA_CLIENT_WS_TASK_STACK 8192
+#endif
+#ifndef CONFIG_P4HOME_HA_CLIENT_CALL_SERVICE_TIMEOUT_MS
+#define CONFIG_P4HOME_HA_CLIENT_CALL_SERVICE_TIMEOUT_MS 8000
 #endif
 
 typedef enum {
@@ -55,6 +60,7 @@ typedef enum {
     HA_PENDING_NONE = 0,
     HA_PENDING_SUBSCRIBE,
     HA_PENDING_GET_STATES,
+    HA_PENDING_CALL_SERVICE,
 } ha_pending_type_t;
 
 typedef struct {
@@ -75,6 +81,7 @@ typedef struct {
     ha_client_state_t state;
     ha_sub_state_t sub_state;
     EventGroupHandle_t event_group;
+    SemaphoreHandle_t call_mutex;
     TaskHandle_t worker_task;
     esp_websocket_client_handle_t ws;
     portMUX_TYPE lock;
@@ -91,7 +98,10 @@ typedef struct {
     size_t initial_entity_count;
     char normalized_url[256];
     char last_error[48];
+    char last_call_error[80];
     char token_masked[24];
+    uint32_t last_call_id;
+    bool last_call_success;
     uint32_t initial_state_count;
     uint32_t total_event_count;
     uint32_t reconnect_count;
@@ -116,12 +126,14 @@ static ha_client_state_ctx_t s_ctx = {
     .state = HA_CLIENT_STATE_IDLE,
     .sub_state = HA_SUB_STATE_IDLE,
     .event_group = NULL,
+    .call_mutex = NULL,
     .worker_task = NULL,
     .ws = NULL,
     .lock = portMUX_INITIALIZER_UNLOCKED,
     .next_message_id = 1U,
     .normalized_url = {0},
     .last_error = "idle",
+    .last_call_error = "idle",
     .token_masked = {0},
 };
 
@@ -146,6 +158,14 @@ static void ha_client_set_state_locked(ha_client_state_t state)
 static void ha_client_set_error_locked(const char *reason)
 {
     snprintf(s_ctx.last_error, sizeof(s_ctx.last_error), "%s", reason != NULL ? reason : "unknown");
+}
+
+static void ha_client_set_call_result_locked(uint32_t id, bool success, const char *reason)
+{
+    s_ctx.last_call_id = id;
+    s_ctx.last_call_success = success;
+    snprintf(s_ctx.last_call_error, sizeof(s_ctx.last_call_error), "%s",
+             reason != NULL && reason[0] != '\0' ? reason : (success ? "ok" : "unknown"));
 }
 
 static uint32_t ha_client_alloc_message_id(void)
@@ -530,6 +550,27 @@ static void ha_client_handle_result(cJSON *root)
         s_ctx.sub_state = HA_SUB_STATE_STEADY;
         taskEXIT_CRITICAL(&s_ctx.lock);
         xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_SUB_READY_BIT | HA_CLIENT_INITIAL_DONE_BIT);
+        return;
+    }
+
+    if (pending_type == HA_PENDING_CALL_SERVICE) {
+        cJSON *success = cJSON_GetObjectItemCaseSensitive(root, "success");
+        cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+        cJSON *message = cJSON_IsObject(error) ? cJSON_GetObjectItemCaseSensitive(error, "message") : NULL;
+        cJSON *code = cJSON_IsObject(error) ? cJSON_GetObjectItemCaseSensitive(error, "code") : NULL;
+        char reason[80] = {0};
+        if (cJSON_IsString(message)) {
+            snprintf(reason, sizeof(reason), "%s", message->valuestring);
+        } else if (cJSON_IsString(code)) {
+            snprintf(reason, sizeof(reason), "%s", code->valuestring);
+        } else {
+            snprintf(reason, sizeof(reason), "%s", cJSON_IsTrue(success) ? "ok" : "call_service_failed");
+        }
+
+        taskENTER_CRITICAL(&s_ctx.lock);
+        ha_client_set_call_result_locked((uint32_t)id_item->valuedouble, cJSON_IsTrue(success), reason);
+        taskEXIT_CRITICAL(&s_ctx.lock);
+        xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_CALL_DONE_BIT);
     }
 }
 
@@ -1099,8 +1140,11 @@ esp_err_t ha_client_init(void)
 
     s_ctx.event_group = xEventGroupCreate();
     ESP_RETURN_ON_FALSE(s_ctx.event_group != NULL, ESP_ERR_NO_MEM, TAG, "ha event group alloc failed");
+    s_ctx.call_mutex = xSemaphoreCreateMutex();
+    ESP_RETURN_ON_FALSE(s_ctx.call_mutex != NULL, ESP_ERR_NO_MEM, TAG, "ha call mutex alloc failed");
     s_ctx.initialized = true;
     snprintf(s_ctx.last_error, sizeof(s_ctx.last_error), "idle");
+    snprintf(s_ctx.last_call_error, sizeof(s_ctx.last_call_error), "idle");
     return ESP_OK;
 }
 
@@ -1289,4 +1333,152 @@ esp_err_t ha_client_get_metrics(ha_client_metrics_t *metrics)
     taskEXIT_CRITICAL(&s_ctx.lock);
 
     return ESP_OK;
+}
+
+static bool ha_client_validate_call_text(const char *text)
+{
+    if (text == NULL || text[0] == '\0') {
+        return false;
+    }
+    for (const char *p = text; *p != '\0'; ++p) {
+        const char ch = *p;
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+              (ch >= '0' && ch <= '9') || ch == '_' || ch == '.')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static esp_err_t ha_client_build_call_json(const ha_client_call_service_request_t *request,
+                                           uint32_t id, char **out_json)
+{
+    ESP_RETURN_ON_FALSE(request != NULL && out_json != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "call_service args are required");
+    ESP_RETURN_ON_FALSE(ha_client_validate_call_text(request->domain), ESP_ERR_INVALID_ARG, TAG,
+                        "invalid call_service domain");
+    ESP_RETURN_ON_FALSE(ha_client_validate_call_text(request->service), ESP_ERR_INVALID_ARG, TAG,
+                        "invalid call_service service");
+
+    cJSON *root = cJSON_CreateObject();
+    ESP_RETURN_ON_FALSE(root != NULL, ESP_ERR_NO_MEM, TAG, "failed to allocate call_service JSON");
+
+    cJSON *service_data = NULL;
+    if (request->service_data_json != NULL && request->service_data_json[0] != '\0') {
+        service_data = cJSON_Parse(request->service_data_json);
+        if (!cJSON_IsObject(service_data)) {
+            cJSON_Delete(service_data);
+            cJSON_Delete(root);
+            return ESP_ERR_INVALID_ARG;
+        }
+    } else {
+        service_data = cJSON_CreateObject();
+    }
+    if (service_data == NULL) {
+        cJSON_Delete(root);
+        return ESP_ERR_NO_MEM;
+    }
+
+    cJSON_AddNumberToObject(root, "id", id);
+    cJSON_AddStringToObject(root, "type", "call_service");
+    cJSON_AddStringToObject(root, "domain", request->domain);
+    cJSON_AddStringToObject(root, "service", request->service);
+    cJSON_AddItemToObject(root, "service_data", service_data);
+
+    *out_json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return *out_json != NULL ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
+esp_err_t ha_client_call_service(const ha_client_call_service_request_t *request)
+{
+    ESP_RETURN_ON_FALSE(s_ctx.initialized && s_ctx.event_group != NULL && s_ctx.call_mutex != NULL,
+                        ESP_ERR_INVALID_STATE, TAG, "ha client not initialized");
+    ESP_RETURN_ON_FALSE(request != NULL, ESP_ERR_INVALID_ARG, TAG, "call_service request is required");
+    ESP_RETURN_ON_FALSE(ha_client_ready() && s_ctx.ws != NULL, ESP_ERR_INVALID_STATE, TAG,
+                        "ha client is not ready");
+
+    uint32_t timeout_ms = request->timeout_ms;
+    if (timeout_ms == 0U) {
+        timeout_ms = CONFIG_P4HOME_HA_CLIENT_CALL_SERVICE_TIMEOUT_MS;
+    }
+
+    if (xSemaphoreTake(s_ctx.call_mutex, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    uint32_t id = ha_client_alloc_message_id();
+    char *call_json = NULL;
+    esp_err_t err = ha_client_build_call_json(request, id, &call_json);
+    if (err != ESP_OK) {
+        xSemaphoreGive(s_ctx.call_mutex);
+        return err;
+    }
+
+    xEventGroupClearBits(s_ctx.event_group, HA_CLIENT_CALL_DONE_BIT);
+    taskENTER_CRITICAL(&s_ctx.lock);
+    ha_client_set_call_result_locked(id, false, "pending");
+    taskEXIT_CRITICAL(&s_ctx.lock);
+    ha_client_set_pending(id, HA_PENDING_CALL_SERVICE);
+
+    int sent = esp_websocket_client_send_text(s_ctx.ws, call_json, strlen(call_json), pdMS_TO_TICKS(timeout_ms));
+    cJSON_free(call_json);
+    if (sent < 0) {
+        (void)ha_client_take_pending(id);
+        xSemaphoreGive(s_ctx.call_mutex);
+        return ESP_FAIL;
+    }
+
+    EventBits_t bits = xEventGroupWaitBits(s_ctx.event_group, HA_CLIENT_CALL_DONE_BIT,
+                                           pdTRUE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
+    if ((bits & HA_CLIENT_CALL_DONE_BIT) == 0U) {
+        (void)ha_client_take_pending(id);
+        taskENTER_CRITICAL(&s_ctx.lock);
+        ha_client_set_call_result_locked(id, false, "call_service_timeout");
+        taskEXIT_CRITICAL(&s_ctx.lock);
+        xSemaphoreGive(s_ctx.call_mutex);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    bool success = false;
+    char reason[sizeof(s_ctx.last_call_error)] = {0};
+    taskENTER_CRITICAL(&s_ctx.lock);
+    success = s_ctx.last_call_id == id && s_ctx.last_call_success;
+    snprintf(reason, sizeof(reason), "%s", s_ctx.last_call_error);
+    taskEXIT_CRITICAL(&s_ctx.lock);
+
+    xSemaphoreGive(s_ctx.call_mutex);
+    if (!success) {
+        ESP_LOGW(TAG, "HA call_service failed domain=%s service=%s error=%s",
+                 request->domain, request->service, reason);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "HA call_service ok domain=%s service=%s", request->domain, request->service);
+    return ESP_OK;
+}
+
+esp_err_t ha_client_call_entity_service(const char *domain, const char *service,
+                                        const char *entity_id, uint32_t timeout_ms)
+{
+    ESP_RETURN_ON_FALSE(entity_id != NULL && entity_id[0] != '\0', ESP_ERR_INVALID_ARG, TAG,
+                        "entity_id is required");
+
+    cJSON *service_data = cJSON_CreateObject();
+    ESP_RETURN_ON_FALSE(service_data != NULL, ESP_ERR_NO_MEM, TAG, "failed to allocate entity service JSON");
+    cJSON_AddStringToObject(service_data, "entity_id", entity_id);
+    char *service_data_json = cJSON_PrintUnformatted(service_data);
+    cJSON_Delete(service_data);
+    ESP_RETURN_ON_FALSE(service_data_json != NULL, ESP_ERR_NO_MEM, TAG,
+                        "failed to print entity service JSON");
+
+    ha_client_call_service_request_t request = {
+        .domain = domain,
+        .service = service,
+        .service_data_json = service_data_json,
+        .timeout_ms = timeout_ms,
+    };
+    esp_err_t err = ha_client_call_service(&request);
+    cJSON_free(service_data_json);
+    return err;
 }

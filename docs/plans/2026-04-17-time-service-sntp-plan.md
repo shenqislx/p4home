@@ -12,7 +12,7 @@
 - 后续 `plan 5 ha-client-state-subscription` 的 `state_changed` 事件需要给每条 state 打本地时间戳，用于 `plan 6 panel_data_store` 的 `fresh / stale / unknown` 判定；若时钟未同步，`stale` 判定会整体错乱
 - `plan 9 ui-connection-status-banner` 顶栏要显示 `HH:MM`，需要 `time_service_format_now_iso8601` 的稳定输出
 
-当前仓库状态：
+立项时仓库状态：
 
 - `firmware/components/` 下没有 `time_service/` 组件
 - `firmware/sdkconfig.defaults` 没有 `CONFIG_LWIP_SNTP_*` / `CONFIG_LWIP_DHCP_GET_NTP_SRV` 基线

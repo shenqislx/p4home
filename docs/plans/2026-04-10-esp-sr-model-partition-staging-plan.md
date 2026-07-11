@@ -8,7 +8,7 @@
 - `esp_srmodel_init("model")` 无法挂载模型
 - `AFE` 只能停留在 preflight 失败状态
 
-这意味着当前工程虽然已经接入 `ESP-SR`，但还没有把模型文件真正纳入 `build/flash` 链路，无法形成下一步唤醒词与命令词验证所需的最小底座。
+立项时工程虽然已经接入 `ESP-SR`，但还没有把模型文件真正纳入 `build/flash` 链路，无法形成下一步唤醒词与命令词验证所需的最小底座。
 
 所属 Milestone: `M3`
 
@@ -104,10 +104,22 @@
 - `srmodels.bin` 已进入 `build/flash` 链路
 - 启动日志能输出明确的 `sr` 模型与 `AFE` 状态
 
-## 9. review 准备
+## 9. review 结果
 
-在邀请用户 review 前补充：
+### 已完成的实现项
 
-- 已完成的实现项
-- 已完成的验证项
-- 待用户重点查看的文件
+- `firmware/partitions.csv` 已增加 `model` 分区。
+- `firmware/sdkconfig.defaults` 已固定 ESP-SR 模型进入 flash staging。
+- 启动日志已补充 `VERIFY:sr:*` 相关机器可读标记。
+- 技术说明已沉淀到 [m3-esp-sr-model-partition-staging.md](/Users/andyhao/workspace/p4home/docs/m3-esp-sr-model-partition-staging.md)。
+
+### 已完成的验证项
+
+- 对应实现已随提交 `3d62cf4 Stage ESP-SR models and add audio startup selftest` 落地。
+- 构建链路已生成并烧录 `srmodels.bin`，后续 `AFE` 与固定命令计划均基于该分区继续推进。
+
+### 待重点查看的文件
+
+- [partitions.csv](/Users/andyhao/workspace/p4home/firmware/partitions.csv)
+- [sdkconfig.defaults](/Users/andyhao/workspace/p4home/firmware/sdkconfig.defaults)
+- [app_main.c](/Users/andyhao/workspace/p4home/firmware/main/app_main.c)

@@ -29,6 +29,9 @@ static panel_sensor_kind_t panel_entity_kind_from_text(const char *kind)
     if (strcmp(kind, "timestamp") == 0) {
         return PANEL_SENSOR_KIND_TIMESTAMP;
     }
+    if (strcmp(kind, "action") == 0 || strcmp(kind, "scene") == 0) {
+        return PANEL_SENSOR_KIND_ACTION;
+    }
     return PANEL_SENSOR_KIND_TEXT;
 }
 
@@ -56,6 +59,7 @@ esp_err_t panel_entity_whitelist_load(void)
         cJSON *icon = cJSON_GetObjectItemCaseSensitive(entry, "icon");
         cJSON *group = cJSON_GetObjectItemCaseSensitive(entry, "group");
         cJSON *kind = cJSON_GetObjectItemCaseSensitive(entry, "kind");
+        cJSON *control = cJSON_GetObjectItemCaseSensitive(entry, "control");
         if (!cJSON_IsString(entity_id) || !cJSON_IsString(label)) {
             continue;
         }
@@ -73,6 +77,22 @@ esp_err_t panel_entity_whitelist_load(void)
             snprintf(sensor.group, sizeof(sensor.group), "%s", group->valuestring);
         } else {
             snprintf(sensor.group, sizeof(sensor.group), "%s", "Home");
+        }
+        if (cJSON_IsObject(control)) {
+            cJSON *domain = cJSON_GetObjectItemCaseSensitive(control, "domain");
+            cJSON *on_service = cJSON_GetObjectItemCaseSensitive(control, "on_service");
+            cJSON *off_service = cJSON_GetObjectItemCaseSensitive(control, "off_service");
+            if (cJSON_IsString(domain)) {
+                snprintf(sensor.control_domain, sizeof(sensor.control_domain), "%s", domain->valuestring);
+            }
+            if (cJSON_IsString(on_service)) {
+                snprintf(sensor.control_on_service, sizeof(sensor.control_on_service), "%s",
+                         on_service->valuestring);
+            }
+            if (cJSON_IsString(off_service)) {
+                snprintf(sensor.control_off_service, sizeof(sensor.control_off_service), "%s",
+                         off_service->valuestring);
+            }
         }
         sensor.kind = panel_entity_kind_from_text(cJSON_IsString(kind) ? kind->valuestring : NULL);
         sensor.freshness = PANEL_SENSOR_FRESHNESS_UNKNOWN;

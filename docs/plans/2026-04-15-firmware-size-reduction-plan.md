@@ -100,15 +100,9 @@
 - 当前本地验证基线仍然通过
 - 为后续 `M4/M5` 留出可继续迭代的空间
 
-## 9. review 准备
+## 9. review 结果
 
-在邀请用户 review 前补充：
-
-- 采用了哪些减重项
-- 新旧镜像大小对比
-- 关键验证结果
-
-## 10. 实际结果
+### 已完成的实现项
 
 - 已落地减重项：
   - `CONFIG_BOOTLOADER_LOG_LEVEL_WARN`
@@ -127,7 +121,7 @@
   - `libesp_timer.a`
   - `libesp_audio_processor.a`
 
-## 11. 验证结论
+### 已完成的验证项
 
 - `idf.py build` 通过
 - `idf.py size-components` 确认首轮减重有效
@@ -139,9 +133,9 @@
   - `VERIFY:network/gateway/settings/display/touch/audio/sr:*` 全部 `PASS`
   - `VERIFY:*` 标记在默认 `WARN` 日志级别下仍可见
 
-## 12. 下一步
+### 后续触发条件
 
-- 保留当前配置减重结果，作为后续 `M4/M5` 的新基线
+- 当前配置减重结果已作为后续 `M4/M5` 的新基线。
 - 如果镜像再次逼近分区上限，再进入第二轮更激进裁剪：
   - 针对 `LVGL` widget 集做按需关闭
   - 审查 `ESP-SR / flite` 依赖链的可裁剪项

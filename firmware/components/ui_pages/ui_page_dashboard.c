@@ -10,6 +10,7 @@
 #include "ha_client.h"
 #include "sdkconfig.h"
 #include "time_service.h"
+#include "ui_card_action.h"
 #include "ui_card_binary.h"
 #include "ui_card_multiline.h"
 #include "ui_card_numeric.h"
@@ -44,6 +45,9 @@ static lv_obj_t *ui_page_dashboard_create_card(lv_obj_t *parent, const panel_sen
     if (sensor->kind == PANEL_SENSOR_KIND_NUMERIC) {
         return ui_card_trend_create(parent, sensor);
     }
+    if (sensor->kind == PANEL_SENSOR_KIND_ACTION) {
+        return ui_card_action_create(parent, sensor);
+    }
     if (sensor->kind == PANEL_SENSOR_KIND_BINARY) {
         return ui_card_binary_create(parent, sensor);
     }
@@ -56,6 +60,8 @@ static void ui_page_dashboard_apply_card(lv_obj_t *card, panel_sensor_kind_t kin
         ui_card_weather_apply_locked(card, sensor);
     } else if (sensor->kind == PANEL_SENSOR_KIND_NUMERIC) {
         ui_card_trend_apply_locked(card, sensor);
+    } else if (kind == PANEL_SENSOR_KIND_ACTION) {
+        ui_card_action_apply_locked(card, sensor);
     } else if (kind == PANEL_SENSOR_KIND_NUMERIC) {
         ui_card_numeric_apply_locked(card, sensor);
     } else if (kind == PANEL_SENSOR_KIND_BINARY) {

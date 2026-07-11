@@ -37,3 +37,4 @@ firmware/host_test/sdkconfig
 firmware/host_test/sdkconfig.old
 firmware/host_test/dependencies.lock
 firmware/host_test/managed_components/
+evidence/

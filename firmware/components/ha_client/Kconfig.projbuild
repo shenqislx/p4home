@@ -45,6 +45,11 @@ config P4HOME_HA_CLIENT_MAX_EVENT_JSON_BYTES
     range 2048 65536
     default 8192
 
+config P4HOME_HA_CLIENT_CALL_SERVICE_TIMEOUT_MS
+    int "call_service response timeout (ms)"
+    range 1000 30000
+    default 8000
+
 config P4HOME_HA_CLIENT_RECONNECT_BASE_MS
     int "Reconnect base backoff (ms)"
     range 250 10000

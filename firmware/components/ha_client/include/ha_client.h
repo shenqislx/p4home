@@ -40,6 +40,13 @@ typedef struct {
     const char *last_error_text;
 } ha_client_metrics_t;
 
+typedef struct {
+    const char *domain;
+    const char *service;
+    const char *service_data_json;
+    uint32_t timeout_ms;
+} ha_client_call_service_request_t;
+
 esp_err_t ha_client_init(void);
 esp_err_t ha_client_start(void);
 esp_err_t ha_client_stop(void);
@@ -54,3 +61,6 @@ esp_err_t ha_client_set_state_change_callback(ha_client_state_change_cb_t callba
 bool ha_client_subscription_ready(void);
 uint32_t ha_client_initial_state_count(void);
 esp_err_t ha_client_get_metrics(ha_client_metrics_t *metrics);
+esp_err_t ha_client_call_service(const ha_client_call_service_request_t *request);
+esp_err_t ha_client_call_entity_service(const char *domain, const char *service,
+                                        const char *entity_id, uint32_t timeout_ms);

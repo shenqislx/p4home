@@ -2,7 +2,7 @@
 
 ## 1. 背景
 
-当前工程已经具备：
+立项时工程已经具备：
 
 - `AFE runtime loop`
 - 最小 `wake state machine`
@@ -118,3 +118,24 @@
 - 启动期可以机器可读地裁决 command baseline
 - 本地硬件上已验证最小 `wake -> command -> backlight action` 闭环
 - 后续可以在此基础上继续做真实口播验收和业务动作扩展
+
+## 9. review 结果
+
+### 已完成的实现项
+
+- `sdkconfig.defaults` 已启用英文 `MultiNet7` 固定命令模型。
+- `sr_service` 已加入 fixed-command runtime 与固定命令表。
+- `display_service` 已提供 voice status 与 LCD backlight 动作。
+- `board_support` / `app_main` 已暴露命令词状态与 verify marker。
+- 技术说明已沉淀到 [m3-esp-sr-fixed-command-baseline.md](/Users/andyhao/workspace/p4home/docs/m3-esp-sr-fixed-command-baseline.md)。
+
+### 已完成的验证项
+
+- 对应实现已随提交 `2052b97 Refine ESP-SR fixed command baseline` 落地。
+- M3 固定命令 baseline 已作为语音前端骨架的一部分保留；当前主线暂停语音功能，仅做最小维护。
+
+### 待重点查看的文件
+
+- [sr_service.c](/Users/andyhao/workspace/p4home/firmware/components/sr_service/sr_service.c)
+- [display_service.c](/Users/andyhao/workspace/p4home/firmware/components/display_service/display_service.c)
+- [board_support.c](/Users/andyhao/workspace/p4home/firmware/components/board_support/board_support.c)

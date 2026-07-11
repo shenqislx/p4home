@@ -2,7 +2,7 @@
 
 ## 1. 背景
 
-当前工程已经完成：
+立项时工程已经完成：
 
 - `ESP-SR` 依赖接入
 - `model partition + model staging`
@@ -96,3 +96,24 @@
 - 本地串口日志可以直接证明 `AFE` 持续 runtime loop 已启动
 - `audio owner` 可以直接解释当前音频占用方
 - 后续唤醒词状态机可以基于已有 runtime loop 继续搭建
+
+## 9. review 结果
+
+### 已完成的实现项
+
+- `sr_service` 已加入后台 runtime loop task。
+- `audio_service` 已增加 owner 跟踪，便于解释 microphone 占用方。
+- `display_service` 已补充 owner-aware 提示。
+- 启动日志已增加 `VERIFY:sr:runtime_loop`。
+- 技术说明已沉淀到 [m3-esp-sr-runtime-loop.md](/Users/andyhao/workspace/p4home/docs/m3-esp-sr-runtime-loop.md)。
+
+### 已完成的验证项
+
+- 对应实现已随提交 `5477880 Add ESP-SR runtime loop and audio ownership diagnostics` 落地。
+- 后续固定命令 baseline 已基于该 runtime loop 继续推进。
+
+### 待重点查看的文件
+
+- [sr_service.c](/Users/andyhao/workspace/p4home/firmware/components/sr_service/sr_service.c)
+- [audio_service.c](/Users/andyhao/workspace/p4home/firmware/components/audio_service/audio_service.c)
+- [display_service.c](/Users/andyhao/workspace/p4home/firmware/components/display_service/display_service.c)

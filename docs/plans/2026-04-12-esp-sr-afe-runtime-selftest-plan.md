@@ -2,7 +2,7 @@
 
 ## 1. 背景
 
-当前工程已经完成：
+立项时工程已经完成：
 
 - `ESP-SR` 依赖接入
 - `model partition + model staging`
@@ -95,10 +95,22 @@
 - 启动期 `sr` 标记可用于本地硬件裁决
 - 本地烧录日志可以直接证明 `AFE` 已真实 `feed/fetch`
 
-## 9. review 准备
+## 9. review 结果
 
-在邀请用户 review 前补充：
+### 已完成的实现项
 
-- 已完成的实现项
-- 已完成的验证项
-- 残留 `i2s` 时序噪声的边界说明
+- `audio_service` 已暴露原始 microphone sample 读取接口。
+- `sr_service` 已加入最小 `AFE feed/fetch` runtime selftest。
+- 启动日志已增加 `VERIFY:sr:afe_runtime`。
+- 技术说明已沉淀到 [m3-esp-sr-afe-runtime-selftest.md](/Users/andyhao/workspace/p4home/docs/m3-esp-sr-afe-runtime-selftest.md)。
+
+### 已完成的验证项
+
+- 对应实现已随提交 `5477880 Add ESP-SR runtime loop and audio ownership diagnostics` 落地。
+- 后续 runtime loop 计划已在该 selftest 基础上继续推进。
+
+### 待重点查看的文件
+
+- [sr_service.c](/Users/andyhao/workspace/p4home/firmware/components/sr_service/sr_service.c)
+- [sr_service.h](/Users/andyhao/workspace/p4home/firmware/components/sr_service/include/sr_service.h)
+- [audio_service.c](/Users/andyhao/workspace/p4home/firmware/components/audio_service/audio_service.c)

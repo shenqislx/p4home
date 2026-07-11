@@ -391,6 +391,15 @@ esp_err_t panel_data_store_update(const panel_sensor_t *sensor)
     if (sensor->group[0] != '\0') {
         snprintf(dst->group, sizeof(dst->group), "%s", sensor->group);
     }
+    if (sensor->control_domain[0] != '\0') {
+        snprintf(dst->control_domain, sizeof(dst->control_domain), "%s", sensor->control_domain);
+    }
+    if (sensor->control_on_service[0] != '\0') {
+        snprintf(dst->control_on_service, sizeof(dst->control_on_service), "%s", sensor->control_on_service);
+    }
+    if (sensor->control_off_service[0] != '\0') {
+        snprintf(dst->control_off_service, sizeof(dst->control_off_service), "%s", sensor->control_off_service);
+    }
     if (sensor->kind != PANEL_SENSOR_KIND_NUMERIC || dst->kind == PANEL_SENSOR_KIND_NUMERIC) {
         dst->kind = sensor->kind;
     }

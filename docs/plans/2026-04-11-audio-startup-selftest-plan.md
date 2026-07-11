@@ -2,7 +2,7 @@
 
 ## 1. 背景
 
-当前 `M3` 音频链路已经支持：
+立项时 `M3` 音频链路已经支持：
 
 - 手动触发 `Play Test Tone`
 - 手动触发 `Capture Mic Sample`
@@ -97,10 +97,21 @@
 - 启动期 `audio` 标记可用于本地硬件裁决
 - 本地烧录日志可以直接证明音频 runtime 路径已执行
 
-## 9. review 准备
+## 9. review 结果
 
-在邀请用户 review 前补充：
+### 已完成的实现项
 
-- 已完成的实现项
-- 已完成的验证项
-- 待用户重点查看的文件
+- `audio_service` 已在启动阶段执行最小 tone write 与 microphone capture。
+- 启动期 `VERIFY:audio:tone_played` 与 `VERIFY:audio:mic_capture` 已具备真实判定意义。
+- 技术说明已沉淀到 [m3-audio-startup-selftest.md](/Users/andyhao/workspace/p4home/docs/m3-audio-startup-selftest.md)。
+
+### 已完成的验证项
+
+- 对应实现已随提交 `3d62cf4 Stage ESP-SR models and add audio startup selftest` 落地。
+- 后续 M3 runtime 与固定命令计划已继续复用该音频启动自检基线。
+
+### 待重点查看的文件
+
+- [audio_service.c](/Users/andyhao/workspace/p4home/firmware/components/audio_service/audio_service.c)
+- [audio_service.h](/Users/andyhao/workspace/p4home/firmware/components/audio_service/include/audio_service.h)
+- [app_main.c](/Users/andyhao/workspace/p4home/firmware/main/app_main.c)

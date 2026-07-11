@@ -10,7 +10,7 @@
 - plan 2 `time-service-sntp`：提供 `time_service_wait_synced(...)`，保证 TLS 握手时系统时钟已经是合理的真实时间
 - plan 3 `settings-service-ha-credentials`：在 `p4home_ha` NVS namespace 中保存 `url` / `token` / `verify_tls`，并提供 `settings_service_ha_get_url/token`、`settings_service_ha_verify_tls`、`settings_service_ha_credentials_present`
 
-但 **仓库内还没有任何 HA 侧 client**：面板目前没法和 `Home Assistant` 建立 WebSocket 会话，也没法完成 long-lived access token 的鉴权握手。`M4` 的后续 plan（`ha-client-state-subscription`、`panel-data-store`、`ui-dashboard-sensor-cards`、`ui-connection-status-banner` 等）全部压在「已有一个可用、已鉴权的 HA WebSocket 会话」这个前提上。
+立项时缺少 HA 侧 client：面板没法和 `Home Assistant` 建立 WebSocket 会话，也没法完成 long-lived access token 的鉴权握手。`M4` 的后续 plan（`ha-client-state-subscription`、`panel-data-store`、`ui-dashboard-sensor-cards`、`ui-connection-status-banner` 等）全部压在「已有一个可用、已鉴权的 HA WebSocket 会话」这个前提上。
 
 本 plan 是 `M4` 的第 4 号 plan，负责从零建立 `ha_client` 组件，让面板具备「HA WebSocket 拨号 + long-lived access token 鉴权」的最小可用能力，并把状态机、等待接口、VERIFY 标记一次到位，方便后续 plan 在不动握手逻辑的前提下，直接往状态机的 `READY` 之后叠功能。
 
