@@ -14,9 +14,9 @@
 
 项目当前主线状态：
 
-- **已落地目标**：连接 `Home Assistant`，以图形化方式展示家庭传感器数据
-- **当前进行中**：控制回写与 dashboard 控制卡片
-- **下一阶段目标**：真实设备控制闭环与米家经 HA 联动
+- **已落地目标**：连接 `Home Assistant`，稳定加载并分页展示 27 路灯具状态
+- **当前进行中**：灯具控制卡片的真实设备点击验收
+- **下一阶段目标**：完成“面板 → HA → 米家设备”控制闭环，并评估亮度与场景控制
 - **暂缓目标**：本地语音对话、绕过 HA 的米家直接联动、本地 LLM 节点
 
 对应的关键决策（`2026-04-17` 定版）：
@@ -225,7 +225,7 @@
 - 已实现：
   - Wi‑Fi STA、IP 获取、SNTP、HA 凭证读取、HA WebSocket client、状态订阅、重连指标、`panel_data_store`、实体白名单
   - 启动日志已包含 `VERIFY:network:*`、`VERIFY:time:*`、`VERIFY:ha:reconnect_ready`、`VERIFY:ha:metrics_exported`、`VERIFY:panel_store:ready`、`VERIFY:panel_whitelist:parsed`
-- 当前硬件验证中，Wi‑Fi / SNTP / panel store / whitelist 均通过；HA `ws_connected/authenticated/subscribed/initial_states_loaded` 在 `CONFIG_P4HOME_HA_CLIENT_START_DELAY_MS` 延迟窗口内会报告 `PENDING_DELAY`，HA 不可用时不作为 UI 主线阻塞项。
+- `2026-07-14` 实机验证中，Wi‑Fi 获取 `192.168.110.87`，HA 进入 `READY`，27 个白名单实体全部加载有效状态；SNTP 本轮仍超时，但不影响 HA 状态与灯具 UI。
 
 ## M5：图形化传感器仪表盘 UI
 
@@ -267,8 +267,9 @@
   - `ui_page_dashboard` 已作为默认业务首页，启动页默认为 `dashboard`
   - 顶部状态栏已接入 Wi‑Fi / HA / 时间
   - 数值趋势卡、二值卡、多行卡、天气卡均已接入
-  - 白名单当前渲染 6 张卡片，启动日志输出 `VERIFY:ui:dashboard_rendered:PASS` 与 `VERIFY:ui:dashboard_card_count:n=6`
-  - UI 显示文本已统一为英文
+  - 原传感器卡片能力仍保留在组件层，当前产品首页已切换为 27 路灯具控制卡片，不再显示监测图表
+  - dashboard 每页复用 8 张物理卡片，共 4 页；启动日志输出 `VERIFY:ui:dashboard_rendered:PASS` 与 `VERIFY:ui:dashboard_card_count:n=27`
+  - 灯具名称使用 HA 中的中文名称，状态与控制提示保留简洁英文
 
 ## M6：控制回写与米家联动
 
@@ -298,13 +299,12 @@
 
 - 进行中：
   - 已新增 `M6` 两份计划：`ha-client-call-service-writeback` 与 `ui-binary-control-card`
-  - 当前工作区已实现 `ha_client_call_service()` / `ha_client_call_entity_service()`、控制字段解析、可控 binary switch 和 action card
+  - `e7528d4` 已提交 `ha_client_call_service()` / `ha_client_call_entity_service()`、控制字段解析、可控 binary switch 和 action card
   - 本地增量构建已通过：`cmake --build firmware/build -j4`
-  - `2026-07-10` 已烧录到 ESP32-P4 EVB，启动基线通过；HA worker 可进入 `CONNECTING`
+  - `2026-07-14` 已烧录到 ESP32-P4 EVB；HA 进入 `READY`，27 路灯具状态加载完成，UI 以 8 张卡片分页显示
 - 尚未完成：
-  - 以上 `M6` 改动尚未提交
-  - 当前 NVS 中的 HA 地址 `192.168.110.48:8123` 不可达，尚未完成 `call_service` 成功路径联调
-  - 当前白名单尚无可控实体，尚未完成 switch / action card 实机交互验证
+  - 最终重烧录复测时，宿主机与 P4 均对 `192.168.71.4:8123` 连接超时；需先恢复 UTM/HA 可达性
+  - 尚未在面板上实际点击灯具，`call_service` 成功、设备动作和 HA 状态回刷仍待最终验收
   - 米家设备经 HA 暴露后的联动闭环仍待后续 plan
 
 ## M7：本地语音对话与 AI 节点（延后启用）
@@ -418,7 +418,7 @@
 
 | 序号 | plan 名称                                   | milestone | 状态                                      |
 |------|---------------------------------------------|-----------|-------------------------------------------|
-| 11   | `ha-client-call-service-writeback`          | `M6`      | 已烧录启动验证，阻塞于 HA 地址不可达      |
-| 12   | `ui-binary-control-card`                    | `M6`      | 已烧录启动验证，待可控实体与 HA 可达      |
+| 11   | `ha-client-call-service-writeback`          | `M6`      | 已提交并连接 HA，待真实设备点击验收       |
+| 12   | `ui-binary-control-card`                    | `M6`      | 27 路灯具已分页显示，待控制与回刷验收     |
 
 后续里程碑（`M7` 之后）的 plan 序列在进入对应阶段前再细化，避免提前锁死设计。

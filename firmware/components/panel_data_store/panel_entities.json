@@ -1,51 +1,221 @@
 {
-  "version": 1,
+  "version": 2,
   "entities": [
     {
-      "entity_id": "sensor.xiaomi_cn_2102782855_w2_temperature_p_2_7",
-      "label": "Point Temp",
-      "unit": "C",
-      "icon": "thermometer",
-      "group": "Living",
-      "kind": "numeric"
-    },
-    {
-      "entity_id": "sensor.xiaomi_cn_2103924239_w3_temperature_p_2_7",
-      "label": "Display Temp",
-      "unit": "C",
-      "icon": "thermometer",
-      "group": "Living",
-      "kind": "numeric"
-    },
-    {
-      "entity_id": "sensor.xiaomi_cn_2102549075_w2_temperature_p_2_7",
-      "label": "Dining Temp",
-      "unit": "C",
-      "icon": "thermometer",
-      "group": "Dining",
-      "kind": "numeric"
-    },
-    {
-      "entity_id": "sensor.linp_cn_blt_3_1ofn3nec8cc02_es4b_illumination_p_2_1005",
-      "label": "Illuminance",
-      "unit": "lx",
+      "entity_id": "switch.xiaomi_cn_2102782855_w2_on_p_2_1",
+      "label": "客厅射灯",
       "icon": "light",
-      "group": "Living",
-      "kind": "numeric"
+      "group": "客厅",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
     },
     {
-      "entity_id": "sensor.yunmi_cn_410910914_lx14_tds_out_p_4_2",
-      "label": "Water TDS",
-      "icon": "water",
-      "group": "Water",
-      "kind": "numeric"
+      "entity_id": "switch.xiaomi_cn_2102782855_w2_on_p_3_1",
+      "label": "客厅大灯",
+      "icon": "light",
+      "group": "客厅",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
     },
     {
-      "entity_id": "weather.forecast_wo_de_jia",
-      "label": "Weather",
-      "icon": "weather",
-      "group": "Outdoor",
-      "kind": "text"
+      "entity_id": "switch.xiaomi_cn_2103924239_w3_on_p_2_1",
+      "label": "客厅展示灯",
+      "icon": "light",
+      "group": "客厅",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2103924239_w3_on_p_3_1",
+      "label": "客厅壁灯",
+      "icon": "light",
+      "group": "客厅",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2103924239_w3_on_p_4_1",
+      "label": "客厅筒灯",
+      "icon": "light",
+      "group": "客厅",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2102549075_w2_on_p_2_1",
+      "label": "餐厅柜灯",
+      "icon": "light",
+      "group": "餐厅",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2102549075_w2_on_p_3_1",
+      "label": "餐厅大灯",
+      "icon": "light",
+      "group": "餐厅",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2102740233_w1_on_p_2_1",
+      "label": "厨房灯",
+      "icon": "light",
+      "group": "厨房",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2102497207_w1_on_p_2_1",
+      "label": "拱门灯",
+      "icon": "light",
+      "group": "拱门",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2103852966_w3_on_p_2_1",
+      "label": "客卫花灯",
+      "icon": "light",
+      "group": "客卫",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2103852966_w3_on_p_3_1",
+      "label": "客卫杯子灯",
+      "icon": "light",
+      "group": "客卫",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2103852966_w3_on_p_4_1",
+      "label": "客卫镜柜灯",
+      "icon": "light",
+      "group": "客卫",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2102810987_w2_on_p_2_1",
+      "label": "书房射灯",
+      "icon": "light",
+      "group": "书房",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2102810987_w2_on_p_3_1",
+      "label": "书房吸顶灯",
+      "icon": "light",
+      "group": "书房",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2098197440_w2_on_p_2_1",
+      "label": "阳台大灯",
+      "icon": "light",
+      "group": "阳台",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2098197440_w2_on_p_3_1",
+      "label": "阳台射灯",
+      "icon": "light",
+      "group": "阳台",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2102811604_w2_on_p_2_1",
+      "label": "阳台卧壁灯",
+      "icon": "light",
+      "group": "阳台卧",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2102536019_w1_on_p_2_1",
+      "label": "阳台卧风扇灯",
+      "icon": "light",
+      "group": "阳台卧",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2102780196_w2_on_p_2_1",
+      "label": "吧台灯",
+      "icon": "light",
+      "group": "玄关",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2102780196_w2_on_p_3_1",
+      "label": "玄关线灯",
+      "icon": "light",
+      "group": "玄关",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2098199596_w2_on_p_2_1",
+      "label": "主卫吸顶灯",
+      "icon": "light",
+      "group": "主卫",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2098199596_w2_on_p_3_1",
+      "label": "主卫镜柜灯",
+      "icon": "light",
+      "group": "主卫",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2102443388_w2_on_p_2_1",
+      "label": "主卧风扇灯",
+      "icon": "light",
+      "group": "主卧",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2102443388_w2_on_p_3_1",
+      "label": "主卧过道灯",
+      "icon": "light",
+      "group": "主卧",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2103857429_w3_on_p_2_1",
+      "label": "主卧衣橱灯",
+      "icon": "light",
+      "group": "主卧",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2103857429_w3_on_p_3_1",
+      "label": "主卧过道开关",
+      "icon": "light",
+      "group": "主卧",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "switch.xiaomi_cn_2102733573_w1_on_p_2_1",
+      "label": "衣帽间灯",
+      "icon": "light",
+      "group": "衣帽间",
+      "kind": "binary",
+      "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
     }
   ]
 }

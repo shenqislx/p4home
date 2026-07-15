@@ -111,28 +111,31 @@
 - 点击 `Run` 会走 HA `call_service`
 - 失败路径有 UI 与日志反馈
 
-## 9. 当前状态
+## 9. 当前状态（2026-07-14）
 
 ### 已完成的实现项
 
-- 当前工作区已扩展 `panel_sensor_t` 控制字段与 `PANEL_SENSOR_KIND_ACTION`。
+- `e7528d4` 已提交 `panel_sensor_t` 控制字段、`PANEL_SENSOR_KIND_ACTION` 与 HA `call_service` 写回能力。
 - `panel_entity_whitelist` 已解析可选 `control` 对象。
 - `ui_card_binary` 已在可控实体上创建 `lv_switch`，点击后异步调用 HA 写回 API。
 - 已新增 `ui_card_action`，无状态 action / scene 可显示 `Run` 按钮并调用 `control.on_service`。
 - `ui_page_dashboard` 已接入 action card。
+- 当前白名单已替换为 27 路真实灯具开关，不再展示监测图表。
+- dashboard 使用 8 张固定卡片分页复用，共 4 页；点击卡片或 switch 均可触发开关控制。
 
 ### 已完成的验证项
 
 - 本地增量构建通过：`cmake --build firmware/build -j4`。
 - `git diff --check` 通过。
-- `2026-07-10` 已通过 `/dev/cu.usbserial-210` 烧录到 ESP32-P4 EVB，启动日志确认 `VERIFY:ui:dashboard_rendered:PASS`、`VERIFY:panel_store:ready:PASS`、`VERIFY:panel_whitelist:parsed:PASS`。
+- `2026-07-14` 已通过 `/dev/cu.usbserial-210` 烧录到 ESP32-P4 EVB。
+- 启动日志确认 `dashboard_visible=yes cards=27 children=8`、`VERIFY:ui:dashboard_rendered:PASS`、`VERIFY:ui:dashboard_card_count:n=27`。
+- P4 已连接 `192.168.110.87`，HA 已进入 `READY`，27 个白名单实体均收到有效状态；连续观察约一分钟无崩溃或重启。
+- 最终重烧录后的复测中，宿主机与 P4 均暂时无法连接 `192.168.71.4:8123`；P4 保持稳定并停留在 HA `CONNECTING`，需在 UTM/HA 恢复可达后继续控制验收。
 
 ### 尚未完成
 
-- 这些改动尚未提交到 Git。
-- 当前 `panel_entities.json` 仍只有只读 sensor/weather 实体，没有 `control` 字段，因此实机尚未渲染可控 switch / action card。
-- 当前 HA 地址 `192.168.110.48:8123` 不可达；尚未验证点击 switch / Run 后的设备动作与状态回刷。
-- 需要补充真实 `switch.*` / `light.*` / `scene.*` 白名单实体，并先恢复 HA 服务可达性。
+- 需要在面板上实际点击一盏灯，确认 HA `call_service` 成功、灯具动作以及 `state_changed` 状态回刷。
+- 当前灯具清单均为二值开关；亮度滑条与场景按钮不在本轮 UI 中。
 
 ### 待重点查看的文件
 

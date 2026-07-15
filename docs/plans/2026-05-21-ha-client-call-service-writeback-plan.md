@@ -96,11 +96,11 @@
 - `call_service` result 可同步反馈成功、失败、超时
 - 未改变现有读侧链路职责边界
 
-## 9. 当前状态
+## 9. 当前状态（2026-07-14）
 
 ### 已完成的实现项
 
-- 当前工作区已实现 `ha_client_call_service()` 与 `ha_client_call_entity_service()`。
+- `e7528d4` 已提交 `ha_client_call_service()` 与 `ha_client_call_entity_service()`。
 - `ha_client` 已支持 `HA_PENDING_CALL_SERVICE`、同步等待 result、调用超时与串行化调用。
 - `Kconfig.projbuild` 已增加 `CONFIG_P4HOME_HA_CLIENT_CALL_SERVICE_TIMEOUT_MS`。
 - `ha_client/README.md` 已补充 writeback API 说明。
@@ -109,14 +109,12 @@
 
 - 本地增量构建通过：`cmake --build firmware/build -j4`。
 - `git diff --check` 通过。
-- `2026-07-10` 已通过 `/dev/cu.usbserial-210` 烧录到 ESP32-P4 EVB；bootloader、app、partition table、model 分区均完成 hash 校验。
-- 启动串口验证通过 Wi-Fi、SNTP、dashboard、panel store 与 whitelist 基线；HA worker 已从 `IDLE` 进入 `CONNECTING`。
+- `2026-07-14` 已通过 `/dev/cu.usbserial-210` 重烧录到 ESP32-P4 EVB，应用分区完成 hash 校验。
+- 一轮串口联调中 HA 已进入 `READY`，27 路真实灯具实体全部加载有效状态；最终重烧录复测时宿主机与 P4 均对 `192.168.71.4:8123` 连接超时。
 
 ### 尚未完成
 
-- 这些改动尚未提交到 Git。
-- 当前 NVS 中的 HA 地址为 `192.168.110.48:8123`，开发机与面板侧均连接超时；尚未验证 `call_service result.success=true` 与后续 `state_changed` 回刷。
-- 需要先恢复 HA 服务可达性或更新面板 NVS 中的 HA URL。
+- 需要恢复 UTM/HA 当前可达性，并在面板实际点击一盏灯，验证 `call_service result.success=true`、设备动作与后续 `state_changed` 回刷。
 
 ### 待重点查看的文件
 
