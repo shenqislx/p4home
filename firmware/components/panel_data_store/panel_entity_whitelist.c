@@ -32,6 +32,9 @@ static panel_sensor_kind_t panel_entity_kind_from_text(const char *kind)
     if (strcmp(kind, "action") == 0 || strcmp(kind, "scene") == 0) {
         return PANEL_SENSOR_KIND_ACTION;
     }
+    if (strcmp(kind, "climate") == 0) {
+        return PANEL_SENSOR_KIND_CLIMATE;
+    }
     return PANEL_SENSOR_KIND_TEXT;
 }
 

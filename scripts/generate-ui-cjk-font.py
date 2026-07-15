@@ -18,13 +18,17 @@ OUTPUT_PATH = (
     REPO_ROOT
     / "firmware/components/ui_pages/fonts/ui_font_source_han_sans_sc_16.c"
 )
+STATIC_UI_TEXT = (
+    "空调控制当前模式关闭离线当前温度设定温度模式切换"
+    "制冷制热除湿送风正在发送控制指令控制失败控制指令已发送在线"
+)
 
 
 def collect_symbols() -> str:
     with ENTITIES_PATH.open(encoding="utf-8") as handle:
         document = json.load(handle)
 
-    symbols = set()
+    symbols = {char for char in STATIC_UI_TEXT if ord(char) > 0x7F}
     for entity in document.get("entities", []):
         for key in ("label", "group"):
             symbols.update(char for char in entity.get(key, "") if ord(char) > 0x7F)

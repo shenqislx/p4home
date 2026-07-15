@@ -110,11 +110,11 @@
 - 本地增量构建通过：`cmake --build firmware/build -j4`。
 - `git diff --check` 通过。
 - `2026-07-14` 已通过 `/dev/cu.usbserial-210` 重烧录到 ESP32-P4 EVB，应用分区完成 hash 校验。
-- 一轮串口联调中 HA 已进入 `READY`，27 路真实灯具实体全部加载有效状态；最终重烧录复测时宿主机与 P4 均对 `192.168.71.4:8123` 连接超时。
+- `2026-07-15` 复测确认 P4 可从 `192.168.110.87` 跨网段访问 `192.168.71.4:8123`，HA 进入 `READY`；30 个白名单实体全部完成初始状态拉取。
 
 ### 尚未完成
 
-- 需要恢复 UTM/HA 当前可达性，并在面板实际点击一盏灯，验证 `call_service result.success=true`、设备动作与后续 `state_changed` 回刷。
+- 需要在面板实际点击一盏灯或空调控制项，验证 `call_service result.success=true`、设备动作与后续 `state_changed` 回刷。
 
 ### 待重点查看的文件
 

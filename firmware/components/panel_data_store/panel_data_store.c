@@ -14,6 +14,8 @@
 
 static const char *TAG = "panel_store";
 
+#define PANEL_DATA_STORE_MAX_OBSERVERS 4U
+
 #ifndef CONFIG_P4HOME_WEATHER_ENABLE
 #define CONFIG_P4HOME_WEATHER_ENABLE 0
 #endif
@@ -32,8 +34,9 @@ typedef struct {
     size_t count;
     size_t rejected_count;
     SemaphoreHandle_t mutex;
-    panel_data_store_observer_cb_t observer;
-    void *observer_user;
+    panel_data_store_observer_cb_t observers[PANEL_DATA_STORE_MAX_OBSERVERS];
+    void *observer_users[PANEL_DATA_STORE_MAX_OBSERVERS];
+    size_t observer_count;
 } panel_data_store_ctx_t;
 
 static panel_data_store_ctx_t s_store;
@@ -156,6 +159,44 @@ static cJSON *panel_data_store_json_array(cJSON *root, const char *name)
 {
     cJSON *item = cJSON_GetObjectItemCaseSensitive(root, name);
     return cJSON_IsArray(item) ? item : NULL;
+}
+
+static void panel_data_store_parse_climate_attributes(const ha_client_state_change_t *change,
+                                                      panel_sensor_t *sensor)
+{
+    if (change == NULL || change->attributes_json == NULL || sensor == NULL) {
+        return;
+    }
+
+    cJSON *attrs = cJSON_Parse(change->attributes_json);
+    if (attrs == NULL) {
+        return;
+    }
+
+    sensor->has_current_temperature =
+        panel_data_store_json_number(attrs, "current_temperature", &sensor->current_temperature);
+    sensor->has_target_temperature =
+        panel_data_store_json_number(attrs, "temperature", &sensor->target_temperature);
+    (void)panel_data_store_json_number(attrs, "min_temp", &sensor->min_temperature);
+    (void)panel_data_store_json_number(attrs, "max_temp", &sensor->max_temperature);
+    if (!panel_data_store_json_number(attrs, "target_temp_step", &sensor->target_temperature_step) ||
+        sensor->target_temperature_step <= 0.0) {
+        sensor->target_temperature_step = 1.0;
+    }
+
+    sensor->supported_modes[0] = '\0';
+    cJSON *modes = panel_data_store_json_array(attrs, "hvac_modes");
+    cJSON *mode = NULL;
+    cJSON_ArrayForEach(mode, modes) {
+        if (!cJSON_IsString(mode)) {
+            continue;
+        }
+        size_t used = strlen(sensor->supported_modes);
+        snprintf(sensor->supported_modes + used, sizeof(sensor->supported_modes) - used,
+                 "%s%s", used > 0U ? "," : "", mode->valuestring);
+    }
+
+    cJSON_Delete(attrs);
 }
 
 static bool panel_data_store_unit_is_fahrenheit(const char *unit)
@@ -405,6 +446,16 @@ esp_err_t panel_data_store_update(const panel_sensor_t *sensor)
     }
     dst->value_numeric = sensor->value_numeric;
     snprintf(dst->value_text, sizeof(dst->value_text), "%s", sensor->value_text);
+    if (sensor->kind == PANEL_SENSOR_KIND_CLIMATE) {
+        dst->current_temperature = sensor->current_temperature;
+        dst->target_temperature = sensor->target_temperature;
+        dst->min_temperature = sensor->min_temperature;
+        dst->max_temperature = sensor->max_temperature;
+        dst->target_temperature_step = sensor->target_temperature_step;
+        snprintf(dst->supported_modes, sizeof(dst->supported_modes), "%s", sensor->supported_modes);
+        dst->has_current_temperature = sensor->has_current_temperature;
+        dst->has_target_temperature = sensor->has_target_temperature;
+    }
     dst->updated_at_ms = sensor->updated_at_ms;
     dst->available = sensor->available;
     dst->freshness = sensor->freshness;
@@ -413,13 +464,20 @@ esp_err_t panel_data_store_update(const panel_sensor_t *sensor)
                                                                       : time_service_now_epoch_ms(),
                                           s_store.history[index].count == 0U);
     applied = *dst;
-    notify = s_store.observer != NULL;
-    panel_data_store_observer_cb_t observer = s_store.observer;
-    void *observer_user = s_store.observer_user;
+    panel_data_store_observer_cb_t observers[PANEL_DATA_STORE_MAX_OBSERVERS] = {0};
+    void *observer_users[PANEL_DATA_STORE_MAX_OBSERVERS] = {0};
+    size_t observer_count = s_store.observer_count;
+    memcpy(observers, s_store.observers, sizeof(observers));
+    memcpy(observer_users, s_store.observer_users, sizeof(observer_users));
+    notify = observer_count > 0U;
     xSemaphoreGive(s_store.mutex);
 
     if (notify) {
-        observer(&applied, observer_user);
+        for (size_t i = 0; i < observer_count; ++i) {
+            if (observers[i] != NULL) {
+                observers[i](&applied, observer_users[i]);
+            }
+        }
     }
     return ESP_OK;
 }
@@ -503,8 +561,41 @@ esp_err_t panel_data_store_set_observer(panel_data_store_observer_cb_t observer,
         return ESP_ERR_INVALID_STATE;
     }
     xSemaphoreTake(s_store.mutex, portMAX_DELAY);
-    s_store.observer = observer;
-    s_store.observer_user = user_data;
+    memset(s_store.observers, 0, sizeof(s_store.observers));
+    memset(s_store.observer_users, 0, sizeof(s_store.observer_users));
+    s_store.observer_count = 0U;
+    if (observer != NULL) {
+        s_store.observers[0] = observer;
+        s_store.observer_users[0] = user_data;
+        s_store.observer_count = 1U;
+    }
+    xSemaphoreGive(s_store.mutex);
+    return ESP_OK;
+}
+
+esp_err_t panel_data_store_add_observer(panel_data_store_observer_cb_t observer, void *user_data)
+{
+    if (!s_store.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (observer == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(s_store.mutex, portMAX_DELAY);
+    for (size_t i = 0; i < s_store.observer_count; ++i) {
+        if (s_store.observers[i] == observer && s_store.observer_users[i] == user_data) {
+            xSemaphoreGive(s_store.mutex);
+            return ESP_OK;
+        }
+    }
+    if (s_store.observer_count >= PANEL_DATA_STORE_MAX_OBSERVERS) {
+        xSemaphoreGive(s_store.mutex);
+        return ESP_ERR_NO_MEM;
+    }
+    size_t index = s_store.observer_count++;
+    s_store.observers[index] = observer;
+    s_store.observer_users[index] = user_data;
     xSemaphoreGive(s_store.mutex);
     return ESP_OK;
 }
@@ -597,6 +688,9 @@ void panel_data_store_on_ha_state_change(const ha_client_state_change_t *change,
                panel_data_store_format_weather_summary(change, sensor.value_text, sizeof(sensor.value_text),
                                                        &sensor.value_numeric)) {
         /* Weather attributes are compacted into one dashboard line. */
+    } else if (sensor.kind == PANEL_SENSOR_KIND_CLIMATE) {
+        panel_data_store_ascii_state(change, sensor.value_text, sizeof(sensor.value_text));
+        panel_data_store_parse_climate_attributes(change, &sensor);
     } else {
         panel_data_store_ascii_state(change, sensor.value_text, sizeof(sensor.value_text));
     }

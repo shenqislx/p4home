@@ -12,6 +12,7 @@ typedef enum {
     UI_PAGES_PAGE_SETTINGS = 1,
     UI_PAGES_PAGE_GATEWAY = 2,
     UI_PAGES_PAGE_DASHBOARD = 3,
+    UI_PAGES_PAGE_CLIMATE = 4,
 } ui_pages_page_t;
 
 esp_err_t ui_pages_render_bootstrap(void);

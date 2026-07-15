@@ -206,6 +206,9 @@ static int ui_page_dashboard_find_slot(const char *entity_id)
 static bool ui_page_dashboard_build_one(const panel_sensor_t *sensor, void *user_data)
 {
     (void)user_data;
+    if (sensor->kind == PANEL_SENSOR_KIND_CLIMATE) {
+        return true;
+    }
     if (s_slot_count >= CONFIG_P4HOME_PANEL_STORE_MAX_ENTITIES) {
         return false;
     }
@@ -219,6 +222,9 @@ static bool ui_page_dashboard_build_one(const panel_sensor_t *sensor, void *user
 
 static void ui_page_dashboard_apply_snapshot_locked(const panel_sensor_t *sensor)
 {
+    if (sensor == NULL || sensor->kind == PANEL_SENSOR_KIND_CLIMATE) {
+        return;
+    }
     panel_sensor_t display_sensor = *sensor;
     int index = ui_page_dashboard_find_slot(display_sensor.entity_id);
     if (index < 0) {
@@ -366,7 +372,8 @@ esp_err_t ui_page_dashboard_init(void)
 
     panel_data_store_iterate(ui_page_dashboard_build_one, NULL);
     ui_page_dashboard_update_page_locked();
-    panel_data_store_set_observer(ui_page_dashboard_store_observer, NULL);
+    ESP_RETURN_ON_ERROR(panel_data_store_add_observer(ui_page_dashboard_store_observer, NULL), TAG,
+                        "failed to attach dashboard observer");
     s_refresh_timer = lv_timer_create(ui_page_dashboard_refresh_timer_cb, 2000, NULL);
     s_ready = true;
     return ESP_OK;

@@ -130,7 +130,7 @@
 - `2026-07-14` 已通过 `/dev/cu.usbserial-210` 烧录到 ESP32-P4 EVB。
 - 启动日志确认 `dashboard_visible=yes cards=27 children=8`、`VERIFY:ui:dashboard_rendered:PASS`、`VERIFY:ui:dashboard_card_count:n=27`。
 - P4 已连接 `192.168.110.87`，HA 已进入 `READY`，27 个白名单实体均收到有效状态；连续观察约一分钟无崩溃或重启。
-- 最终重烧录后的复测中，宿主机与 P4 均暂时无法连接 `192.168.71.4:8123`；P4 保持稳定并停留在 HA `CONNECTING`，需在 UTM/HA 恢复可达后继续控制验收。
+- `2026-07-15` 复测确认 P4 可从 `192.168.110.87` 跨网段访问 `192.168.71.4:8123`，HA 进入 `READY`，路由可达性已恢复并验证通过。
 
 ### 尚未完成
 

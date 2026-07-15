@@ -13,6 +13,7 @@ typedef enum {
     PANEL_SENSOR_KIND_TEXT,
     PANEL_SENSOR_KIND_TIMESTAMP,
     PANEL_SENSOR_KIND_ACTION,
+    PANEL_SENSOR_KIND_CLIMATE,
 } panel_sensor_kind_t;
 
 typedef enum {
@@ -33,8 +34,16 @@ typedef struct {
     panel_sensor_kind_t kind;
     double value_numeric;
     char value_text[384];
+    double current_temperature;
+    double target_temperature;
+    double min_temperature;
+    double max_temperature;
+    double target_temperature_step;
+    char supported_modes[80];
     uint64_t updated_at_ms;
     panel_sensor_freshness_t freshness;
+    bool has_current_temperature;
+    bool has_target_temperature;
     bool available;
 } panel_sensor_t;
 
@@ -55,6 +64,7 @@ size_t panel_data_store_entity_count(void);
 size_t panel_data_store_rejected_count(void);
 void panel_data_store_tick_freshness(uint64_t now_ms);
 esp_err_t panel_data_store_set_observer(panel_data_store_observer_cb_t observer, void *user_data);
+esp_err_t panel_data_store_add_observer(panel_data_store_observer_cb_t observer, void *user_data);
 void panel_data_store_iterate(panel_data_store_iterate_cb_t callback, void *user_data);
 void panel_data_store_log_summary(void);
 void panel_data_store_on_ha_state_change(const ha_client_state_change_t *change, void *user_data);

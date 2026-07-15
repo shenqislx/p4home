@@ -216,6 +216,38 @@
       "group": "衣帽间",
       "kind": "binary",
       "control": { "domain": "switch", "on_service": "turn_on", "off_service": "turn_off" }
+    },
+    {
+      "entity_id": "climate.maxi_cn_2042551926_a07s",
+      "label": "客厅风管机",
+      "icon": "climate",
+      "group": "客厅",
+      "unit": "F",
+      "kind": "climate"
+    },
+    {
+      "entity_id": "climate.xiaomi_cn_995583138_h44h00",
+      "label": "阳台卧空调",
+      "icon": "climate",
+      "group": "阳台卧",
+      "unit": "F",
+      "kind": "climate"
+    },
+    {
+      "entity_id": "climate.xiaomi_cn_928331306_h43h00",
+      "label": "书房空调",
+      "icon": "climate",
+      "group": "书房",
+      "unit": "F",
+      "kind": "climate"
+    },
+    {
+      "entity_id": "climate.xiaomi_cn_995762630_h44h00",
+      "label": "主卧空调",
+      "icon": "climate",
+      "group": "主卧",
+      "unit": "F",
+      "kind": "climate"
     }
   ]
 }
