@@ -40,6 +40,11 @@ config P4HOME_HA_CLIENT_INITIAL_STATES_TIMEOUT_MS
     range 1000 60000
     default 10000
 
+config P4HOME_HA_CLIENT_MAX_INITIAL_ENTITIES
+    int "Maximum initial-state entities"
+    range 1 128
+    default 48
+
 config P4HOME_HA_CLIENT_MAX_EVENT_JSON_BYTES
     int "Max inbound HA event JSON bytes"
     range 2048 65536

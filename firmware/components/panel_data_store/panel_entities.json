@@ -248,6 +248,38 @@
       "group": "主卧",
       "unit": "F",
       "kind": "climate"
+    },
+    {
+      "entity_id": "script.p4home_home_mode",
+      "label": "回家模式",
+      "icon": "mode",
+      "group": "快捷模式",
+      "kind": "action",
+      "control": { "domain": "script", "on_service": "turn_on" }
+    },
+    {
+      "entity_id": "script.p4home_away_mode",
+      "label": "离家模式",
+      "icon": "mode",
+      "group": "快捷模式",
+      "kind": "action",
+      "control": { "domain": "script", "on_service": "turn_on" }
+    },
+    {
+      "entity_id": "script.p4home_sleep_mode",
+      "label": "睡眠模式",
+      "icon": "mode",
+      "group": "快捷模式",
+      "kind": "action",
+      "control": { "domain": "script", "on_service": "turn_on" }
+    },
+    {
+      "entity_id": "script.p4home_comfort_mode",
+      "label": "舒适模式",
+      "icon": "mode",
+      "group": "快捷模式",
+      "kind": "action",
+      "control": { "domain": "script", "on_service": "turn_on" }
     }
   ]
 }

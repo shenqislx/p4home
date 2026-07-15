@@ -17,6 +17,7 @@
 #include "ui_fonts.h"
 #include "ui_page_climate.h"
 #include "ui_page_dashboard.h"
+#include "ui_page_quick_modes.h"
 
 static const char *TAG = "ui_pages";
 static bool s_display_ready;
@@ -25,6 +26,7 @@ static lv_obj_t *s_settings_page;
 static lv_obj_t *s_gateway_page;
 static lv_obj_t *s_dashboard_nav_button;
 static lv_obj_t *s_climate_nav_button;
+static lv_obj_t *s_quick_modes_nav_button;
 static lv_obj_t *s_home_nav_button;
 static lv_obj_t *s_settings_nav_button;
 static lv_obj_t *s_gateway_nav_button;
@@ -73,6 +75,8 @@ const char *ui_pages_page_to_text(ui_pages_page_t page)
         return "dashboard";
     case UI_PAGES_PAGE_CLIMATE:
         return "climate";
+    case UI_PAGES_PAGE_QUICK_MODES:
+        return "modes";
     default:
         return "unknown";
     }
@@ -91,6 +95,8 @@ static const char *ui_pages_page_to_label(ui_pages_page_t page)
         return "Lights";
     case UI_PAGES_PAGE_CLIMATE:
         return "Climate";
+    case UI_PAGES_PAGE_QUICK_MODES:
+        return "Modes";
     default:
         return "Unknown";
     }
@@ -115,6 +121,9 @@ static const char *ui_pages_text_to_page_label(const char *text)
     }
     if (strcmp(text, "climate") == 0) {
         return "Climate";
+    }
+    if (strcmp(text, "modes") == 0) {
+        return "Modes";
     }
     return text;
 }
@@ -733,11 +742,21 @@ void ui_pages_show_page_locked(ui_pages_page_t page)
         }
     }
 
+    if (ui_page_quick_modes_root() != NULL) {
+        if (page == UI_PAGES_PAGE_QUICK_MODES) {
+            lv_obj_clear_flag(ui_page_quick_modes_root(), LV_OBJ_FLAG_HIDDEN);
+            ui_page_quick_modes_show();
+        } else {
+            lv_obj_add_flag(ui_page_quick_modes_root(), LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
     ui_pages_style_nav_button_locked(s_home_nav_button, page == UI_PAGES_PAGE_HOME);
     ui_pages_style_nav_button_locked(s_settings_nav_button, page == UI_PAGES_PAGE_SETTINGS);
     ui_pages_style_nav_button_locked(s_gateway_nav_button, page == UI_PAGES_PAGE_GATEWAY);
     ui_pages_style_nav_button_locked(s_dashboard_nav_button, page == UI_PAGES_PAGE_DASHBOARD);
     ui_pages_style_nav_button_locked(s_climate_nav_button, page == UI_PAGES_PAGE_CLIMATE);
+    ui_pages_style_nav_button_locked(s_quick_modes_nav_button, page == UI_PAGES_PAGE_QUICK_MODES);
 }
 
 static void ui_pages_nav_button_event_cb(lv_event_t *event)
@@ -826,6 +845,17 @@ esp_err_t ui_pages_render_bootstrap(void)
     lv_obj_set_style_text_font(subtitle, ui_pages_text_font(), LV_PART_MAIN);
     lv_obj_set_style_text_color(subtitle, lv_color_hex(0x8b949e), LV_PART_MAIN);
     lv_obj_align(subtitle, LV_ALIGN_TOP_LEFT, 40, 58);
+
+    s_quick_modes_nav_button = lv_button_create(screen);
+    lv_obj_set_size(s_quick_modes_nav_button, 104, 44);
+    lv_obj_align(s_quick_modes_nav_button, LV_ALIGN_TOP_RIGHT, -600, 28);
+    lv_obj_add_event_cb(s_quick_modes_nav_button, ui_pages_nav_button_event_cb, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)UI_PAGES_PAGE_QUICK_MODES);
+    lv_obj_t *quick_modes_nav_label = lv_label_create(s_quick_modes_nav_button);
+    lv_label_set_text(quick_modes_nav_label, "Modes");
+    lv_obj_set_style_text_font(quick_modes_nav_label, ui_pages_text_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(quick_modes_nav_label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_center(quick_modes_nav_label);
 
     s_dashboard_nav_button = lv_button_create(screen);
     lv_obj_set_size(s_dashboard_nav_button, 104, 44);
@@ -1159,6 +1189,11 @@ esp_err_t ui_pages_render_bootstrap(void)
     ESP_RETURN_ON_ERROR(ui_page_climate_init(), TAG, "failed to init climate page");
     if (ui_page_climate_root() != NULL) {
         lv_obj_add_flag(ui_page_climate_root(), LV_OBJ_FLAG_HIDDEN);
+    }
+
+    ESP_RETURN_ON_ERROR(ui_page_quick_modes_init(), TAG, "failed to init quick modes page");
+    if (ui_page_quick_modes_root() != NULL) {
+        lv_obj_add_flag(ui_page_quick_modes_root(), LV_OBJ_FLAG_HIDDEN);
     }
 
     ui_pages_refresh_settings_locked(NULL);

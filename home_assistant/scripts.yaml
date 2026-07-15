@@ -1,0 +1,97 @@
+p4home_home_mode:
+  alias: P4Home Home Mode
+  description: Return-home lighting and living-room ducted AC cooling
+  mode: restart
+  sequence:
+    - action: switch.turn_off
+      target:
+        entity_id: &p4home_all_lights
+          - switch.xiaomi_cn_2102782855_w2_on_p_2_1
+          - switch.xiaomi_cn_2102782855_w2_on_p_3_1
+          - switch.xiaomi_cn_2103924239_w3_on_p_2_1
+          - switch.xiaomi_cn_2103924239_w3_on_p_3_1
+          - switch.xiaomi_cn_2103924239_w3_on_p_4_1
+          - switch.xiaomi_cn_2102549075_w2_on_p_2_1
+          - switch.xiaomi_cn_2102549075_w2_on_p_3_1
+          - switch.xiaomi_cn_2102740233_w1_on_p_2_1
+          - switch.xiaomi_cn_2102497207_w1_on_p_2_1
+          - switch.xiaomi_cn_2103852966_w3_on_p_2_1
+          - switch.xiaomi_cn_2103852966_w3_on_p_3_1
+          - switch.xiaomi_cn_2103852966_w3_on_p_4_1
+          - switch.xiaomi_cn_2102810987_w2_on_p_2_1
+          - switch.xiaomi_cn_2102810987_w2_on_p_3_1
+          - switch.xiaomi_cn_2098197440_w2_on_p_2_1
+          - switch.xiaomi_cn_2098197440_w2_on_p_3_1
+          - switch.xiaomi_cn_2102811604_w2_on_p_2_1
+          - switch.xiaomi_cn_2102536019_w1_on_p_2_1
+          - switch.xiaomi_cn_2102780196_w2_on_p_2_1
+          - switch.xiaomi_cn_2102780196_w2_on_p_3_1
+          - switch.xiaomi_cn_2098199596_w2_on_p_2_1
+          - switch.xiaomi_cn_2098199596_w2_on_p_3_1
+          - switch.xiaomi_cn_2102443388_w2_on_p_2_1
+          - switch.xiaomi_cn_2102443388_w2_on_p_3_1
+          - switch.xiaomi_cn_2103857429_w3_on_p_2_1
+          - switch.xiaomi_cn_2103857429_w3_on_p_3_1
+          - switch.xiaomi_cn_2102733573_w1_on_p_2_1
+    - action: switch.turn_on
+      target:
+        entity_id:
+          - switch.xiaomi_cn_2102780196_w2_on_p_2_1
+          - switch.xiaomi_cn_2102782855_w2_on_p_3_1
+          - switch.xiaomi_cn_2102549075_w2_on_p_2_1
+          - switch.xiaomi_cn_2102810987_w2_on_p_3_1
+          - switch.xiaomi_cn_2102811604_w2_on_p_2_1
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: climate.maxi_cn_2042551926_a07s
+      data:
+        hvac_mode: cool
+
+p4home_away_mode:
+  alias: P4Home Away Mode
+  description: Turn off every configured light and AC
+  mode: restart
+  sequence:
+    - action: switch.turn_off
+      target:
+        entity_id: *p4home_all_lights
+    - action: climate.turn_off
+      target:
+        entity_id:
+          - climate.maxi_cn_2042551926_a07s
+          - climate.xiaomi_cn_995583138_h44h00
+          - climate.xiaomi_cn_928331306_h43h00
+          - climate.xiaomi_cn_995762630_h44h00
+
+p4home_sleep_mode:
+  alias: P4Home Sleep Mode
+  description: Turn off every configured light and cool the main bedroom
+  mode: restart
+  sequence:
+    - action: switch.turn_off
+      target:
+        entity_id: *p4home_all_lights
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: climate.xiaomi_cn_995762630_h44h00
+      data:
+        hvac_mode: cool
+
+p4home_comfort_mode:
+  alias: P4Home Comfort Mode
+  description: Comfortable lighting for the living and study areas
+  mode: restart
+  sequence:
+    - action: switch.turn_off
+      target:
+        entity_id: *p4home_all_lights
+    - action: switch.turn_on
+      target:
+        entity_id:
+          - switch.xiaomi_cn_2103924239_w3_on_p_2_1
+          - switch.xiaomi_cn_2102782855_w2_on_p_3_1
+          - switch.xiaomi_cn_2102549075_w2_on_p_2_1
+          - switch.xiaomi_cn_2102810987_w2_on_p_2_1
+          - switch.xiaomi_cn_2098197440_w2_on_p_2_1
+          - switch.xiaomi_cn_2102811604_w2_on_p_2_1
+          - switch.xiaomi_cn_2102780196_w2_on_p_2_1

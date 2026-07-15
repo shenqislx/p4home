@@ -206,7 +206,7 @@ static int ui_page_dashboard_find_slot(const char *entity_id)
 static bool ui_page_dashboard_build_one(const panel_sensor_t *sensor, void *user_data)
 {
     (void)user_data;
-    if (sensor->kind == PANEL_SENSOR_KIND_CLIMATE) {
+    if (sensor->kind == PANEL_SENSOR_KIND_CLIMATE || sensor->kind == PANEL_SENSOR_KIND_ACTION) {
         return true;
     }
     if (s_slot_count >= CONFIG_P4HOME_PANEL_STORE_MAX_ENTITIES) {
@@ -222,7 +222,8 @@ static bool ui_page_dashboard_build_one(const panel_sensor_t *sensor, void *user
 
 static void ui_page_dashboard_apply_snapshot_locked(const panel_sensor_t *sensor)
 {
-    if (sensor == NULL || sensor->kind == PANEL_SENSOR_KIND_CLIMATE) {
+    if (sensor == NULL || sensor->kind == PANEL_SENSOR_KIND_CLIMATE ||
+        sensor->kind == PANEL_SENSOR_KIND_ACTION) {
         return;
     }
     panel_sensor_t display_sensor = *sensor;

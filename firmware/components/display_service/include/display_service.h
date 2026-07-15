@@ -12,6 +12,7 @@ typedef enum {
     DISPLAY_SERVICE_PAGE_GATEWAY = 2,
     DISPLAY_SERVICE_PAGE_DASHBOARD = 3,
     DISPLAY_SERVICE_PAGE_CLIMATE = 4,
+    DISPLAY_SERVICE_PAGE_QUICK_MODES = 5,
 } display_service_page_t;
 
 esp_err_t display_service_init(void);
