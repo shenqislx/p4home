@@ -7,6 +7,7 @@
 #include "esp_err.h"
 
 typedef enum {
+    /** Legacy values retained only so existing NVS data can be migrated safely. */
     SETTINGS_SERVICE_STARTUP_PAGE_HOME = 0,
     SETTINGS_SERVICE_STARTUP_PAGE_SETTINGS = 1,
     SETTINGS_SERVICE_STARTUP_PAGE_DASHBOARD = 2,

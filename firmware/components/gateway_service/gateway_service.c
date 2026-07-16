@@ -85,10 +85,6 @@ const char *gateway_service_command_type_text(gateway_service_command_type_t typ
     switch (type) {
     case GATEWAY_SERVICE_COMMAND_SYNC_STATE:
         return "sync_state";
-    case GATEWAY_SERVICE_COMMAND_SHOW_HOME:
-        return "show_home";
-    case GATEWAY_SERVICE_COMMAND_SHOW_SETTINGS:
-        return "show_settings";
     default:
         return "unknown";
     }

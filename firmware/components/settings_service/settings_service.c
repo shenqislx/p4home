@@ -46,28 +46,14 @@ static portMUX_TYPE s_ha_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static const char *settings_service_page_to_text(settings_service_startup_page_t page)
 {
-    switch (page) {
-    case SETTINGS_SERVICE_STARTUP_PAGE_HOME:
-        return "home";
-    case SETTINGS_SERVICE_STARTUP_PAGE_SETTINGS:
-        return "settings";
-    case SETTINGS_SERVICE_STARTUP_PAGE_DASHBOARD:
-        return "dashboard";
-    default:
-        return "unknown";
-    }
+    (void)page;
+    return "dashboard";
 }
 
 static settings_service_startup_page_t settings_service_normalize_page(uint8_t raw_page)
 {
-    switch ((settings_service_startup_page_t)raw_page) {
-    case SETTINGS_SERVICE_STARTUP_PAGE_HOME:
-    case SETTINGS_SERVICE_STARTUP_PAGE_SETTINGS:
-    case SETTINGS_SERVICE_STARTUP_PAGE_DASHBOARD:
-        return (settings_service_startup_page_t)raw_page;
-    default:
-        return SETTINGS_SERVICE_STARTUP_PAGE_DASHBOARD;
-    }
+    (void)raw_page;
+    return SETTINGS_SERVICE_STARTUP_PAGE_DASHBOARD;
 }
 
 static esp_err_t settings_service_open_handle(nvs_open_mode_t mode, nvs_handle_t *handle)
@@ -240,6 +226,16 @@ esp_err_t settings_service_init(void)
     if (err != ESP_OK) {
         nvs_close(handle);
         ESP_RETURN_ON_ERROR(err, TAG, "failed to store boot_count");
+    }
+
+    if (raw_startup_page != (uint8_t)SETTINGS_SERVICE_STARTUP_PAGE_DASHBOARD) {
+        ESP_LOGW(TAG, "migrating legacy startup_page=%u to dashboard", raw_startup_page);
+        err = nvs_set_u8(handle, SETTINGS_KEY_STARTUP_PAGE,
+                         (uint8_t)SETTINGS_SERVICE_STARTUP_PAGE_DASHBOARD);
+        if (err != ESP_OK) {
+            nvs_close(handle);
+            ESP_RETURN_ON_ERROR(err, TAG, "failed to migrate startup_page");
+        }
     }
 
     err = nvs_commit(handle);

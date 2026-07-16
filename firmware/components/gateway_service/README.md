@@ -9,11 +9,11 @@
 - 单条 pending command 邮箱
 - 最近一次命令执行结果摘要
 
-当前 demo command：
+当前自检 command：
 
 - `sync_state`
-- `show_home`
-- `show_settings`
+
+`Home`、`Settings`、`Gateway` 三个早期诊断页面已从产品 UI 移除；网关服务继续为启动自检和状态快照提供后台能力。
 
 当前阶段不负责：
 

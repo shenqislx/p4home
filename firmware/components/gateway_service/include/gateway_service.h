@@ -7,8 +7,6 @@
 
 typedef enum {
     GATEWAY_SERVICE_COMMAND_SYNC_STATE = 0,
-    GATEWAY_SERVICE_COMMAND_SHOW_HOME = 1,
-    GATEWAY_SERVICE_COMMAND_SHOW_SETTINGS = 2,
 } gateway_service_command_type_t;
 
 typedef struct {

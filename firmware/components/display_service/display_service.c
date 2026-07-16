@@ -1,8 +1,5 @@
 #include "display_service.h"
 
-#include <stdio.h>
-
-#include "audio_service.h"
 #include "bsp/esp32_p4_function_ev_board.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -141,21 +138,6 @@ const char *display_service_current_page_text(void)
     return ui_pages_current_page_text();
 }
 
-esp_err_t display_service_refresh_gateway_page(void)
-{
-    ESP_RETURN_ON_FALSE(s_display_ready, ESP_ERR_INVALID_STATE, TAG,
-                        "display not ready");
-    if (ui_pages_current_page() != UI_PAGES_PAGE_GATEWAY) {
-        return ESP_OK;
-    }
-    ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
-                        "failed to lock LVGL");
-
-    ui_pages_refresh_gateway_locked(NULL);
-    bsp_display_unlock();
-    return ESP_OK;
-}
-
 esp_err_t display_service_set_touch_state(bool attached)
 {
     ESP_RETURN_ON_FALSE(s_display_ready, ESP_ERR_INVALID_STATE, TAG,
@@ -168,48 +150,18 @@ esp_err_t display_service_set_touch_state(bool attached)
     return err;
 }
 
-esp_err_t display_service_record_touch_sample(uint16_t x, uint16_t y, uint32_t click_count)
-{
-    ESP_RETURN_ON_FALSE(s_display_ready, ESP_ERR_INVALID_STATE, TAG,
-                        "display not ready");
-    ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
-                        "failed to lock LVGL");
-
-    esp_err_t err = ui_pages_record_touch_sample_locked(x, y, click_count);
-    bsp_display_unlock();
-    return err;
-}
-
 esp_err_t display_service_set_audio_state(bool speaker_ready, bool microphone_ready)
 {
-    char metrics_text[96];
-
-    snprintf(metrics_text, sizeof(metrics_text),
-             "speaker_ready=%s microphone_ready=%s tone_played=%s mic_capture_ready=%s",
-             speaker_ready ? "yes" : "no",
-             microphone_ready ? "yes" : "no",
-             audio_service_tone_played() ? "yes" : "no",
-             audio_service_microphone_capture_ready() ? "yes" : "no");
-
-    esp_err_t err =
-        ui_pages_update_meter_ui(NULL, -1, metrics_text, ui_pages_audio_meter_running());
-    if (err == ESP_OK && ui_pages_current_page() == UI_PAGES_PAGE_SETTINGS) {
-        ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
-                            "failed to lock LVGL");
-        ui_pages_refresh_settings_locked(NULL);
-        bsp_display_unlock();
-    } else if (err == ESP_OK && ui_pages_current_page() == UI_PAGES_PAGE_GATEWAY) {
-        ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
-                            "failed to lock LVGL");
-        ui_pages_refresh_gateway_locked(NULL);
-        bsp_display_unlock();
-    }
-    return err;
+    (void)speaker_ready;
+    (void)microphone_ready;
+    return s_display_ready ? ESP_OK : ESP_ERR_INVALID_STATE;
 }
 
 esp_err_t display_service_set_voice_state(const char *status_text, const char *metrics_text)
 {
-    return ui_pages_update_voice_labels(status_text, metrics_text);
+    (void)status_text;
+    (void)metrics_text;
+    return s_display_ready ? ESP_OK : ESP_ERR_INVALID_STATE;
 }
 
 esp_err_t display_service_set_backlight_enabled(bool enabled)
@@ -218,17 +170,6 @@ esp_err_t display_service_set_backlight_enabled(bool enabled)
     ESP_RETURN_ON_ERROR(err, TAG, "failed to change display backlight");
     ui_pages_set_backlight_enabled(enabled);
 
-    if (s_display_ready && ui_pages_current_page() == UI_PAGES_PAGE_SETTINGS) {
-        ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
-                            "failed to lock LVGL");
-        ui_pages_refresh_settings_locked(NULL);
-        bsp_display_unlock();
-    } else if (s_display_ready && ui_pages_current_page() == UI_PAGES_PAGE_GATEWAY) {
-        ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
-                            "failed to lock LVGL");
-        ui_pages_refresh_gateway_locked(NULL);
-        bsp_display_unlock();
-    }
     return ESP_OK;
 }
 

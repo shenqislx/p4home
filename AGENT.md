@@ -75,13 +75,13 @@ Codex 扩展目录；当前固化 skill：`esp-idf-v5.5.4`。
 | `board_support` | 板级编排：初始化各 service、网关状态发布、命令处理 |
 | `diagnostics_service` | 启动信息、芯片/分区/内存、心跳 |
 | `display_service` | DSI/LVGL 显示初始化、对外 API；页面 UI 委托 `ui_pages` |
-| `ui_pages` | 三页 LVGL UI、音频/触摸/网关控件与运行时标签更新 |
+| `ui_pages` | `Modes / Lights / Climate` 三个产品页及顶部导航 |
 | `touch_service` | GT911 / LVGL 触摸 |
 | `audio_service` | Codec、提示音、采集 |
 | `sr_service` | ESP-SR（AFE / WakeNet / MultiNet）与运行时任务 |
 | `network_service` | `esp_netif`、STA、hostname/device_id |
 | `gateway_service` | 本地网关状态与命令邮箱（脚手架） |
-| `settings_service` | NVS：启动页、启动计数等 |
+| `settings_service` | NVS：HA 凭证、固定 Dashboard 启动页兼容迁移、启动计数等 |
 
 `ui_core/`：预留（导航壳/主题），当前逻辑主要在 `ui_pages`。
 

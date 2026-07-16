@@ -1,7 +1,6 @@
 #include <stdbool.h>
 #include <inttypes.h>
 #include <stdio.h>
-#include <string.h>
 
 #include "esp_err.h"
 #include "esp_log.h"
@@ -93,14 +92,7 @@ void app_main(void)
         }
     }
 
-    const char *startup_page = board_support_startup_page_text();
-    if (startup_page != NULL && strcmp(startup_page, "settings") == 0) {
-        (void)display_service_show_page(DISPLAY_SERVICE_PAGE_SETTINGS);
-    } else if (startup_page != NULL && strcmp(startup_page, "home") == 0) {
-        (void)display_service_show_page(DISPLAY_SERVICE_PAGE_HOME);
-    } else {
-        (void)display_service_show_page(DISPLAY_SERVICE_PAGE_DASHBOARD);
-    }
+    (void)display_service_show_page(DISPLAY_SERVICE_PAGE_DASHBOARD);
 
     ESP_LOGW(TAG, "network ready=%s stack_ready=%s event_loop_ready=%s sta_netif_ready=%s hostname=%s device_id=%s mac=%s",
              board_support_network_ready() ? "yes" : "no",

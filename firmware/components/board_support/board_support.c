@@ -43,14 +43,7 @@ static esp_err_t board_support_publish_gateway_state_internal(const char *reason
         .voice_state = sr_service_voice_state_text(),
     };
 
-    esp_err_t err = gateway_service_publish_panel_state(&panel_state, reason);
-    if (err == ESP_OK && display_service_is_ready()) {
-        esp_err_t display_err = display_service_refresh_gateway_page();
-        if (display_err != ESP_OK) {
-            ESP_LOGW(TAG, "failed to refresh gateway page: %s", esp_err_to_name(display_err));
-        }
-    }
-    return err;
+    return gateway_service_publish_panel_state(&panel_state, reason);
 }
 
 static esp_err_t board_support_process_gateway_command_internal(bool *processed)
@@ -76,35 +69,14 @@ static esp_err_t board_support_process_gateway_command_internal(bool *processed)
         action_err = board_support_publish_gateway_state_internal("command-sync-state");
         detail = "state sync executed";
         break;
-    case GATEWAY_SERVICE_COMMAND_SHOW_HOME:
-        action_err = display_service_show_page(DISPLAY_SERVICE_PAGE_HOME);
-        detail = "home page requested";
-        break;
-    case GATEWAY_SERVICE_COMMAND_SHOW_SETTINGS:
-        action_err = display_service_show_page(DISPLAY_SERVICE_PAGE_SETTINGS);
-        detail = "settings page requested";
-        break;
     default:
         action_err = ESP_ERR_NOT_SUPPORTED;
         detail = "unsupported command";
         break;
     }
 
-    if (action_err == ESP_OK && command.type != GATEWAY_SERVICE_COMMAND_SYNC_STATE) {
-        action_err = board_support_publish_gateway_state_internal("command-applied");
-        detail = "command applied and state synced";
-    }
-
     gateway_service_complete_command(&command, action_err == ESP_OK,
                                      action_err == ESP_OK ? detail : esp_err_to_name(action_err));
-
-    if (display_service_is_ready()) {
-        esp_err_t display_err = display_service_refresh_gateway_page();
-        if (display_err != ESP_OK) {
-            ESP_LOGW(TAG, "failed to refresh gateway page after command: %s",
-                     esp_err_to_name(display_err));
-        }
-    }
 
     if (action_err != ESP_OK) {
         ESP_LOGW(TAG, "gateway command %s failed: %s",
