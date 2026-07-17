@@ -42,6 +42,7 @@
 
 - [总体方案](./docs/esp32-p4-smart-panel-plan.md)
 - [本地验证计划](./docs/p4-local-validation-plan.md)
+- [UTM 桥接网络与 P4/HA 通讯操作手册](./docs/utm-bridged-network-p4-home-assistant-guide.md)
 - [Harness 工作流](./docs/harness-workflow.md)
 
 建议开发顺序：
