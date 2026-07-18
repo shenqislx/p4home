@@ -7,6 +7,7 @@
 
 #include "sdkconfig.h"
 #include "ui_fonts.h"
+#include "ui_pixel_theme.h"
 
 #define UI_CARD_TREND_POINTS CONFIG_P4HOME_PANEL_STORE_HISTORY_POINTS
 
@@ -88,36 +89,23 @@ static void ui_card_trend_delete_cb(lv_event_t *event)
 
 static void ui_card_trend_apply_visual(lv_obj_t *card, const panel_sensor_t *sensor)
 {
-    uint32_t bg = 0x101827;
-    uint32_t grad = 0x0f2a38;
+    uint32_t bg = UI_PIXEL_COLOR_PANEL;
     uint32_t border = 0x1d4ed8;
     if (strcmp(sensor->icon, "water") == 0 || strcmp(sensor->group, "Water") == 0) {
-        grad = 0x0d342f;
         border = 0x0f766e;
     } else if (strcmp(sensor->icon, "battery") == 0) {
-        grad = 0x26320f;
         border = 0x65a30d;
     } else if (strcmp(sensor->icon, "weather") == 0) {
-        grad = 0x33290d;
         border = 0xca8a04;
     }
     if (!sensor->available) {
-        grad = 0x331821;
+        bg = 0x24171b;
         border = 0x7f1d1d;
     } else if (sensor->freshness == PANEL_SENSOR_FRESHNESS_STALE) {
-        grad = 0x33290d;
+        bg = 0x211d13;
         border = 0x854d0e;
     }
-
-    lv_obj_set_style_bg_color(card, lv_color_hex(bg), LV_PART_MAIN);
-    lv_obj_set_style_bg_grad_color(card, lv_color_hex(grad), LV_PART_MAIN);
-    lv_obj_set_style_bg_grad_dir(card, LV_GRAD_DIR_VER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(card, lv_color_hex(border), LV_PART_MAIN);
-    lv_obj_set_style_border_width(card, 1, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(card, 24, LV_PART_MAIN);
-    lv_obj_set_style_shadow_spread(card, 1, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(card, ui_card_trend_accent(sensor), LV_PART_MAIN);
-    lv_obj_set_style_shadow_opa(card, sensor->available ? LV_OPA_30 : LV_OPA_10, LV_PART_MAIN);
+    ui_pixel_style_card(card, bg, border);
 }
 
 static void ui_card_trend_format_value(const panel_sensor_t *sensor, char *buffer, size_t buffer_len)
@@ -200,19 +188,20 @@ lv_obj_t *ui_card_trend_create(lv_obj_t *parent, const panel_sensor_t *sensor)
     lv_obj_set_user_data(card, ctx);
     lv_obj_add_event_cb(card, ui_card_trend_delete_cb, LV_EVENT_DELETE, ctx);
     lv_obj_set_size(card, 176, 180);
-    lv_obj_set_style_radius(card, 16, LV_PART_MAIN);
+    ui_pixel_style_card(card, UI_PIXEL_COLOR_PANEL, UI_PIXEL_COLOR_GRID);
     lv_obj_set_style_pad_all(card, 14, LV_PART_MAIN);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
     ctx->title = lv_label_create(card);
-    lv_obj_set_width(ctx->title, 94);
+    lv_obj_set_width(ctx->title, 86);
     lv_label_set_long_mode(ctx->title, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(ctx->title, ui_pages_text_font(), LV_PART_MAIN);
     lv_obj_set_style_text_color(ctx->title, lv_color_hex(0xeaf2ff), LV_PART_MAIN);
     lv_obj_align(ctx->title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     ctx->value = lv_label_create(card);
-    lv_obj_set_width(ctx->value, 58);
+    lv_obj_set_width(ctx->value, 54);
+    lv_obj_set_style_text_align(ctx->value, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
     lv_label_set_long_mode(ctx->value, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(ctx->value, ui_pages_text_font(), LV_PART_MAIN);
     lv_obj_set_style_text_color(ctx->value, lv_color_white(), LV_PART_MAIN);
@@ -224,13 +213,14 @@ lv_obj_t *ui_card_trend_create(lv_obj_t *parent, const panel_sensor_t *sensor)
     lv_chart_set_type(ctx->chart, LV_CHART_TYPE_LINE);
     lv_chart_set_point_count(ctx->chart, UI_CARD_TREND_POINTS);
     lv_chart_set_update_mode(ctx->chart, LV_CHART_UPDATE_MODE_SHIFT);
-    lv_obj_set_style_bg_opa(ctx->chart, LV_OPA_10, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(ctx->chart, lv_color_hex(0x020617), LV_PART_MAIN);
-    lv_obj_set_style_border_width(ctx->chart, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(ctx->chart, 10, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ctx->chart, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ctx->chart, lv_color_hex(UI_PIXEL_COLOR_SCREEN), LV_PART_MAIN);
+    lv_obj_set_style_border_width(ctx->chart, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(ctx->chart, lv_color_hex(UI_PIXEL_COLOR_GRID), LV_PART_MAIN);
+    lv_obj_set_style_radius(ctx->chart, 0, LV_PART_MAIN);
     lv_obj_set_style_line_width(ctx->chart, 1, LV_PART_MAIN);
     lv_obj_set_style_line_color(ctx->chart, lv_color_hex(0x24415a), LV_PART_MAIN);
-    lv_obj_set_style_line_width(ctx->chart, 3, LV_PART_ITEMS);
+    lv_obj_set_style_line_width(ctx->chart, 2, LV_PART_ITEMS);
     lv_obj_set_style_size(ctx->chart, 0, 0, LV_PART_INDICATOR);
     ctx->series = lv_chart_add_series(ctx->chart, ui_card_trend_accent(sensor), LV_CHART_AXIS_PRIMARY_Y);
 

@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "ui_fonts.h"
+#include "ui_pixel_theme.h"
 
 static const char *ui_card_multiline_safe_text(const char *text, const char *fallback)
 {
@@ -37,23 +38,17 @@ static void ui_card_multiline_set_labels(lv_obj_t *card, const panel_sensor_t *s
     lv_label_set_text(meta, meta_text);
     uint32_t color = 0x24203a;
     uint32_t border = 0x334155;
-    uint32_t border_width = 0;
     if (!sensor->available) {
         color = 0x2f1f24;
         border = 0x7f1d1d;
-        border_width = 2;
     } else if (sensor->freshness == PANEL_SENSOR_FRESHNESS_UNKNOWN) {
         color = 0x202632;
         border = 0x475569;
-        border_width = 2;
     } else if (sensor->freshness == PANEL_SENSOR_FRESHNESS_STALE) {
         color = 0x30291d;
         border = 0x854d0e;
-        border_width = 2;
     }
-    lv_obj_set_style_bg_color(card, lv_color_hex(color), LV_PART_MAIN);
-    lv_obj_set_style_border_color(card, lv_color_hex(border), LV_PART_MAIN);
-    lv_obj_set_style_border_width(card, border_width, LV_PART_MAIN);
+    ui_pixel_style_card(card, color, border);
 }
 
 static void ui_card_multiline_style_labels(lv_obj_t *title, lv_obj_t *value, lv_obj_t *meta)
@@ -74,14 +69,13 @@ lv_obj_t *ui_card_multiline_create(lv_obj_t *parent, const panel_sensor_t *senso
 {
     lv_obj_t *card = lv_obj_create(parent);
     lv_obj_set_size(card, 280, 120);
-    lv_obj_set_style_bg_color(card, lv_color_hex(0x24203a), LV_PART_MAIN);
-    lv_obj_set_style_border_width(card, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(card, 18, LV_PART_MAIN);
+    ui_pixel_style_card(card, 0x24203a, UI_PIXEL_COLOR_GRID);
     lv_obj_set_style_pad_all(card, 16, LV_PART_MAIN);
     lv_obj_t *title = lv_label_create(card);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_obj_t *value = lv_label_create(card);
     lv_obj_set_width(value, 248);
+    lv_obj_set_height(value, 42);
     lv_label_set_long_mode(value, LV_LABEL_LONG_WRAP);
     lv_obj_align(value, LV_ALIGN_TOP_LEFT, 0, 28);
     lv_obj_t *meta = lv_label_create(card);

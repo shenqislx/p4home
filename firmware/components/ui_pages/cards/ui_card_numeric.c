@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "ui_fonts.h"
+#include "ui_pixel_theme.h"
 
 static const char *ui_card_numeric_safe_text(const char *text, const char *fallback)
 {
@@ -37,10 +38,7 @@ static void ui_card_numeric_apply_visual(lv_obj_t *card, const panel_sensor_t *s
         color = 0x30291d;
         border = 0x854d0e;
     }
-    lv_obj_set_style_bg_color(card, lv_color_hex(color), LV_PART_MAIN);
-    lv_obj_set_style_border_color(card, lv_color_hex(border), LV_PART_MAIN);
-    lv_obj_set_style_border_width(card, sensor->freshness == PANEL_SENSOR_FRESHNESS_FRESH && sensor->available ? 0 : 2,
-                                  LV_PART_MAIN);
+    ui_pixel_style_card(card, color, border);
 }
 
 static void ui_card_numeric_set_labels(lv_obj_t *card, const panel_sensor_t *sensor)
@@ -84,9 +82,7 @@ lv_obj_t *ui_card_numeric_create(lv_obj_t *parent, const panel_sensor_t *sensor)
 {
     lv_obj_t *card = lv_obj_create(parent);
     lv_obj_set_size(card, 280, 120);
-    lv_obj_set_style_bg_color(card, lv_color_hex(0x1f2a37), LV_PART_MAIN);
-    lv_obj_set_style_border_width(card, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(card, 18, LV_PART_MAIN);
+    ui_pixel_style_card(card, UI_PIXEL_COLOR_PANEL, UI_PIXEL_COLOR_GRID);
     lv_obj_set_style_pad_all(card, 16, LV_PART_MAIN);
 
     lv_obj_t *title = lv_label_create(card);

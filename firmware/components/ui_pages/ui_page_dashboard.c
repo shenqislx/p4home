@@ -17,6 +17,7 @@
 #include "ui_card_trend.h"
 #include "ui_card_weather.h"
 #include "ui_fonts.h"
+#include "ui_pixel_theme.h"
 #include "ui_status_banner.h"
 
 static const char *TAG = "ui_dashboard";
@@ -103,13 +104,13 @@ static void ui_page_dashboard_update_page_locked(void)
 
     if (s_page_label != NULL) {
         char page_text[24];
-        snprintf(page_text, sizeof(page_text), "%u / %u",
+        snprintf(page_text, sizeof(page_text), "[%u/%u]",
                  (unsigned)(s_current_page + 1U), (unsigned)page_count);
         lv_label_set_text(s_page_label, page_text);
     }
     if (s_pager_title != NULL) {
         char title_text[32];
-        snprintf(title_text, sizeof(title_text), "Lights  %u", (unsigned)s_slot_count);
+        snprintf(title_text, sizeof(title_text), "LIGHTS:%u", (unsigned)s_slot_count);
         lv_label_set_text(s_pager_title, title_text);
     }
     if (s_prev_button != NULL) {
@@ -147,14 +148,14 @@ static lv_obj_t *ui_page_dashboard_create_page_button(lv_obj_t *parent, const ch
     lv_obj_t *button = lv_button_create(parent);
     lv_obj_set_size(button, 44, 36);
     lv_obj_align(button, align, x_offset, 0);
-    lv_obj_set_style_radius(button, 8, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x263241), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x17202b), LV_PART_MAIN | LV_STATE_DISABLED);
+    ui_pixel_style_button(button, UI_PIXEL_COLOR_PANEL_ALT, UI_PIXEL_COLOR_GRID);
     lv_obj_add_event_cb(button, ui_page_dashboard_page_button_cb, LV_EVENT_CLICKED,
                         (void *)direction);
 
     lv_obj_t *label = lv_label_create(button);
     lv_label_set_text(label, symbol);
+    lv_obj_set_style_text_font(label, ui_pages_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, lv_color_hex(UI_PIXEL_COLOR_INK), LV_PART_MAIN);
     lv_obj_center(label);
     return button;
 }
@@ -351,24 +352,24 @@ esp_err_t ui_page_dashboard_init(void)
     s_pager = lv_obj_create(s_root);
     lv_obj_set_size(s_pager, 944, UI_DASHBOARD_PAGER_HEIGHT);
     lv_obj_align(s_pager, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    lv_obj_set_style_bg_opa(s_pager, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_pager, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(s_pager, 0, LV_PART_MAIN);
+    ui_pixel_style_surface(s_pager, UI_PIXEL_COLOR_SCREEN, UI_PIXEL_COLOR_GRID);
+    lv_obj_set_style_pad_all(s_pager, 2, LV_PART_MAIN);
     lv_obj_clear_flag(s_pager, LV_OBJ_FLAG_SCROLLABLE);
 
     s_pager_title = lv_label_create(s_pager);
-    lv_obj_set_style_text_font(s_pager_title, ui_pages_text_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_pager_title, lv_color_hex(0xa8b3c2), LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_pager_title, ui_pages_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_pager_title, lv_color_hex(UI_PIXEL_COLOR_MUTED), LV_PART_MAIN);
     lv_obj_align(s_pager_title, LV_ALIGN_LEFT_MID, 4, 0);
 
     s_page_label = lv_label_create(s_pager);
-    lv_obj_set_style_text_font(s_page_label, ui_pages_text_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_page_label, lv_color_hex(0xe5edf5), LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_page_label, ui_pages_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_page_label, lv_color_hex(UI_PIXEL_COLOR_CYAN), LV_PART_MAIN);
     lv_obj_align(s_page_label, LV_ALIGN_CENTER, 0, 0);
 
-    s_prev_button = ui_page_dashboard_create_page_button(s_pager, LV_SYMBOL_LEFT,
+    /* The pixel font intentionally contains ASCII only; use native pixel glyphs here. */
+    s_prev_button = ui_page_dashboard_create_page_button(s_pager, "<",
                                                          LV_ALIGN_CENTER, -82, -1);
-    s_next_button = ui_page_dashboard_create_page_button(s_pager, LV_SYMBOL_RIGHT,
+    s_next_button = ui_page_dashboard_create_page_button(s_pager, ">",
                                                          LV_ALIGN_CENTER, 82, 1);
 
     panel_data_store_iterate(ui_page_dashboard_build_one, NULL);

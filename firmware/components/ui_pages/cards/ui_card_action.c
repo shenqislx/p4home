@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "ha_client.h"
 #include "ui_fonts.h"
+#include "ui_pixel_theme.h"
 
 static const char *TAG = "ui_card_action";
 
@@ -164,9 +165,7 @@ lv_obj_t *ui_card_action_create(lv_obj_t *parent, const panel_sensor_t *sensor)
     lv_obj_set_user_data(card, ctx);
     lv_obj_add_event_cb(card, ui_card_action_delete_cb, LV_EVENT_DELETE, ctx);
     lv_obj_set_size(card, 280, 120);
-    lv_obj_set_style_bg_color(card, lv_color_hex(0x1f2a37), LV_PART_MAIN);
-    lv_obj_set_style_border_width(card, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(card, 18, LV_PART_MAIN);
+    ui_pixel_style_card(card, UI_PIXEL_COLOR_PANEL, UI_PIXEL_COLOR_GRID);
     lv_obj_set_style_pad_all(card, 16, LV_PART_MAIN);
 
     ctx->title = lv_label_create(card);
@@ -179,14 +178,13 @@ lv_obj_t *ui_card_action_create(lv_obj_t *parent, const panel_sensor_t *sensor)
     ctx->button = lv_button_create(card);
     lv_obj_set_size(ctx->button, 82, 44);
     lv_obj_align(ctx->button, LV_ALIGN_TOP_RIGHT, 0, 0);
-    lv_obj_set_style_bg_color(ctx->button, lv_color_hex(0x2563eb), LV_PART_MAIN);
-    lv_obj_set_style_radius(ctx->button, 10, LV_PART_MAIN);
+    ui_pixel_style_button(ctx->button, 0x164e63, UI_PIXEL_COLOR_CYAN);
     lv_obj_add_event_cb(ctx->button, ui_card_action_click_cb, LV_EVENT_CLICKED, ctx);
 
     ctx->button_label = lv_label_create(ctx->button);
     lv_label_set_text(ctx->button_label, "Run");
     lv_obj_set_style_text_color(ctx->button_label, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_text_font(ctx->button_label, ui_pages_text_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(ctx->button_label, ui_pages_pixel_font(), LV_PART_MAIN);
     lv_obj_center(ctx->button_label);
 
     ctx->meta = lv_label_create(card);

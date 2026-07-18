@@ -13,21 +13,26 @@
 #include "ha_client.h"
 #include "panel_data_store.h"
 #include "ui_fonts.h"
+#include "ui_pixel_theme.h"
 
 static const char *TAG = "ui_quick_modes";
 
 #define UI_QUICK_MODE_COUNT 4U
+#define UI_QUICK_MODE_CARD_WIDTH 448
+#define UI_QUICK_MODE_CARD_HEIGHT 182
 
 typedef struct {
     const char *entity_id;
     const char *title;
-    const char *summary;
     uint32_t color;
+    uint32_t accent;
 } ui_quick_mode_def_t;
 
 typedef struct {
     lv_obj_t *button;
-    lv_obj_t *state;
+    lv_obj_t *indicator_glow;
+    lv_obj_t *indicator;
+    uint32_t indicator_color;
     bool available;
 } ui_quick_mode_view_t;
 
@@ -43,27 +48,27 @@ typedef struct {
 static const ui_quick_mode_def_t s_modes[UI_QUICK_MODE_COUNT] = {
     {
         .entity_id = "script.p4home_home_mode",
-        .title = "回家模式",
-        .summary = "迎宾照明  风管机制冷",
+        .title = "回家",
         .color = 0x24624a,
+        .accent = UI_PIXEL_COLOR_CYAN,
     },
     {
         .entity_id = "script.p4home_away_mode",
-        .title = "离家模式",
-        .summary = "全屋灯具与空调关闭",
+        .title = "离家",
         .color = 0x424b55,
+        .accent = UI_PIXEL_COLOR_MUTED,
     },
     {
         .entity_id = "script.p4home_sleep_mode",
-        .title = "睡眠模式",
-        .summary = "全屋熄灯  主卧制冷",
+        .title = "睡眠",
         .color = 0x28567a,
+        .accent = UI_PIXEL_COLOR_BLUE,
     },
     {
         .entity_id = "script.p4home_comfort_mode",
-        .title = "舒适模式",
-        .summary = "重点区域照明",
+        .title = "舒适",
         .color = 0x896a25,
+        .accent = UI_PIXEL_COLOR_YELLOW,
     },
 };
 
@@ -87,22 +92,42 @@ static int ui_page_quick_modes_find(const char *entity_id)
     return -1;
 }
 
+static void ui_page_quick_modes_set_indicator(size_t index, uint32_t color)
+{
+    if (index >= UI_QUICK_MODE_COUNT || s_views[index].indicator == NULL) {
+        return;
+    }
+    if (s_views[index].indicator_color == color) {
+        return;
+    }
+    s_views[index].indicator_color = color;
+    if (s_views[index].indicator_glow != NULL) {
+        lv_obj_set_style_bg_color(s_views[index].indicator_glow, lv_color_hex(color),
+                                  LV_PART_MAIN);
+    }
+    lv_obj_set_style_bg_color(s_views[index].indicator, lv_color_hex(color), LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_views[index].indicator, lv_color_hex(UI_PIXEL_COLOR_INK),
+                                  LV_PART_MAIN);
+}
+
 static void ui_page_quick_modes_refresh_buttons(void)
 {
     size_t available_count = 0U;
     for (size_t i = 0; i < UI_QUICK_MODE_COUNT; ++i) {
         available_count += s_views[i].available ? 1U : 0U;
-        bool disabled = s_pending_index >= 0 || !s_views[i].available;
+        /* A pending action is rejected by the event handler. Do not restyle all
+         * four large cards from inside a click callback. */
+        bool disabled = !s_views[i].available;
         if (disabled) {
             lv_obj_add_state(s_views[i].button, LV_STATE_DISABLED);
         } else {
             lv_obj_remove_state(s_views[i].button, LV_STATE_DISABLED);
         }
-        if (s_pending_index == (int)i) {
-            lv_label_set_text(s_views[i].state, "正在执行");
-        } else {
-            lv_label_set_text(s_views[i].state, s_views[i].available ? "可用" : "等待连接");
-        }
+        uint32_t indicator_color = s_pending_index == (int)i
+                                       ? UI_PIXEL_COLOR_YELLOW
+                                       : (s_views[i].available ? s_modes[i].accent
+                                                               : UI_PIXEL_COLOR_GRID);
+        ui_page_quick_modes_set_indicator(i, indicator_color);
     }
     if (s_pending_index < 0 && s_status != NULL) {
         if (available_count < UI_QUICK_MODE_COUNT) {
@@ -126,10 +151,10 @@ static void ui_page_quick_modes_apply_result(void *user_data)
     ui_page_quick_modes_refresh_buttons();
     if (result->result == ESP_OK) {
         lv_label_set_text_fmt(s_status, "%s已发送", s_modes[result->index].title);
-        lv_label_set_text(s_views[result->index].state, "已发送");
+        ui_page_quick_modes_set_indicator(result->index, s_modes[result->index].accent);
     } else {
         lv_label_set_text_fmt(s_status, "%s执行失败", s_modes[result->index].title);
-        lv_label_set_text(s_views[result->index].state, "执行失败");
+        ui_page_quick_modes_set_indicator(result->index, UI_PIXEL_COLOR_RED);
     }
     free(result);
 }
@@ -171,6 +196,9 @@ static void ui_page_quick_modes_click(lv_event_t *event)
     if (index >= UI_QUICK_MODE_COUNT || !s_views[index].available) {
         return;
     }
+
+    ESP_LOGW(TAG, "VERIFY:ui:mode_click:PASS index=%u title=%s",
+             (unsigned)index, s_modes[index].title);
 
     ui_quick_mode_task_arg_t *arg = calloc(1U, sizeof(*arg));
     if (arg == NULL) {
@@ -223,34 +251,105 @@ static void ui_page_quick_modes_store_observer(const panel_sensor_t *sensor, voi
 static lv_obj_t *ui_page_quick_modes_create_button(lv_obj_t *parent, size_t index,
                                                     int32_t x, int32_t y)
 {
-    lv_obj_t *button = lv_button_create(parent);
-    if (button == NULL) {
+    lv_obj_t *deep_layer = lv_obj_create(parent);
+    if (deep_layer == NULL) {
         return NULL;
     }
-    lv_obj_set_size(button, 456, 190);
+    lv_obj_set_size(deep_layer, UI_QUICK_MODE_CARD_WIDTH, UI_QUICK_MODE_CARD_HEIGHT);
+    lv_obj_set_pos(deep_layer, x + 8, y + 8);
+    ui_pixel_style_surface(deep_layer, 0x020405, 0x071014);
+    lv_obj_set_style_pad_all(deep_layer, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(deep_layer, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *mid_layer = lv_obj_create(parent);
+    if (mid_layer == NULL) {
+        lv_obj_delete(deep_layer);
+        return NULL;
+    }
+    lv_obj_set_size(mid_layer, UI_QUICK_MODE_CARD_WIDTH, UI_QUICK_MODE_CARD_HEIGHT);
+    lv_obj_set_pos(mid_layer, x + 4, y + 4);
+    ui_pixel_style_surface(mid_layer, 0x0c1418, s_modes[index].accent);
+    lv_obj_set_style_pad_all(mid_layer, 0, LV_PART_MAIN);
+    lv_obj_set_style_outline_width(mid_layer, 1, LV_PART_MAIN);
+    lv_obj_set_style_outline_color(mid_layer, lv_color_hex(s_modes[index].accent), LV_PART_MAIN);
+    lv_obj_set_style_outline_opa(mid_layer, LV_OPA_30, LV_PART_MAIN);
+    lv_obj_clear_flag(mid_layer, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *button = lv_button_create(parent);
+    if (button == NULL) {
+        lv_obj_delete(mid_layer);
+        lv_obj_delete(deep_layer);
+        return NULL;
+    }
+    lv_obj_set_size(button, UI_QUICK_MODE_CARD_WIDTH, UI_QUICK_MODE_CARD_HEIGHT);
     lv_obj_set_pos(button, x, y);
-    lv_obj_set_style_radius(button, 8, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(button, lv_color_hex(s_modes[index].color), LV_PART_MAIN);
+    /* The two backing layers already provide depth. The interactive face is
+     * deliberately shadow-free so a press only redraws its own fixed bounds. */
+    ui_pixel_style_surface(button, s_modes[index].color, s_modes[index].accent);
+    lv_obj_set_style_bg_color(button, lv_color_hex(s_modes[index].color),
+                              LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(button, lv_color_hex(UI_PIXEL_COLOR_INK),
+                                  LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_outline_width(button, 1, LV_PART_MAIN);
+    lv_obj_set_style_outline_pad(button, 0, LV_PART_MAIN);
+    lv_obj_set_style_outline_color(button, lv_color_hex(s_modes[index].accent), LV_PART_MAIN);
+    lv_obj_set_style_outline_opa(button, LV_OPA_30, LV_PART_MAIN);
     lv_obj_set_style_bg_color(button, lv_color_hex(0x252b32), LV_PART_MAIN | LV_STATE_DISABLED);
+    lv_obj_set_style_border_color(button, lv_color_hex(0x26333a),
+                                  LV_PART_MAIN | LV_STATE_DISABLED);
+    lv_obj_set_style_pad_all(button, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(button, ui_page_quick_modes_click, LV_EVENT_CLICKED,
                         (void *)(uintptr_t)index);
 
+    lv_obj_t *accent_bar = lv_obj_create(button);
+    lv_obj_set_size(accent_bar, 8, 112);
+    lv_obj_align(accent_bar, LV_ALIGN_LEFT_MID, 18, 0);
+    lv_obj_set_style_bg_color(accent_bar, lv_color_hex(s_modes[index].accent), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(accent_bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(accent_bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(accent_bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(accent_bar, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(accent_bar, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title_shadow = lv_label_create(button);
+    lv_label_set_text(title_shadow, s_modes[index].title);
+    lv_obj_set_style_text_font(title_shadow, ui_pages_mode_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(title_shadow, 8, LV_PART_MAIN);
+    lv_obj_set_style_text_color(title_shadow, lv_color_hex(0x020405), LV_PART_MAIN);
+    lv_obj_align(title_shadow, LV_ALIGN_CENTER, 6, 6);
+
+    lv_obj_t *title_depth = lv_label_create(button);
+    lv_label_set_text(title_depth, s_modes[index].title);
+    lv_obj_set_style_text_font(title_depth, ui_pages_mode_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(title_depth, 8, LV_PART_MAIN);
+    lv_obj_set_style_text_color(title_depth, lv_color_hex(s_modes[index].accent), LV_PART_MAIN);
+    lv_obj_align(title_depth, LV_ALIGN_CENTER, 3, 3);
+
     lv_obj_t *title = lv_label_create(button);
     lv_label_set_text(title, s_modes[index].title);
-    lv_obj_set_style_text_font(title, ui_pages_text_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_pos(title, 8, 10);
+    lv_obj_set_style_text_font(title, ui_pages_mode_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(title, 8, LV_PART_MAIN);
+    lv_obj_set_style_text_color(title, lv_color_hex(UI_PIXEL_COLOR_INK), LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
 
-    lv_obj_t *summary = lv_label_create(button);
-    lv_label_set_text(summary, s_modes[index].summary);
-    lv_obj_set_style_text_font(summary, ui_pages_text_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(summary, lv_color_hex(0xdce5ed), LV_PART_MAIN);
-    lv_obj_set_pos(summary, 8, 64);
+    s_views[index].indicator_glow = lv_obj_create(button);
+    lv_obj_set_size(s_views[index].indicator_glow, 20, 20);
+    lv_obj_align(s_views[index].indicator_glow, LV_ALIGN_BOTTOM_RIGHT, -12, -12);
+    lv_obj_set_style_bg_opa(s_views[index].indicator_glow, LV_OPA_20, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_views[index].indicator_glow, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_views[index].indicator_glow, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_views[index].indicator_glow, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(s_views[index].indicator_glow,
+                      LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-    s_views[index].state = lv_label_create(button);
-    lv_obj_set_style_text_font(s_views[index].state, ui_pages_text_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_views[index].state, lv_color_hex(0xb9c6d2), LV_PART_MAIN);
-    lv_obj_set_pos(s_views[index].state, 8, 124);
+    s_views[index].indicator = lv_obj_create(button);
+    lv_obj_set_size(s_views[index].indicator, 12, 12);
+    lv_obj_align(s_views[index].indicator, LV_ALIGN_BOTTOM_RIGHT, -16, -16);
+    lv_obj_set_style_radius(s_views[index].indicator, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_views[index].indicator, 1, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(s_views[index].indicator, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_views[index].indicator, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(s_views[index].indicator, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     return button;
 }
 
@@ -272,7 +371,7 @@ esp_err_t ui_page_quick_modes_init(void)
     lv_obj_t *title = lv_label_create(s_root);
     lv_label_set_text(title, "快捷模式");
     lv_obj_set_style_text_font(title, ui_pages_text_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xe5edf5), LV_PART_MAIN);
+    lv_obj_set_style_text_color(title, lv_color_hex(UI_PIXEL_COLOR_CYAN), LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 4, 0);
 
     s_status = lv_label_create(s_root);

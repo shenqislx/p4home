@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "ui_fonts.h"
+#include "ui_pixel_theme.h"
 
 typedef struct {
     lv_obj_t *title;
@@ -200,32 +201,26 @@ static lv_color_t ui_card_weather_condition_color(const char *condition)
 static void ui_card_weather_style_day_panel(lv_obj_t *panel)
 {
     lv_obj_set_size(panel, 442, 132);
-    lv_obj_set_style_radius(panel, 14, LV_PART_MAIN);
+    ui_pixel_style_card(panel, UI_PIXEL_COLOR_PANEL, 0x1d4ed8);
     lv_obj_set_style_pad_all(panel, 14, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(panel, lv_color_hex(0x101827), LV_PART_MAIN);
-    lv_obj_set_style_bg_grad_color(panel, lv_color_hex(0x102a38), LV_PART_MAIN);
-    lv_obj_set_style_bg_grad_dir(panel, LV_GRAD_DIR_VER, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(panel, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_color(panel, lv_color_hex(0x1d4ed8), LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(panel, 18, LV_PART_MAIN);
-    lv_obj_set_style_shadow_spread(panel, 1, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(panel, lv_color_hex(0x38bdf8), LV_PART_MAIN);
-    lv_obj_set_style_shadow_opa(panel, LV_OPA_20, LV_PART_MAIN);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
 }
 
 static void ui_card_weather_style_icon(lv_obj_t *icon)
 {
     lv_obj_set_size(icon, 58, 58);
-    lv_obj_set_style_radius(icon, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_radius(icon, 0, LV_PART_MAIN);
     lv_obj_set_style_bg_color(icon, lv_color_hex(0xfacc15), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(icon, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(icon, 2, LV_PART_MAIN);
     lv_obj_set_style_border_color(icon, lv_color_hex(0xfef3c7), LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(icon, 18, LV_PART_MAIN);
-    lv_obj_set_style_shadow_opa(icon, LV_OPA_40, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(icon, lv_color_hex(0xfacc15), LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(icon, 10, LV_PART_MAIN);
+    lv_obj_set_style_shadow_color(icon, lv_color_hex(UI_PIXEL_COLOR_YELLOW), LV_PART_MAIN);
+    lv_obj_set_style_shadow_opa(icon, LV_OPA_20, LV_PART_MAIN);
+    lv_obj_set_style_outline_width(icon, 1, LV_PART_MAIN);
+    lv_obj_set_style_outline_pad(icon, 1, LV_PART_MAIN);
+    lv_obj_set_style_outline_color(icon, lv_color_hex(UI_PIXEL_COLOR_YELLOW), LV_PART_MAIN);
+    lv_obj_set_style_outline_opa(icon, LV_OPA_40, LV_PART_MAIN);
     lv_obj_clear_flag(icon, LV_OBJ_FLAG_SCROLLABLE);
 }
 
@@ -258,13 +253,13 @@ static void ui_card_weather_build_day_panel(lv_obj_t *card, lv_obj_t **panel, lv
     lv_obj_align(*condition, LV_ALIGN_TOP_LEFT, 78, 0);
 
     *temp = ui_card_weather_create_panel_label(*panel, lv_color_hex(0xfff7d6), 330);
-    lv_obj_align(*temp, LV_ALIGN_TOP_LEFT, 78, 34);
+    lv_obj_align(*temp, LV_ALIGN_TOP_LEFT, 78, 28);
 
     *rain = ui_card_weather_create_panel_label(*panel, lv_color_hex(0xbfdbfe), 330);
-    lv_obj_align(*rain, LV_ALIGN_TOP_LEFT, 78, 66);
+    lv_obj_align(*rain, LV_ALIGN_TOP_LEFT, 78, 56);
 
     *air = ui_card_weather_create_panel_label(*panel, lv_color_hex(0xd1fae5), 330);
-    lv_obj_align(*air, LV_ALIGN_TOP_LEFT, 78, 98);
+    lv_obj_align(*air, LV_ALIGN_TOP_LEFT, 78, 84);
 }
 
 static void ui_card_weather_apply_day(ui_card_weather_day_t *day, lv_obj_t *panel, lv_obj_t *icon,
@@ -276,9 +271,10 @@ static void ui_card_weather_apply_day(ui_card_weather_day_t *day, lv_obj_t *pane
     snprintf(condition_text, sizeof(condition_text), "%s %s", day->title, day->condition);
 
     lv_obj_set_style_bg_color(icon, accent, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(icon, accent, LV_PART_MAIN);
     lv_obj_set_style_border_color(panel, accent, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(panel, accent, LV_PART_MAIN);
+    lv_obj_set_style_outline_color(panel, accent, LV_PART_MAIN);
+    lv_obj_set_style_shadow_color(icon, accent, LV_PART_MAIN);
+    lv_obj_set_style_outline_color(icon, accent, LV_PART_MAIN);
     lv_label_set_text(icon_label, ui_card_weather_condition_symbol(day->condition));
     lv_label_set_text(condition, condition_text);
     lv_label_set_text(temp, day->temp);
@@ -288,28 +284,16 @@ static void ui_card_weather_apply_day(ui_card_weather_day_t *day, lv_obj_t *pane
 
 static void ui_card_weather_apply_visual(lv_obj_t *card, const panel_sensor_t *sensor)
 {
-    uint32_t grad = 0x0f2a38;
+    uint32_t background = UI_PIXEL_COLOR_PANEL;
     uint32_t border = 0x1d4ed8;
-    lv_opa_t shadow = LV_OPA_30;
     if (!sensor->available) {
-        grad = 0x331821;
+        background = 0x24171b;
         border = 0x7f1d1d;
-        shadow = LV_OPA_10;
     } else if (sensor->freshness == PANEL_SENSOR_FRESHNESS_STALE) {
-        grad = 0x33290d;
+        background = 0x211d13;
         border = 0x854d0e;
-        shadow = LV_OPA_20;
     }
-
-    lv_obj_set_style_bg_color(card, lv_color_hex(0x101827), LV_PART_MAIN);
-    lv_obj_set_style_bg_grad_color(card, lv_color_hex(grad), LV_PART_MAIN);
-    lv_obj_set_style_bg_grad_dir(card, LV_GRAD_DIR_VER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(card, lv_color_hex(border), LV_PART_MAIN);
-    lv_obj_set_style_border_width(card, 1, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(card, 24, LV_PART_MAIN);
-    lv_obj_set_style_shadow_spread(card, 1, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(card, lv_color_hex(0x38bdf8), LV_PART_MAIN);
-    lv_obj_set_style_shadow_opa(card, shadow, LV_PART_MAIN);
+    ui_pixel_style_card(card, background, border);
 }
 
 lv_obj_t *ui_card_weather_create(lv_obj_t *parent, const panel_sensor_t *sensor)
@@ -323,7 +307,7 @@ lv_obj_t *ui_card_weather_create(lv_obj_t *parent, const panel_sensor_t *sensor)
     lv_obj_set_user_data(card, ctx);
     lv_obj_add_event_cb(card, ui_card_weather_delete_cb, LV_EVENT_DELETE, ctx);
     lv_obj_set_size(card, 944, 210);
-    lv_obj_set_style_radius(card, 16, LV_PART_MAIN);
+    ui_pixel_style_card(card, UI_PIXEL_COLOR_PANEL, UI_PIXEL_COLOR_GRID);
     lv_obj_set_style_pad_all(card, 16, LV_PART_MAIN);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 

@@ -9,6 +9,7 @@
 #include "ui_page_climate.h"
 #include "ui_page_dashboard.h"
 #include "ui_page_quick_modes.h"
+#include "ui_pixel_theme.h"
 
 static const char *TAG = "ui_pages";
 static bool s_display_ready;
@@ -39,11 +40,9 @@ static void ui_pages_style_nav_button_locked(lv_obj_t *button, bool selected)
         return;
     }
 
-    lv_obj_set_style_bg_color(button,
-                              selected ? lv_palette_main(LV_PALETTE_BLUE) : lv_color_hex(0x30363d),
-                              LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(button, 0, LV_PART_MAIN);
+    ui_pixel_style_button(button,
+                          selected ? UI_PIXEL_COLOR_PANEL_ALT : UI_PIXEL_COLOR_SCREEN,
+                          selected ? UI_PIXEL_COLOR_CYAN : UI_PIXEL_COLOR_GRID);
 }
 
 void ui_pages_show_page_locked(ui_pages_page_t page)
@@ -93,6 +92,7 @@ static void ui_pages_nav_button_event_cb(lv_event_t *event)
     }
 
     ui_pages_page_t page = (ui_pages_page_t)(intptr_t)lv_event_get_user_data(event);
+    ESP_LOGW(TAG, "VERIFY:ui:navigation:PASS page=%s", ui_pages_page_to_text(page));
     ui_pages_show_page_locked(page);
 }
 
@@ -116,8 +116,8 @@ static lv_obj_t *ui_pages_create_nav_button(lv_obj_t *screen,
         return NULL;
     }
     lv_label_set_text(label, label_text);
-    lv_obj_set_style_text_font(label, ui_pages_text_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label, ui_pages_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, lv_color_hex(UI_PIXEL_COLOR_INK), LV_PART_MAIN);
     lv_obj_center(label);
     return button;
 }
@@ -128,27 +128,42 @@ esp_err_t ui_pages_render_bootstrap(void)
                         "failed to lock LVGL");
 
     lv_obj_t *screen = lv_screen_active();
-    lv_obj_set_style_bg_color(screen, lv_color_hex(0x0d1117), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(UI_PIXEL_COLOR_SCREEN), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_text_font(screen, ui_pages_text_font(), LV_PART_MAIN);
 
     lv_obj_t *title = lv_label_create(screen);
-    lv_label_set_text(title, "p4home");
-    lv_obj_set_style_text_color(title, lv_color_white(), LV_PART_MAIN);
+    lv_label_set_text(title, "P4HOME // CTRL");
+    lv_obj_set_width(title, 520);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_font(title, ui_pages_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(title, lv_color_hex(UI_PIXEL_COLOR_CYAN), LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 40, 24);
 
     lv_obj_t *subtitle = lv_label_create(screen);
-    lv_label_set_text(subtitle, "Home Assistant Smart Panel");
-    lv_obj_set_style_text_font(subtitle, ui_pages_text_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(subtitle, lv_color_hex(0x8b949e), LV_PART_MAIN);
+    lv_label_set_text(subtitle, "ESP32-P4 // SYS:READY");
+    lv_obj_set_width(subtitle, 520);
+    lv_label_set_long_mode(subtitle, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_font(subtitle, ui_pages_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(subtitle, lv_color_hex(UI_PIXEL_COLOR_MUTED), LV_PART_MAIN);
     lv_obj_align(subtitle, LV_ALIGN_TOP_LEFT, 40, 58);
 
+    lv_obj_t *header_rule = lv_obj_create(screen);
+    lv_obj_set_size(header_rule, 944, 2);
+    lv_obj_align(header_rule, LV_ALIGN_TOP_LEFT, 40, 88);
+    lv_obj_set_style_bg_color(header_rule, lv_color_hex(UI_PIXEL_COLOR_GRID), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(header_rule, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(header_rule, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(header_rule, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(header_rule, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(header_rule, LV_OBJ_FLAG_SCROLLABLE);
+
     s_quick_modes_nav_button =
-        ui_pages_create_nav_button(screen, "Modes", -264, UI_PAGES_PAGE_QUICK_MODES);
+        ui_pages_create_nav_button(screen, "MODES", -264, UI_PAGES_PAGE_QUICK_MODES);
     s_dashboard_nav_button =
-        ui_pages_create_nav_button(screen, "Lights", -152, UI_PAGES_PAGE_DASHBOARD);
+        ui_pages_create_nav_button(screen, "LIGHTS", -152, UI_PAGES_PAGE_DASHBOARD);
     s_climate_nav_button =
-        ui_pages_create_nav_button(screen, "Climate", -40, UI_PAGES_PAGE_CLIMATE);
+        ui_pages_create_nav_button(screen, "CLIMATE", -40, UI_PAGES_PAGE_CLIMATE);
     if (s_quick_modes_nav_button == NULL || s_dashboard_nav_button == NULL ||
         s_climate_nav_button == NULL) {
         bsp_display_unlock();

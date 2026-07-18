@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "ha_client.h"
 #include "ui_fonts.h"
+#include "ui_pixel_theme.h"
 
 static const char *TAG = "ui_card_climate";
 
@@ -151,8 +152,18 @@ static void ui_card_climate_style_mode_buttons(ui_card_climate_ctx_t *ctx)
         lv_obj_set_style_bg_color(ctx->mode_buttons[i],
                                   lv_color_hex(active ? active_colors[i] : 0x29313a),
                                   LV_PART_MAIN);
-        lv_obj_set_style_border_width(ctx->mode_buttons[i], active ? 2 : 0, LV_PART_MAIN);
-        lv_obj_set_style_border_color(ctx->mode_buttons[i], lv_color_hex(0xe5edf5), LV_PART_MAIN);
+        lv_obj_set_style_border_width(ctx->mode_buttons[i], 2, LV_PART_MAIN);
+        lv_obj_set_style_border_color(ctx->mode_buttons[i],
+                                      lv_color_hex(active ? UI_PIXEL_COLOR_INK
+                                                          : UI_PIXEL_COLOR_GRID),
+                                      LV_PART_MAIN);
+        lv_obj_set_style_outline_color(ctx->mode_buttons[i],
+                                       lv_color_hex(active ? active_colors[i]
+                                                           : UI_PIXEL_COLOR_GRID),
+                                       LV_PART_MAIN);
+        lv_obj_set_style_outline_opa(ctx->mode_buttons[i],
+                                     active ? LV_OPA_60 : LV_OPA_20,
+                                     LV_PART_MAIN);
         if (!supported || !ctx->available || ctx->pending) {
             lv_obj_add_state(ctx->mode_buttons[i], LV_STATE_DISABLED);
         } else {
@@ -181,9 +192,7 @@ static void ui_card_climate_set_visual(lv_obj_t *card, ui_card_climate_ctx_t *ct
         background = 0x1d3325;
         border = 0x52b877;
     }
-    lv_obj_set_style_bg_color(card, lv_color_hex(background), LV_PART_MAIN);
-    lv_obj_set_style_border_color(card, lv_color_hex(border), LV_PART_MAIN);
-    lv_obj_set_style_border_width(card, 2, LV_PART_MAIN);
+    ui_pixel_style_card(card, background, border);
 }
 
 static void ui_card_climate_apply_labels(lv_obj_t *card, const panel_sensor_t *sensor)
@@ -239,6 +248,12 @@ static void ui_card_climate_apply_labels(lv_obj_t *card, const panel_sensor_t *s
     bool on = sensor->available && strcmp(sensor->value_text, "off") != 0;
     lv_obj_set_style_bg_color(ctx->power_button,
                               lv_color_hex(on ? 0xe06a4f : 0x394552), LV_PART_MAIN);
+    lv_obj_set_style_outline_color(ctx->power_button,
+                                   lv_color_hex(on ? UI_PIXEL_COLOR_RED
+                                                   : UI_PIXEL_COLOR_GRID),
+                                   LV_PART_MAIN);
+    lv_obj_set_style_outline_opa(ctx->power_button, on ? LV_OPA_60 : LV_OPA_20,
+                                 LV_PART_MAIN);
     ui_card_climate_set_controls_disabled(ctx, !sensor->available || ctx->pending);
     if (!sensor->has_target_temperature) {
         lv_obj_add_state(ctx->temperature_buttons[0], LV_STATE_DISABLED);
@@ -400,8 +415,7 @@ static lv_obj_t *ui_card_climate_create_button(lv_obj_t *parent, int32_t x, int3
     lv_obj_t *button = lv_button_create(parent);
     lv_obj_set_size(button, width, height);
     lv_obj_set_pos(button, x, y);
-    lv_obj_set_style_radius(button, 8, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x29313a), LV_PART_MAIN);
+    ui_pixel_style_button(button, UI_PIXEL_COLOR_PANEL_ALT, UI_PIXEL_COLOR_GRID);
     lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, user_data);
     lv_obj_t *label = lv_label_create(button);
     lv_label_set_text(label, text);
@@ -434,7 +448,7 @@ lv_obj_t *ui_card_climate_create(lv_obj_t *parent, const panel_sensor_t *sensor)
     lv_obj_set_user_data(card, ctx);
     lv_obj_add_event_cb(card, ui_card_climate_delete_event, LV_EVENT_DELETE, ctx);
     lv_obj_set_size(card, 760, 402);
-    lv_obj_set_style_radius(card, 8, LV_PART_MAIN);
+    ui_pixel_style_card(card, UI_PIXEL_COLOR_PANEL, UI_PIXEL_COLOR_GRID);
     lv_obj_set_style_pad_all(card, 16, LV_PART_MAIN);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 

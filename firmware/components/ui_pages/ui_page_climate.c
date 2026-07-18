@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "ui_card_climate.h"
 #include "ui_fonts.h"
+#include "ui_pixel_theme.h"
 
 static const char *TAG = "ui_climate";
 
@@ -85,8 +86,7 @@ static lv_obj_t *ui_page_climate_create_page_button(lv_obj_t *parent, int32_t x,
     }
     lv_obj_set_size(button, 72, 104);
     lv_obj_set_pos(button, x, 155);
-    lv_obj_set_style_radius(button, 8, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x29313a), LV_PART_MAIN);
+    ui_pixel_style_button(button, UI_PIXEL_COLOR_PANEL_ALT, UI_PIXEL_COLOR_GRID);
     lv_obj_add_event_cb(button, ui_page_climate_page_event, LV_EVENT_CLICKED,
                         (void *)(intptr_t)direction);
     lv_obj_t *label = lv_label_create(button);
@@ -155,13 +155,14 @@ esp_err_t ui_page_climate_init(void)
     lv_obj_t *title = lv_label_create(s_root);
     lv_label_set_text(title, "空调控制");
     lv_obj_set_style_text_font(title, ui_pages_text_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xe5edf5), LV_PART_MAIN);
+    lv_obj_set_style_text_color(title, lv_color_hex(UI_PIXEL_COLOR_CYAN), LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 4, 0);
 
     s_summary = lv_label_create(s_root);
     lv_label_set_text(s_summary, "-- / -- | Home Assistant");
     lv_obj_set_style_text_font(s_summary, ui_pages_text_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_summary, lv_color_hex(0x8fa0b2), LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_summary, ui_pages_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_summary, lv_color_hex(UI_PIXEL_COLOR_MUTED), LV_PART_MAIN);
     lv_obj_align(s_summary, LV_ALIGN_TOP_RIGHT, -4, 0);
 
     s_grid = lv_obj_create(s_root);

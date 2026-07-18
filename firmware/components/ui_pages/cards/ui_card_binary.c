@@ -9,13 +9,17 @@
 #include "freertos/task.h"
 #include "ha_client.h"
 #include "ui_fonts.h"
+#include "ui_pixel_theme.h"
 
 static const char *TAG = "ui_card_binary";
 
 typedef struct {
+    lv_obj_t *group;
+    lv_obj_t *title_depth;
     lv_obj_t *title;
-    lv_obj_t *value;
-    lv_obj_t *meta;
+    lv_obj_t *state;
+    lv_obj_t *accent_bar;
+    lv_obj_t *indicator;
     lv_obj_t *toggle;
     char entity_id[128];
     char domain[16];
@@ -23,6 +27,7 @@ typedef struct {
     char off_service[24];
     char last_error[32];
     uint32_t binding_generation;
+    uint32_t visual_key;
     bool pending;
     bool deleted;
 } ui_card_binary_ctx_t;
@@ -50,18 +55,40 @@ static const char *ui_card_binary_safe_text(const char *text, const char *fallba
     return (text != NULL && text[0] != '\0') ? text : fallback;
 }
 
-static const char *ui_card_binary_status_text(const panel_sensor_t *sensor)
+typedef struct {
+    const char *match;
+    const char *short_title;
+} ui_card_binary_title_map_t;
+
+static const char *ui_card_binary_short_title(const char *label)
 {
-    if (!sensor->available) {
-        return "Offline";
+    static const ui_card_binary_title_map_t title_map[] = {
+        {"展示灯", "展示"},
+        {"杯子灯", "杯灯"},
+        {"镜柜灯", "镜灯"},
+        {"吸顶灯", "顶灯"},
+        {"风扇灯", "风扇"},
+        {"过道开关", "过道"},
+        {"过道灯", "过道"},
+        {"衣橱灯", "衣橱"},
+        {"吧台灯", "吧台"},
+        {"大灯", "主灯"},
+        {"射灯", "射灯"},
+        {"壁灯", "壁灯"},
+        {"筒灯", "筒灯"},
+        {"柜灯", "柜灯"},
+        {"花灯", "花灯"},
+        {"线灯", "线灯"},
+    };
+
+    if (label != NULL) {
+        for (size_t i = 0; i < sizeof(title_map) / sizeof(title_map[0]); ++i) {
+            if (strstr(label, title_map[i].match) != NULL) {
+                return title_map[i].short_title;
+            }
+        }
     }
-    if (sensor->freshness == PANEL_SENSOR_FRESHNESS_UNKNOWN) {
-        return "Loading";
-    }
-    if (sensor->freshness == PANEL_SENSOR_FRESHNESS_STALE) {
-        return "Stale";
-    }
-    return "Online";
+    return "照明";
 }
 
 static bool ui_card_binary_is_on(const panel_sensor_t *sensor)
@@ -77,43 +104,53 @@ static bool ui_card_binary_is_controllable(const panel_sensor_t *sensor)
            sensor->control_on_service[0] != '\0' && sensor->control_off_service[0] != '\0';
 }
 
-static void ui_card_binary_style_labels(lv_obj_t *title, lv_obj_t *value, lv_obj_t *meta)
+static void ui_card_binary_set_text_if_changed(lv_obj_t *label, const char *text)
 {
-    lv_obj_set_style_text_color(title, lv_color_hex(0xe5edf5), LV_PART_MAIN);
-    lv_obj_set_style_text_color(value, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(meta, lv_color_hex(0xa8b3c2), LV_PART_MAIN);
-    lv_obj_set_style_text_font(title, ui_pages_text_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_font(value, ui_pages_text_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_font(meta, ui_pages_text_font(), LV_PART_MAIN);
-    lv_obj_set_width(title, 196);
-    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(value, 104);
-    lv_label_set_long_mode(value, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(meta, 196);
-    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
+    if (label != NULL && text != NULL && strcmp(lv_label_get_text(label), text) != 0) {
+        lv_label_set_text(label, text);
+    }
 }
 
 static void ui_card_binary_set_visual(lv_obj_t *card, const panel_sensor_t *sensor, bool on)
 {
+    ui_card_binary_ctx_t *ctx = (ui_card_binary_ctx_t *)lv_obj_get_user_data(card);
     uint32_t color = on ? 0x3a3218 : 0x1a2028;
     uint32_t border = on ? 0xf3c64e : 0x344150;
+    uint32_t accent = on ? UI_PIXEL_COLOR_YELLOW : UI_PIXEL_COLOR_CYAN;
     uint32_t border_width = on ? 2 : 1;
+    uint32_t visual_key = on ? 1U : 0U;
     if (!sensor->available) {
         color = 0x2f1f24;
         border = 0x7f1d1d;
+        accent = UI_PIXEL_COLOR_RED;
         border_width = 2;
+        visual_key = 2U;
     } else if (sensor->freshness == PANEL_SENSOR_FRESHNESS_UNKNOWN) {
         color = 0x202632;
         border = 0x475569;
+        accent = UI_PIXEL_COLOR_MUTED;
         border_width = 2;
+        visual_key = 3U;
     } else if (sensor->freshness == PANEL_SENSOR_FRESHNESS_STALE) {
         color = 0x30291d;
         border = 0x854d0e;
+        accent = UI_PIXEL_COLOR_YELLOW;
         border_width = 2;
+        visual_key = 4U;
     }
-    lv_obj_set_style_bg_color(card, lv_color_hex(color), LV_PART_MAIN);
-    lv_obj_set_style_border_color(card, lv_color_hex(border), LV_PART_MAIN);
+    if (ctx != NULL && ctx->visual_key == visual_key) {
+        return;
+    }
+    if (ctx != NULL) {
+        ctx->visual_key = visual_key;
+    }
+    ui_pixel_style_card(card, color, border);
     lv_obj_set_style_border_width(card, border_width, LV_PART_MAIN);
+    if (ctx != NULL) {
+        lv_obj_set_style_bg_color(ctx->accent_bar, lv_color_hex(accent), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(ctx->indicator, lv_color_hex(accent), LV_PART_MAIN);
+        lv_obj_set_style_text_color(ctx->title_depth, lv_color_hex(accent), LV_PART_MAIN);
+    }
 }
 
 static void ui_card_binary_set_labels(lv_obj_t *card, const panel_sensor_t *sensor)
@@ -125,7 +162,7 @@ static void ui_card_binary_set_labels(lv_obj_t *card, const panel_sensor_t *sens
 
     bool on = ui_card_binary_is_on(sensor);
     bool controllable = ui_card_binary_is_controllable(sensor);
-    char meta_text[64];
+    const char *state_text;
 
     if (ctx->entity_id[0] != '\0' && strcmp(ctx->entity_id, sensor->entity_id) != 0) {
         ctx->binding_generation++;
@@ -133,8 +170,11 @@ static void ui_card_binary_set_labels(lv_obj_t *card, const panel_sensor_t *sens
         ctx->last_error[0] = '\0';
     }
 
-    lv_label_set_text(ctx->title, ui_card_binary_safe_text(sensor->label, sensor->entity_id));
-    lv_label_set_text(ctx->value, !sensor->available ? "Offline" : (on ? "On" : "Off"));
+    ui_card_binary_set_text_if_changed(ctx->group,
+                                       ui_card_binary_safe_text(sensor->group, "LIGHT"));
+    const char *short_title = ui_card_binary_short_title(sensor->label);
+    ui_card_binary_set_text_if_changed(ctx->title_depth, short_title);
+    ui_card_binary_set_text_if_changed(ctx->title, short_title);
 
     if (controllable) {
         snprintf(ctx->entity_id, sizeof(ctx->entity_id), "%s", sensor->entity_id);
@@ -143,18 +183,16 @@ static void ui_card_binary_set_labels(lv_obj_t *card, const panel_sensor_t *sens
         snprintf(ctx->off_service, sizeof(ctx->off_service), "%s", sensor->control_off_service);
     }
 
-    if (ctx->pending) {
-        snprintf(meta_text, sizeof(meta_text), "%.16s | Sending",
-                 ui_card_binary_safe_text(sensor->group, "Default"));
-    } else if (ctx->last_error[0] != '\0') {
-        snprintf(meta_text, sizeof(meta_text), "%.16s | %.16s",
-                 ui_card_binary_safe_text(sensor->group, "Default"), ctx->last_error);
+    if (!sensor->available || ctx->last_error[0] != '\0') {
+        state_text = "ERR";
+    } else if (ctx->pending || sensor->freshness == PANEL_SENSOR_FRESHNESS_UNKNOWN) {
+        state_text = "...";
+    } else if (sensor->freshness == PANEL_SENSOR_FRESHNESS_STALE) {
+        state_text = "OLD";
     } else {
-        snprintf(meta_text, sizeof(meta_text), "%.16s | %s",
-                 ui_card_binary_safe_text(sensor->group, "Default"),
-                 ui_card_binary_status_text(sensor));
+        state_text = on ? "ON" : "OFF";
     }
-    lv_label_set_text(ctx->meta, meta_text);
+    ui_card_binary_set_text_if_changed(ctx->state, state_text);
 
     if (ctx->toggle != NULL) {
         if (on) {
@@ -193,7 +231,7 @@ static void ui_card_binary_request_control(ui_card_binary_ctx_t *ctx, bool targe
     ctx->pending = true;
     ctx->last_error[0] = '\0';
     lv_obj_add_state(ctx->toggle, LV_STATE_DISABLED);
-    lv_label_set_text(ctx->meta, "Control | Sending");
+    ui_card_binary_set_text_if_changed(ctx->state, "...");
 
     BaseType_t ok = xTaskCreate(ui_card_binary_call_task, "p4home_ctl", 4096, task_arg,
                                 tskIDLE_PRIORITY + 3, NULL);
@@ -201,7 +239,7 @@ static void ui_card_binary_request_control(ui_card_binary_ctx_t *ctx, bool targe
         ctx->pending = false;
         snprintf(ctx->last_error, sizeof(ctx->last_error), "Failed");
         lv_obj_remove_state(ctx->toggle, LV_STATE_DISABLED);
-        lv_label_set_text(ctx->meta, "Control | Failed");
+        ui_card_binary_set_text_if_changed(ctx->state, "ERR");
         free(task_arg);
     }
 }
@@ -218,10 +256,10 @@ static void ui_card_binary_apply_call_result_on_lvgl(void *user_data)
         ctx->pending = false;
         if (result->result == ESP_OK) {
             ctx->last_error[0] = '\0';
-            lv_label_set_text(ctx->meta, "Control | Sent");
+            ui_card_binary_set_text_if_changed(ctx->state, result->target_on ? "ON" : "OFF");
         } else {
             snprintf(ctx->last_error, sizeof(ctx->last_error), "Failed");
-            lv_label_set_text(ctx->meta, "Control | Failed");
+            ui_card_binary_set_text_if_changed(ctx->state, "ERR");
             if (ctx->toggle != NULL) {
                 if (result->target_on) {
                     lv_obj_remove_state(ctx->toggle, LV_STATE_CHECKED);
@@ -317,52 +355,111 @@ lv_obj_t *ui_card_binary_create(lv_obj_t *parent, const panel_sensor_t *sensor)
         free(ctx);
         return NULL;
     }
+    ctx->visual_key = UINT32_MAX;
     lv_obj_set_user_data(card, ctx);
     lv_obj_add_event_cb(card, ui_card_binary_delete_cb, LV_EVENT_DELETE, ctx);
     lv_obj_set_size(card, 220, 148);
-    lv_obj_set_style_border_width(card, 1, LV_PART_MAIN);
-    lv_obj_set_style_radius(card, 8, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(card, 12, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(card, 8, LV_PART_MAIN);
-    lv_obj_set_style_shadow_spread(card, 0, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(card, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_shadow_opa(card, LV_OPA_20, LV_PART_MAIN);
+    ui_pixel_style_card(card, UI_PIXEL_COLOR_PANEL, UI_PIXEL_COLOR_GRID);
+    lv_obj_set_style_pad_all(card, 10, LV_PART_MAIN);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(card, ui_card_binary_card_click_cb, LV_EVENT_CLICKED, ctx);
+
+    lv_obj_t *depth_strip = lv_obj_create(card);
+    lv_obj_set_size(depth_strip, 196, 6);
+    lv_obj_align(depth_strip, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(depth_strip, lv_color_hex(0x020405), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(depth_strip, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(depth_strip, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(depth_strip, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(depth_strip, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(depth_strip, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    ctx->accent_bar = lv_obj_create(card);
+    lv_obj_set_size(ctx->accent_bar, 6, 92);
+    lv_obj_align(ctx->accent_bar, LV_ALIGN_LEFT_MID, 0, -2);
+    lv_obj_set_style_bg_opa(ctx->accent_bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ctx->accent_bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(ctx->accent_bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(ctx->accent_bar, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(ctx->accent_bar, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    ctx->indicator = lv_obj_create(card);
+    lv_obj_set_size(ctx->indicator, 10, 10);
+    lv_obj_align(ctx->indicator, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_set_style_bg_opa(ctx->indicator, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_color(ctx->indicator, lv_color_hex(UI_PIXEL_COLOR_INK), LV_PART_MAIN);
+    lv_obj_set_style_border_width(ctx->indicator, 1, LV_PART_MAIN);
+    lv_obj_set_style_radius(ctx->indicator, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(ctx->indicator, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(ctx->indicator, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    ctx->group = lv_label_create(card);
+    if (ctx->group == NULL) {
+        lv_obj_delete(card);
+        return NULL;
+    }
+    lv_obj_set_width(ctx->group, 120);
+    lv_label_set_long_mode(ctx->group, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(ctx->group, ui_pages_text_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(ctx->group, lv_color_hex(UI_PIXEL_COLOR_MUTED), LV_PART_MAIN);
+    lv_obj_align(ctx->group, LV_ALIGN_TOP_LEFT, 14, 0);
+
+    ctx->title_depth = lv_label_create(card);
+    if (ctx->title_depth == NULL) {
+        lv_obj_delete(card);
+        return NULL;
+    }
+    lv_obj_set_style_text_font(ctx->title_depth, ui_pages_lights_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(ctx->title_depth, 3, LV_PART_MAIN);
+    lv_obj_align(ctx->title_depth, LV_ALIGN_LEFT_MID, 17, -2);
 
     ctx->title = lv_label_create(card);
     if (ctx->title == NULL) {
         lv_obj_delete(card);
         return NULL;
     }
-    lv_obj_align(ctx->title, LV_ALIGN_TOP_LEFT, 0, 0);
-    ctx->value = lv_label_create(card);
-    if (ctx->value == NULL) {
+    lv_obj_set_style_text_font(ctx->title, ui_pages_lights_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(ctx->title, 3, LV_PART_MAIN);
+    lv_obj_set_style_text_color(ctx->title, lv_color_hex(UI_PIXEL_COLOR_INK), LV_PART_MAIN);
+    lv_obj_align(ctx->title, LV_ALIGN_LEFT_MID, 14, -5);
+
+    ctx->state = lv_label_create(card);
+    if (ctx->state == NULL) {
         lv_obj_delete(card);
         return NULL;
     }
-    lv_obj_align(ctx->value, LV_ALIGN_LEFT_MID, 0, 5);
-    ctx->meta = lv_label_create(card);
-    if (ctx->meta == NULL) {
-        lv_obj_delete(card);
-        return NULL;
-    }
-    lv_obj_align(ctx->meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_style_text_font(ctx->state, ui_pages_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(ctx->state, lv_color_hex(UI_PIXEL_COLOR_MUTED), LV_PART_MAIN);
+    lv_obj_align(ctx->state, LV_ALIGN_BOTTOM_LEFT, 14, -10);
     if (ui_card_binary_is_controllable(sensor)) {
         ctx->toggle = lv_switch_create(card);
         if (ctx->toggle == NULL) {
             lv_obj_delete(card);
             return NULL;
         }
-        lv_obj_set_size(ctx->toggle, 68, 38);
-        lv_obj_align(ctx->toggle, LV_ALIGN_RIGHT_MID, 0, 5);
+        lv_obj_set_size(ctx->toggle, 58, 34);
+        lv_obj_align(ctx->toggle, LV_ALIGN_RIGHT_MID, 0, 14);
         lv_obj_set_style_bg_color(ctx->toggle, lv_color_hex(0xf3c64e),
                                  LV_PART_INDICATOR | LV_STATE_CHECKED);
+        lv_obj_set_style_bg_color(ctx->toggle, lv_color_hex(UI_PIXEL_COLOR_GRID), LV_PART_MAIN);
         lv_obj_set_style_bg_color(ctx->toggle, lv_color_hex(0xe5edf5), LV_PART_KNOB);
+        lv_obj_set_style_radius(ctx->toggle, 0, LV_PART_MAIN);
+        lv_obj_set_style_radius(ctx->toggle, 0, LV_PART_INDICATOR);
+        lv_obj_set_style_radius(ctx->toggle, 0, LV_PART_KNOB);
+        lv_obj_set_style_shadow_width(ctx->toggle, 4, LV_PART_MAIN);
+        lv_obj_set_style_shadow_offset_x(ctx->toggle, 2, LV_PART_MAIN);
+        lv_obj_set_style_shadow_offset_y(ctx->toggle, 2, LV_PART_MAIN);
+        lv_obj_set_style_shadow_color(ctx->toggle, lv_color_hex(0x020405), LV_PART_MAIN);
+        lv_obj_set_style_shadow_opa(ctx->toggle, LV_OPA_60, LV_PART_MAIN);
+        lv_obj_set_style_outline_width(ctx->toggle, 1, LV_PART_MAIN);
+        lv_obj_set_style_outline_pad(ctx->toggle, 1, LV_PART_MAIN);
+        lv_obj_set_style_outline_color(ctx->toggle, lv_color_hex(UI_PIXEL_COLOR_GRID), LV_PART_MAIN);
+        lv_obj_set_style_outline_color(ctx->toggle, lv_color_hex(UI_PIXEL_COLOR_YELLOW),
+                                       LV_PART_MAIN | LV_STATE_CHECKED);
+        lv_obj_set_style_outline_opa(ctx->toggle, LV_OPA_40, LV_PART_MAIN);
         lv_obj_add_event_cb(ctx->toggle, ui_card_binary_toggle_event_cb, LV_EVENT_VALUE_CHANGED, ctx);
-        lv_obj_set_width(ctx->value, 112);
     }
 
-    ui_card_binary_style_labels(ctx->title, ctx->value, ctx->meta);
     ui_card_binary_set_labels(card, sensor);
     return card;
 }
