@@ -60,8 +60,9 @@ static void ui_page_climate_update_pager_locked(void)
     if (s_card == NULL || s_summary == NULL || s_slot_count == 0U) {
         return;
     }
-    lv_label_set_text_fmt(s_summary, "%u / %u | Home Assistant",
-                          (unsigned)(s_current_index + 1U), (unsigned)s_slot_count);
+    lv_label_set_text_fmt(s_summary, "[%u/%u] | HA:%s",
+                          (unsigned)(s_current_index + 1U), (unsigned)s_slot_count,
+                          s_slots[s_current_index].sensor.available ? "DATA" : "WAIT");
     ui_card_climate_apply_locked(s_card, &s_slots[s_current_index].sensor);
 }
 
@@ -92,7 +93,7 @@ static lv_obj_t *ui_page_climate_create_page_button(lv_obj_t *parent, int32_t x,
     lv_obj_t *label = lv_label_create(button);
     if (label != NULL) {
         lv_label_set_text(label, symbol);
-        lv_obj_set_style_text_font(label, ui_pages_text_font(), LV_PART_MAIN);
+        lv_obj_set_style_text_font(label, ui_pages_pixel_font(), LV_PART_MAIN);
         lv_obj_set_style_text_color(label, lv_color_white(), LV_PART_MAIN);
         lv_obj_center(label);
     }
@@ -117,7 +118,7 @@ static void ui_page_climate_apply_on_lvgl(void *user_data)
             slot->logged_ready = true;
         }
         if ((size_t)index == s_current_index) {
-            ui_card_climate_apply_locked(s_card, sensor);
+            ui_page_climate_update_pager_locked();
         }
     }
     free(sensor);
@@ -180,9 +181,9 @@ esp_err_t ui_page_climate_init(void)
     s_card = ui_card_climate_create(s_grid, &s_slots[0].sensor);
     ESP_RETURN_ON_FALSE(s_card != NULL, ESP_ERR_NO_MEM, TAG, "climate card alloc failed");
     lv_obj_align(s_card, LV_ALIGN_TOP_MID, 0, 6);
-    ESP_RETURN_ON_FALSE(ui_page_climate_create_page_button(s_grid, 8, LV_SYMBOL_LEFT, -1) != NULL,
+    ESP_RETURN_ON_FALSE(ui_page_climate_create_page_button(s_grid, 8, "<", -1) != NULL,
                         ESP_ERR_NO_MEM, TAG, "climate previous button alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_climate_create_page_button(s_grid, 864, LV_SYMBOL_RIGHT, 1) != NULL,
+    ESP_RETURN_ON_FALSE(ui_page_climate_create_page_button(s_grid, 864, ">", 1) != NULL,
                         ESP_ERR_NO_MEM, TAG, "climate next button alloc failed");
     ui_page_climate_update_pager_locked();
     ESP_RETURN_ON_ERROR(panel_data_store_add_observer(ui_page_climate_store_observer, NULL), TAG,

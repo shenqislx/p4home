@@ -43,7 +43,6 @@ static lv_obj_t *s_next_button;
 static bool s_ready;
 static ui_dashboard_slot_t s_slots[CONFIG_P4HOME_PANEL_STORE_MAX_ENTITIES];
 static size_t s_slot_count;
-static lv_timer_t *s_refresh_timer;
 static uint32_t s_apply_count;
 static size_t s_current_page;
 static lv_obj_t *s_page_cards[UI_DASHBOARD_CARDS_PER_PAGE];
@@ -301,23 +300,6 @@ static void ui_page_dashboard_store_observer(const panel_sensor_t *sensor, void 
     lv_async_call(ui_page_dashboard_apply_on_lvgl, copy);
 }
 
-static bool ui_page_dashboard_refresh_one(const panel_sensor_t *sensor, void *user_data)
-{
-    (void)user_data;
-    ui_page_dashboard_apply_snapshot_locked(sensor);
-    return true;
-}
-
-static void ui_page_dashboard_refresh_timer_cb(lv_timer_t *timer)
-{
-    (void)timer;
-    if (s_root == NULL) {
-        return;
-    }
-    panel_data_store_tick_freshness(time_service_now_epoch_ms());
-    panel_data_store_iterate(ui_page_dashboard_refresh_one, NULL);
-}
-
 esp_err_t ui_page_dashboard_init(void)
 {
     if (s_ready) {
@@ -376,7 +358,6 @@ esp_err_t ui_page_dashboard_init(void)
     ui_page_dashboard_update_page_locked();
     ESP_RETURN_ON_ERROR(panel_data_store_add_observer(ui_page_dashboard_store_observer, NULL), TAG,
                         "failed to attach dashboard observer");
-    s_refresh_timer = lv_timer_create(ui_page_dashboard_refresh_timer_cb, 2000, NULL);
     s_ready = true;
     return ESP_OK;
 }

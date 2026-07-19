@@ -215,6 +215,7 @@ static esp_err_t audio_service_init_microphone(void)
 
 esp_err_t audio_service_play_test_tone(void)
 {
+    ESP_RETURN_ON_ERROR(audio_service_init(), TAG, "lazy audio init failed");
     ESP_RETURN_ON_FALSE(s_state.initialized, ESP_ERR_INVALID_STATE, TAG,
                         "audio service not initialized");
     ESP_RETURN_ON_FALSE(s_speaker_codec != NULL, ESP_ERR_INVALID_STATE, TAG,
@@ -272,6 +273,7 @@ esp_err_t audio_service_run_startup_selftest(void)
 
 esp_err_t audio_service_begin_microphone_stream_for(const char *owner)
 {
+    ESP_RETURN_ON_ERROR(audio_service_init(), TAG, "lazy audio init failed");
     ESP_RETURN_ON_FALSE(s_state.initialized, ESP_ERR_INVALID_STATE, TAG,
                         "audio service not initialized");
     ESP_RETURN_ON_FALSE(s_microphone_codec != NULL, ESP_ERR_INVALID_STATE, TAG,

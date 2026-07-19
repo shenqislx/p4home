@@ -64,3 +64,6 @@ esp_err_t ha_client_get_metrics(ha_client_metrics_t *metrics);
 esp_err_t ha_client_call_service(const ha_client_call_service_request_t *request);
 esp_err_t ha_client_call_entity_service(const char *domain, const char *service,
                                         const char *entity_id, uint32_t timeout_ms);
+esp_err_t ha_client_request_json(const char *type, const char *fields_json,
+                                 char **result_json, uint32_t timeout_ms);
+void ha_client_free_json(char *json);

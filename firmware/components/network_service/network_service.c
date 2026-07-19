@@ -532,6 +532,18 @@ static esp_err_t network_service_wifi_start_internal(void)
 
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "esp_wifi_start failed");
 
+#if CONFIG_P4HOME_WIFI_MODEM_SLEEP_ENABLE
+    ESP_RETURN_ON_ERROR(esp_wifi_set_ps(WIFI_PS_MIN_MODEM), TAG,
+                        "failed to enable C6 minimum modem sleep");
+    wifi_ps_type_t ps_mode = WIFI_PS_NONE;
+    ESP_RETURN_ON_ERROR(esp_wifi_get_ps(&ps_mode), TAG,
+                        "failed to verify C6 modem sleep");
+    ESP_LOGW(TAG, "VERIFY:network:c6_modem_sleep:%s mode=%d",
+             ps_mode == WIFI_PS_MIN_MODEM ? "PASS" : "FAIL", (int)ps_mode);
+#else
+    ESP_LOGW(TAG, "VERIFY:network:c6_modem_sleep:SKIPPED");
+#endif
+
     taskENTER_CRITICAL(&s_state_lock);
     s_state.wifi_started = true;
     taskEXIT_CRITICAL(&s_state_lock);

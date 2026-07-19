@@ -242,7 +242,7 @@ static void ui_card_climate_apply_labels(lv_obj_t *card, const panel_sensor_t *s
         lv_label_set_text(ctx->meta, "控制失败");
     } else {
         lv_label_set_text_fmt(ctx->meta, "%s | %s", sensor->group,
-                              sensor->available ? "在线" : "离线");
+                              sensor->available ? "HA DATA" : "HA NO DATA // CHECK ENTITY");
     }
 
     bool on = sensor->available && strcmp(sensor->value_text, "off") != 0;

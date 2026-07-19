@@ -2,6 +2,7 @@
 
 #include "bsp/esp32_p4_function_ev_board.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "ui_pages.h"
@@ -10,6 +11,133 @@ static const char *TAG = "display_service";
 static lv_display_t *s_display;
 static bool s_display_ready;
 static bsp_lcd_handles_t s_lcd_handles;
+static void *s_lvgl_ext_memory;
+static lv_mem_pool_t s_lvgl_ext_pool;
+static lv_obj_t *s_wake_overlay;
+static lv_timer_t *s_backlight_timer;
+static bool s_backlight_forced_off;
+
+typedef enum {
+    DISPLAY_BACKLIGHT_BRIGHT = 0,
+    DISPLAY_BACKLIGHT_DIM,
+    DISPLAY_BACKLIGHT_OFF,
+} display_backlight_state_t;
+
+static display_backlight_state_t s_backlight_state = DISPLAY_BACKLIGHT_BRIGHT;
+
+#define DISPLAY_SERVICE_LVGL_EXT_POOL_BYTES (64U * 1024U)
+#define DISPLAY_SERVICE_DIM_AFTER_MS         (60U * 1000U)
+#define DISPLAY_SERVICE_OFF_AFTER_MS         (5U * 60U * 1000U)
+#define DISPLAY_SERVICE_DIM_PERCENT          25
+
+static esp_err_t display_service_apply_backlight_locked(display_backlight_state_t state)
+{
+    if (state == s_backlight_state) {
+        return ESP_OK;
+    }
+
+    int percent = state == DISPLAY_BACKLIGHT_BRIGHT ? 100
+                  : state == DISPLAY_BACKLIGHT_DIM ? DISPLAY_SERVICE_DIM_PERCENT
+                                                   : 0;
+    ESP_RETURN_ON_ERROR(bsp_display_brightness_set(percent), TAG,
+                        "failed to set adaptive backlight");
+    s_backlight_state = state;
+    ui_pages_set_backlight_enabled(state != DISPLAY_BACKLIGHT_OFF);
+
+    if (s_wake_overlay != NULL) {
+        if (state == DISPLAY_BACKLIGHT_OFF) {
+            lv_obj_clear_flag(s_wake_overlay, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(s_wake_overlay);
+        } else {
+            lv_obj_add_flag(s_wake_overlay, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    ESP_LOGW(TAG, "VERIFY:power:backlight:%s percent=%d",
+             state == DISPLAY_BACKLIGHT_BRIGHT ? "BRIGHT"
+             : state == DISPLAY_BACKLIGHT_DIM ? "DIM"
+                                              : "OFF",
+             percent);
+    return ESP_OK;
+}
+
+static void display_service_wake_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_PRESSED) {
+        return;
+    }
+    s_backlight_forced_off = false;
+    lv_display_trigger_activity(s_display);
+    (void)display_service_apply_backlight_locked(DISPLAY_BACKLIGHT_BRIGHT);
+}
+
+static void display_service_backlight_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    if (s_display == NULL || s_backlight_forced_off) {
+        return;
+    }
+    uint32_t inactive_ms = lv_display_get_inactive_time(s_display);
+    display_backlight_state_t next = inactive_ms >= DISPLAY_SERVICE_OFF_AFTER_MS
+                                         ? DISPLAY_BACKLIGHT_OFF
+                                     : inactive_ms >= DISPLAY_SERVICE_DIM_AFTER_MS
+                                         ? DISPLAY_BACKLIGHT_DIM
+                                         : DISPLAY_BACKLIGHT_BRIGHT;
+    (void)display_service_apply_backlight_locked(next);
+}
+
+static esp_err_t display_service_start_backlight_policy(void)
+{
+    ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
+                        "failed to lock LVGL for backlight policy");
+    s_wake_overlay = lv_obj_create(lv_layer_top());
+    if (s_wake_overlay != NULL) {
+        lv_obj_set_size(s_wake_overlay, LV_PCT(100), LV_PCT(100));
+        lv_obj_align(s_wake_overlay, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_style_bg_opa(s_wake_overlay, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_width(s_wake_overlay, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(s_wake_overlay, 0, LV_PART_MAIN);
+        lv_obj_clear_flag(s_wake_overlay, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(s_wake_overlay, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_event_cb(s_wake_overlay, display_service_wake_event_cb,
+                            LV_EVENT_PRESSED, NULL);
+    }
+    if (s_wake_overlay != NULL) {
+        s_backlight_timer = lv_timer_create(display_service_backlight_timer_cb, 1000, NULL);
+    }
+    bsp_display_unlock();
+
+    ESP_RETURN_ON_FALSE(s_wake_overlay != NULL && s_backlight_timer != NULL,
+                        ESP_ERR_NO_MEM, TAG, "failed to create backlight policy objects");
+    ESP_LOGW(TAG, "adaptive backlight enabled default=100%% dim=%u ms/%d%% off=%u ms",
+             (unsigned)DISPLAY_SERVICE_DIM_AFTER_MS, DISPLAY_SERVICE_DIM_PERCENT,
+             (unsigned)DISPLAY_SERVICE_OFF_AFTER_MS);
+    return ESP_OK;
+}
+
+static esp_err_t display_service_add_lvgl_psram_pool(void)
+{
+    if (s_lvgl_ext_pool != NULL) {
+        return ESP_OK;
+    }
+
+    s_lvgl_ext_memory = heap_caps_malloc(DISPLAY_SERVICE_LVGL_EXT_POOL_BYTES,
+                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ESP_RETURN_ON_FALSE(s_lvgl_ext_memory != NULL, ESP_ERR_NO_MEM, TAG,
+                        "failed to allocate LVGL PSRAM pool");
+    ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
+                        "failed to lock LVGL for pool extension");
+    s_lvgl_ext_pool = lv_mem_add_pool(s_lvgl_ext_memory,
+                                      DISPLAY_SERVICE_LVGL_EXT_POOL_BYTES);
+    bsp_display_unlock();
+    if (s_lvgl_ext_pool == NULL) {
+        heap_caps_free(s_lvgl_ext_memory);
+        s_lvgl_ext_memory = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    ESP_LOGI(TAG, "LVGL PSRAM pool added: %u bytes",
+             (unsigned)DISPLAY_SERVICE_LVGL_EXT_POOL_BYTES);
+    return ESP_OK;
+}
 
 static inline ui_pages_page_t display_to_ui_page(display_service_page_t page)
 {
@@ -97,10 +225,14 @@ esp_err_t display_service_init(void)
     ESP_LOGI(TAG, "starting display bootstrap for ESP32-P4 EVB V1.4 without touch");
     ESP_RETURN_ON_ERROR(display_service_start_lcd_without_touch(), TAG,
                         "failed to start LCD/LVGL bootstrap");
+    ESP_RETURN_ON_ERROR(display_service_add_lvgl_psram_pool(), TAG,
+                        "failed to extend LVGL memory pool");
     ESP_RETURN_ON_ERROR(bsp_display_backlight_on(), TAG,
                         "failed to enable display backlight");
     ESP_RETURN_ON_ERROR(ui_pages_render_bootstrap(), TAG,
                         "failed to render bootstrap screen");
+    ESP_RETURN_ON_ERROR(display_service_start_backlight_policy(), TAG,
+                        "failed to start adaptive backlight policy");
 
     s_display_ready = true;
     ui_pages_set_backlight_enabled(true);
@@ -166,11 +298,18 @@ esp_err_t display_service_set_voice_state(const char *status_text, const char *m
 
 esp_err_t display_service_set_backlight_enabled(bool enabled)
 {
-    esp_err_t err = enabled ? bsp_display_backlight_on() : bsp_display_backlight_off();
-    ESP_RETURN_ON_ERROR(err, TAG, "failed to change display backlight");
-    ui_pages_set_backlight_enabled(enabled);
-
-    return ESP_OK;
+    ESP_RETURN_ON_FALSE(s_display_ready, ESP_ERR_INVALID_STATE, TAG,
+                        "display not ready");
+    ESP_RETURN_ON_FALSE(bsp_display_lock(0), ESP_ERR_TIMEOUT, TAG,
+                        "failed to lock LVGL for backlight change");
+    s_backlight_forced_off = !enabled;
+    if (enabled) {
+        lv_display_trigger_activity(s_display);
+    }
+    esp_err_t err = display_service_apply_backlight_locked(
+        enabled ? DISPLAY_BACKLIGHT_BRIGHT : DISPLAY_BACKLIGHT_OFF);
+    bsp_display_unlock();
+    return err;
 }
 
 bool display_service_backlight_enabled(void)

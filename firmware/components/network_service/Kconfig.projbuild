@@ -22,6 +22,14 @@ config P4HOME_WIFI_VERIFY_WAIT_MS
     range 0 60000
     default 3000
 
+config P4HOME_WIFI_MODEM_SLEEP_ENABLE
+    bool "Enable ESP32-C6 minimum modem sleep"
+    default y
+    help
+        Let the hosted ESP32-C6 sleep between DTIM beacons while keeping the
+        Wi-Fi association and TCP connections alive. This can add receive
+        latency of up to roughly one DTIM interval.
+
 config P4HOME_WIFI_STATIC_IP_ENABLE
     bool "Enable static IPv4 for Wi-Fi STA debug"
     default n

@@ -211,8 +211,13 @@ void app_main(void)
                       strcmp(display_service_current_page_text(), "dashboard") == 0);
     log_verify_marker("touch", "detect", board_support_touch_detected());
     log_verify_marker("touch", "lvgl_indev", board_support_touch_indev_ready());
+#if CONFIG_P4HOME_SR_ENABLE || CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST
     log_verify_marker("audio", "speaker", board_support_audio_speaker_ready());
     log_verify_marker("audio", "microphone", board_support_audio_microphone_ready());
+#else
+    log_verify_marker_status("audio", "speaker", "LAZY");
+    log_verify_marker_status("audio", "microphone", "LAZY");
+#endif
 #if CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST
     log_verify_marker("audio", "tone_played", board_support_audio_tone_played());
     log_verify_marker("audio", "mic_capture", board_support_audio_microphone_capture_ready());
@@ -257,7 +262,7 @@ void app_main(void)
 #endif
 
         const TickType_t now = xTaskGetTickCount();
-        if ((now - last_heartbeat_tick) >= pdMS_TO_TICKS(10000)) {
+        if ((now - last_heartbeat_tick) >= pdMS_TO_TICKS(30000)) {
             diagnostics_service_log_runtime_heartbeat();
             diagnostics_service_log_ha_summary();
             panel_data_store_tick_freshness(time_service_now_epoch_ms());

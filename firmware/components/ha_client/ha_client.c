@@ -33,6 +33,7 @@ static const char *TAG = "ha_client";
 #define HA_CLIENT_INITIAL_DONE_BIT  BIT4
 #define HA_CLIENT_STOP_BIT          BIT5
 #define HA_CLIENT_CALL_DONE_BIT     BIT6
+#define HA_CLIENT_REQUEST_DONE_BIT  BIT7
 #define HA_CLIENT_MAX_INITIAL_ENTITIES CONFIG_P4HOME_HA_CLIENT_MAX_INITIAL_ENTITIES
 #define HA_CLIENT_ENTITY_ID_MAX_LEN 128U
 
@@ -61,6 +62,7 @@ typedef enum {
     HA_PENDING_SUBSCRIBE,
     HA_PENDING_GET_STATES,
     HA_PENDING_CALL_SERVICE,
+    HA_PENDING_REQUEST,
 } ha_pending_type_t;
 
 typedef struct {
@@ -102,6 +104,10 @@ typedef struct {
     char token_masked[24];
     uint32_t last_call_id;
     bool last_call_success;
+    char *last_request_result_json;
+    char last_request_error[80];
+    uint32_t last_request_id;
+    bool last_request_success;
     uint32_t initial_state_count;
     uint32_t total_event_count;
     uint32_t reconnect_count;
@@ -134,6 +140,7 @@ static ha_client_state_ctx_t s_ctx = {
     .normalized_url = {0},
     .last_error = "idle",
     .last_call_error = "idle",
+    .last_request_error = "idle",
     .token_masked = {0},
 };
 
@@ -571,6 +578,38 @@ static void ha_client_handle_result(cJSON *root)
         ha_client_set_call_result_locked((uint32_t)id_item->valuedouble, cJSON_IsTrue(success), reason);
         taskEXIT_CRITICAL(&s_ctx.lock);
         xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_CALL_DONE_BIT);
+        return;
+    }
+
+    if (pending_type == HA_PENDING_REQUEST) {
+        cJSON *success = cJSON_GetObjectItemCaseSensitive(root, "success");
+        cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+        cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+        cJSON *message = cJSON_IsObject(error) ? cJSON_GetObjectItemCaseSensitive(error, "message") : NULL;
+        cJSON *code = cJSON_IsObject(error) ? cJSON_GetObjectItemCaseSensitive(error, "code") : NULL;
+        char *result_json = cJSON_IsTrue(success) && result != NULL
+                                ? cJSON_PrintUnformatted(result)
+                                : NULL;
+        char reason[80] = {0};
+        if (cJSON_IsString(message)) {
+            snprintf(reason, sizeof(reason), "%s", message->valuestring);
+        } else if (cJSON_IsString(code)) {
+            snprintf(reason, sizeof(reason), "%s", code->valuestring);
+        } else {
+            snprintf(reason, sizeof(reason), "%s",
+                     cJSON_IsTrue(success) ? "ok" : "request_failed");
+        }
+
+        taskENTER_CRITICAL(&s_ctx.lock);
+        if (s_ctx.last_request_result_json != NULL) {
+            cJSON_free(s_ctx.last_request_result_json);
+        }
+        s_ctx.last_request_result_json = result_json;
+        s_ctx.last_request_id = (uint32_t)id_item->valuedouble;
+        s_ctx.last_request_success = cJSON_IsTrue(success);
+        snprintf(s_ctx.last_request_error, sizeof(s_ctx.last_request_error), "%s", reason);
+        taskEXIT_CRITICAL(&s_ctx.lock);
+        xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_REQUEST_DONE_BIT);
     }
 }
 
@@ -1145,6 +1184,7 @@ esp_err_t ha_client_init(void)
     s_ctx.initialized = true;
     snprintf(s_ctx.last_error, sizeof(s_ctx.last_error), "idle");
     snprintf(s_ctx.last_call_error, sizeof(s_ctx.last_call_error), "idle");
+    snprintf(s_ctx.last_request_error, sizeof(s_ctx.last_request_error), "idle");
     return ESP_OK;
 }
 
@@ -1456,6 +1496,122 @@ esp_err_t ha_client_call_service(const ha_client_call_service_request_t *request
 
     ESP_LOGI(TAG, "HA call_service ok domain=%s service=%s", request->domain, request->service);
     return ESP_OK;
+}
+
+static bool ha_client_validate_request_type(const char *type)
+{
+    if (type == NULL || type[0] == '\0') {
+        return false;
+    }
+    for (const char *p = type; *p != '\0'; ++p) {
+        char ch = *p;
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
+              ch == '_' || ch == '/')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+esp_err_t ha_client_request_json(const char *type, const char *fields_json,
+                                 char **result_json, uint32_t timeout_ms)
+{
+    ESP_RETURN_ON_FALSE(s_ctx.initialized && s_ctx.event_group != NULL && s_ctx.call_mutex != NULL,
+                        ESP_ERR_INVALID_STATE, TAG, "ha client not initialized");
+    ESP_RETURN_ON_FALSE(ha_client_validate_request_type(type), ESP_ERR_INVALID_ARG, TAG,
+                        "invalid HA request type");
+    ESP_RETURN_ON_FALSE(result_json != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "result_json is required");
+    ESP_RETURN_ON_FALSE(ha_client_ready() && s_ctx.ws != NULL, ESP_ERR_INVALID_STATE, TAG,
+                        "ha client is not ready");
+    *result_json = NULL;
+    if (timeout_ms == 0U) {
+        timeout_ms = CONFIG_P4HOME_HA_CLIENT_CALL_SERVICE_TIMEOUT_MS;
+    }
+    if (xSemaphoreTake(s_ctx.call_mutex, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    cJSON *fields = NULL;
+    if (fields_json != NULL && fields_json[0] != '\0') {
+        fields = cJSON_Parse(fields_json);
+        if (!cJSON_IsObject(fields)) {
+            cJSON_Delete(fields);
+            xSemaphoreGive(s_ctx.call_mutex);
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) {
+        cJSON_Delete(fields);
+        xSemaphoreGive(s_ctx.call_mutex);
+        return ESP_ERR_NO_MEM;
+    }
+    uint32_t id = ha_client_alloc_message_id();
+    cJSON_AddNumberToObject(root, "id", id);
+    cJSON_AddStringToObject(root, "type", type);
+    cJSON *field = NULL;
+    cJSON_ArrayForEach(field, fields) {
+        if (field->string == NULL || strcmp(field->string, "id") == 0 ||
+            strcmp(field->string, "type") == 0) {
+            continue;
+        }
+        cJSON_AddItemToObject(root, field->string, cJSON_Duplicate(field, true));
+    }
+    char *request_json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    cJSON_Delete(fields);
+    if (request_json == NULL) {
+        xSemaphoreGive(s_ctx.call_mutex);
+        return ESP_ERR_NO_MEM;
+    }
+
+    xEventGroupClearBits(s_ctx.event_group, HA_CLIENT_REQUEST_DONE_BIT);
+    taskENTER_CRITICAL(&s_ctx.lock);
+    if (s_ctx.last_request_result_json != NULL) {
+        cJSON_free(s_ctx.last_request_result_json);
+        s_ctx.last_request_result_json = NULL;
+    }
+    s_ctx.last_request_id = id;
+    s_ctx.last_request_success = false;
+    snprintf(s_ctx.last_request_error, sizeof(s_ctx.last_request_error), "%s", "pending");
+    taskEXIT_CRITICAL(&s_ctx.lock);
+    ha_client_set_pending(id, HA_PENDING_REQUEST);
+
+    int sent = esp_websocket_client_send_text(s_ctx.ws, request_json, strlen(request_json),
+                                               pdMS_TO_TICKS(timeout_ms));
+    cJSON_free(request_json);
+    if (sent < 0) {
+        (void)ha_client_take_pending(id);
+        xSemaphoreGive(s_ctx.call_mutex);
+        return ESP_FAIL;
+    }
+
+    EventBits_t bits = xEventGroupWaitBits(s_ctx.event_group, HA_CLIENT_REQUEST_DONE_BIT,
+                                           pdTRUE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
+    if ((bits & HA_CLIENT_REQUEST_DONE_BIT) == 0U) {
+        (void)ha_client_take_pending(id);
+        xSemaphoreGive(s_ctx.call_mutex);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    bool success = false;
+    taskENTER_CRITICAL(&s_ctx.lock);
+    success = s_ctx.last_request_id == id && s_ctx.last_request_success;
+    if (success) {
+        *result_json = s_ctx.last_request_result_json;
+        s_ctx.last_request_result_json = NULL;
+    }
+    taskEXIT_CRITICAL(&s_ctx.lock);
+    xSemaphoreGive(s_ctx.call_mutex);
+    return success ? ESP_OK : ESP_FAIL;
+}
+
+void ha_client_free_json(char *json)
+{
+    if (json != NULL) {
+        cJSON_free(json);
+    }
 }
 
 esp_err_t ha_client_call_entity_service(const char *domain, const char *service,

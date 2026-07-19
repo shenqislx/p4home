@@ -51,6 +51,17 @@ static int panel_data_store_find_index_locked(const char *entity_id)
     return -1;
 }
 
+static bool panel_data_store_ui_state_equal(const panel_sensor_t *left,
+                                            const panel_sensor_t *right)
+{
+    panel_sensor_t left_ui = *left;
+    panel_sensor_t right_ui = *right;
+    /* A newer HA timestamp alone must not trigger an LVGL redraw. */
+    left_ui.updated_at_ms = 0U;
+    right_ui.updated_at_ms = 0U;
+    return memcmp(&left_ui, &right_ui, sizeof(left_ui)) == 0;
+}
+
 static bool panel_data_store_is_trend_source(const panel_sensor_t *sensor)
 {
     return sensor != NULL && sensor->kind == PANEL_SENSOR_KIND_NUMERIC;
@@ -161,6 +172,17 @@ static cJSON *panel_data_store_json_array(cJSON *root, const char *name)
     return cJSON_IsArray(item) ? item : NULL;
 }
 
+static bool panel_data_store_json_number_alias(cJSON *root, const char *const *names,
+                                               size_t count, double *value)
+{
+    for (size_t i = 0; i < count; ++i) {
+        if (panel_data_store_json_number(root, names[i], value)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void panel_data_store_parse_climate_attributes(const ha_client_state_change_t *change,
                                                       panel_sensor_t *sensor)
 {
@@ -173,10 +195,18 @@ static void panel_data_store_parse_climate_attributes(const ha_client_state_chan
         return;
     }
 
-    sensor->has_current_temperature =
-        panel_data_store_json_number(attrs, "current_temperature", &sensor->current_temperature);
-    sensor->has_target_temperature =
-        panel_data_store_json_number(attrs, "temperature", &sensor->target_temperature);
+    static const char *current_names[] = {
+        "current_temperature", "current_temp", "indoor_temperature"
+    };
+    static const char *target_names[] = {
+        "temperature", "target_temperature"
+    };
+    sensor->has_current_temperature = panel_data_store_json_number_alias(
+        attrs, current_names, sizeof(current_names) / sizeof(current_names[0]),
+        &sensor->current_temperature);
+    sensor->has_target_temperature = panel_data_store_json_number_alias(
+        attrs, target_names, sizeof(target_names) / sizeof(target_names[0]),
+        &sensor->target_temperature);
     (void)panel_data_store_json_number(attrs, "min_temp", &sensor->min_temperature);
     (void)panel_data_store_json_number(attrs, "max_temp", &sensor->max_temperature);
     if (!panel_data_store_json_number(attrs, "target_temp_step", &sensor->target_temperature_step) ||
@@ -420,6 +450,7 @@ esp_err_t panel_data_store_update(const panel_sensor_t *sensor)
     }
 
     panel_sensor_t *dst = &s_store.entities[index];
+    panel_sensor_t previous = *dst;
     if (sensor->label[0] != '\0') {
         snprintf(dst->label, sizeof(dst->label), "%s", sensor->label);
     }
@@ -469,7 +500,7 @@ esp_err_t panel_data_store_update(const panel_sensor_t *sensor)
     size_t observer_count = s_store.observer_count;
     memcpy(observers, s_store.observers, sizeof(observers));
     memcpy(observer_users, s_store.observer_users, sizeof(observer_users));
-    notify = observer_count > 0U;
+    notify = observer_count > 0U && !panel_data_store_ui_state_equal(&previous, dst);
     xSemaphoreGive(s_store.mutex);
 
     if (notify) {
@@ -546,13 +577,41 @@ void panel_data_store_tick_freshness(uint64_t now_ms)
     if (!s_store.initialized) {
         return;
     }
+    bool changed[CONFIG_P4HOME_PANEL_STORE_MAX_ENTITIES] = {0};
+    panel_data_store_observer_cb_t observers[PANEL_DATA_STORE_MAX_OBSERVERS] = {0};
+    void *observer_users[PANEL_DATA_STORE_MAX_OBSERVERS] = {0};
+    size_t observer_count = 0U;
+    size_t entity_count = 0U;
+
     xSemaphoreTake(s_store.mutex, portMAX_DELAY);
     for (size_t i = 0; i < s_store.count; ++i) {
-        s_store.entities[i].freshness =
+        panel_sensor_freshness_t next =
             panel_data_store_compute_freshness(now_ms, s_store.entities[i].updated_at_ms);
+        changed[i] = next != s_store.entities[i].freshness;
+        s_store.entities[i].freshness = next;
         panel_data_store_append_sample_locked(i, &s_store.entities[i], now_ms, false);
     }
+    entity_count = s_store.count;
+    observer_count = s_store.observer_count;
+    memcpy(observers, s_store.observers, sizeof(observers));
+    memcpy(observer_users, s_store.observer_users, sizeof(observer_users));
     xSemaphoreGive(s_store.mutex);
+
+    /* Only freshness transitions are published; unchanged entities stay quiet. */
+    for (size_t i = 0; i < entity_count; ++i) {
+        if (!changed[i]) {
+            continue;
+        }
+        panel_sensor_t snapshot;
+        xSemaphoreTake(s_store.mutex, portMAX_DELAY);
+        snapshot = s_store.entities[i];
+        xSemaphoreGive(s_store.mutex);
+        for (size_t observer = 0; observer < observer_count; ++observer) {
+            if (observers[observer] != NULL) {
+                observers[observer](&snapshot, observer_users[observer]);
+            }
+        }
+    }
 }
 
 esp_err_t panel_data_store_set_observer(panel_data_store_observer_cb_t observer, void *user_data)
@@ -691,6 +750,12 @@ void panel_data_store_on_ha_state_change(const ha_client_state_change_t *change,
     } else if (sensor.kind == PANEL_SENSOR_KIND_CLIMATE) {
         panel_data_store_ascii_state(change, sensor.value_text, sizeof(sensor.value_text));
         panel_data_store_parse_climate_attributes(change, &sensor);
+        ESP_LOGW(TAG,
+                 "climate snapshot id=%s state=%s available=%s current=%s target=%s attrs_bytes=%u",
+                 sensor.entity_id, sensor.value_text, sensor.available ? "yes" : "no",
+                 sensor.has_current_temperature ? "yes" : "no",
+                 sensor.has_target_temperature ? "yes" : "no",
+                 (unsigned)(change->attributes_json != NULL ? strlen(change->attributes_json) : 0U));
     } else {
         panel_data_store_ascii_state(change, sensor.value_text, sizeof(sensor.value_text));
     }

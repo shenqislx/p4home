@@ -187,6 +187,7 @@ esp_err_t board_support_init(void)
         }
     }
 
+#if CONFIG_P4HOME_SR_ENABLE || CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST
     esp_err_t audio_ret = audio_service_init();
     if (audio_ret != ESP_OK) {
         ESP_LOGW(TAG, "audio service init failed: %s", esp_err_to_name(audio_ret));
@@ -197,6 +198,9 @@ esp_err_t board_support_init(void)
             ESP_LOGW(TAG, "audio UI state update failed: %s", esp_err_to_name(audio_ret));
         }
     }
+#else
+    ESP_LOGW(TAG, "audio codec initialization deferred until first use");
+#endif
 
 #if CONFIG_P4HOME_SR_ENABLE
     esp_err_t sr_ret = sr_service_init();
