@@ -74,10 +74,127 @@ static const ui_quick_mode_def_t s_modes[UI_QUICK_MODE_COUNT] = {
 
 static lv_obj_t *s_root;
 static lv_obj_t *s_status;
+static lv_obj_t *s_director_depth;
+static lv_obj_t *s_director;
+static lv_obj_t *s_director_title;
+static lv_obj_t *s_director_stage;
+static lv_obj_t *s_director_progress;
+static lv_obj_t *s_director_steps[3];
+static lv_timer_t *s_director_timer;
 static ui_quick_mode_view_t s_views[UI_QUICK_MODE_COUNT];
 static int s_pending_index = -1;
 static bool s_has_action_status;
+static bool s_director_active;
+static bool s_director_call_finished;
+static bool s_director_call_success;
+static bool s_director_result_ready;
+static uint32_t s_director_tick;
+static uint32_t s_director_result_ticks;
 static bool s_ready;
+
+static void ui_page_quick_modes_set_step(size_t index, uint32_t color)
+{
+    if (index >= 3U || s_director_steps[index] == NULL) {
+        return;
+    }
+    lv_obj_set_style_bg_color(s_director_steps[index], lv_color_hex(color), LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_director_steps[index], lv_color_hex(color), LV_PART_MAIN);
+}
+
+static void ui_page_quick_modes_director_show(size_t index)
+{
+    if (s_director == NULL || index >= UI_QUICK_MODE_COUNT) {
+        return;
+    }
+    s_director_tick = 0U;
+    s_director_result_ticks = 0U;
+    s_director_call_finished = false;
+    s_director_call_success = false;
+    s_director_result_ready = false;
+    s_director_active = true;
+    lv_label_set_text_fmt(s_director_title, "%s场景 // DIRECTOR",
+                          s_modes[index].title);
+    lv_label_set_text(s_director_stage, "01 // 确认场景可用");
+    lv_bar_set_value(s_director_progress, 8, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(s_director_progress,
+                              lv_color_hex(s_modes[index].accent), LV_PART_INDICATOR);
+    lv_obj_set_style_border_color(s_director, lv_color_hex(s_modes[index].accent),
+                                  LV_PART_MAIN);
+    ui_page_quick_modes_set_step(0, s_modes[index].accent);
+    ui_page_quick_modes_set_step(1, UI_PIXEL_COLOR_GRID);
+    ui_page_quick_modes_set_step(2, UI_PIXEL_COLOR_GRID);
+    lv_obj_clear_flag(s_director, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_director_depth, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_director_depth);
+    lv_obj_move_foreground(s_director);
+    if (s_director_timer != NULL) {
+        lv_timer_reset(s_director_timer);
+        lv_timer_resume(s_director_timer);
+    }
+}
+
+static void ui_page_quick_modes_director_finalize(bool success)
+{
+    s_director_result_ready = true;
+    s_director_result_ticks = 0U;
+    lv_bar_set_value(s_director_progress, 100, LV_ANIM_ON);
+    if (success) {
+        lv_label_set_text(s_director_title, "场景已启程 // SENT");
+        lv_label_set_text(s_director_stage, "指令已交给 Home Assistant");
+        lv_obj_set_style_border_color(s_director, lv_color_hex(UI_PIXEL_COLOR_CYAN),
+                                      LV_PART_MAIN);
+        lv_obj_set_style_bg_color(s_director_progress,
+                                  lv_color_hex(UI_PIXEL_COLOR_CYAN), LV_PART_INDICATOR);
+        for (size_t i = 0; i < 3U; ++i) {
+            ui_page_quick_modes_set_step(i, UI_PIXEL_COLOR_CYAN);
+        }
+    } else {
+        lv_label_set_text(s_director_title, "场景未发送 // FAILED");
+        lv_label_set_text(s_director_stage, "连接或服务调用失败");
+        lv_obj_set_style_border_color(s_director, lv_color_hex(UI_PIXEL_COLOR_RED),
+                                      LV_PART_MAIN);
+        lv_obj_set_style_bg_color(s_director_progress,
+                                  lv_color_hex(UI_PIXEL_COLOR_RED), LV_PART_INDICATOR);
+        ui_page_quick_modes_set_step(2, UI_PIXEL_COLOR_RED);
+    }
+}
+
+static void ui_page_quick_modes_director_apply_result(bool success)
+{
+    s_director_call_finished = true;
+    s_director_call_success = success;
+    if (s_director_tick >= 4U) {
+        ui_page_quick_modes_director_finalize(success);
+    }
+}
+
+static void ui_page_quick_modes_director_timer_cb(lv_timer_t *timer)
+{
+    if (s_director_result_ready) {
+        s_director_result_ticks++;
+        if (s_director_result_ticks >= 6U) {
+            lv_obj_add_flag(s_director, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_director_depth, LV_OBJ_FLAG_HIDDEN);
+            s_director_active = false;
+            lv_timer_pause(timer);
+        }
+        return;
+    }
+
+    s_director_tick++;
+    if (s_director_tick == 2U) {
+        lv_label_set_text(s_director_stage, "02 // 发送至 Home Assistant");
+        lv_bar_set_value(s_director_progress, 36, LV_ANIM_ON);
+        ui_page_quick_modes_set_step(1, UI_PIXEL_COLOR_YELLOW);
+    } else if (s_director_tick >= 4U) {
+        lv_label_set_text(s_director_stage, "03 // 等待家庭响应");
+        lv_bar_set_value(s_director_progress, 68, LV_ANIM_ON);
+        ui_page_quick_modes_set_step(2, UI_PIXEL_COLOR_BLUE);
+    }
+    if (s_director_tick >= 4U && s_director_call_finished) {
+        ui_page_quick_modes_director_finalize(s_director_call_success);
+    }
+}
 
 static int ui_page_quick_modes_find(const char *entity_id)
 {
@@ -156,6 +273,7 @@ static void ui_page_quick_modes_apply_result(void *user_data)
         lv_label_set_text_fmt(s_status, "%s执行失败", s_modes[result->index].title);
         ui_page_quick_modes_set_indicator(result->index, UI_PIXEL_COLOR_RED);
     }
+    ui_page_quick_modes_director_apply_result(result->result == ESP_OK);
     free(result);
 }
 
@@ -188,7 +306,8 @@ static void ui_page_quick_modes_task(void *arg)
 
 static void ui_page_quick_modes_click(lv_event_t *event)
 {
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED || s_pending_index >= 0) {
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED ||
+        s_pending_index >= 0 || s_director_active) {
         return;
     }
 
@@ -208,6 +327,7 @@ static void ui_page_quick_modes_click(lv_event_t *event)
     s_pending_index = (int)index;
     s_has_action_status = true;
     lv_label_set_text_fmt(s_status, "正在执行%s", s_modes[index].title);
+    ui_page_quick_modes_director_show(index);
     ui_page_quick_modes_refresh_buttons();
     if (xTaskCreate(ui_page_quick_modes_task, "p4home_quick", 4096, arg,
                     tskIDLE_PRIORITY + 3, NULL) != pdPASS) {
@@ -215,7 +335,93 @@ static void ui_page_quick_modes_click(lv_event_t *event)
         free(arg);
         ui_page_quick_modes_refresh_buttons();
         lv_label_set_text(s_status, "执行失败");
+        ui_page_quick_modes_director_apply_result(false);
     }
+}
+
+static esp_err_t ui_page_quick_modes_create_director(void)
+{
+    s_director_depth = lv_obj_create(s_root);
+    ESP_RETURN_ON_FALSE(s_director_depth != NULL, ESP_ERR_NO_MEM, TAG,
+                        "director depth alloc failed");
+    lv_obj_set_size(s_director_depth, 568, 218);
+    lv_obj_align(s_director_depth, LV_ALIGN_CENTER, 8, 24);
+    ui_pixel_style_surface(s_director_depth, 0x020405, 0x020405);
+    lv_obj_set_style_pad_all(s_director_depth, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(s_director_depth, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    s_director = lv_obj_create(s_root);
+    ESP_RETURN_ON_FALSE(s_director != NULL, ESP_ERR_NO_MEM, TAG,
+                        "director alloc failed");
+    lv_obj_set_size(s_director, 568, 218);
+    lv_obj_align(s_director, LV_ALIGN_CENTER, 0, 16);
+    ui_pixel_style_surface(s_director, 0x101820, UI_PIXEL_COLOR_CYAN);
+    lv_obj_set_style_border_width(s_director, 3, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_director, 20, LV_PART_MAIN);
+    lv_obj_add_flag(s_director, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(s_director, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *eyebrow = lv_label_create(s_director);
+    lv_label_set_text(eyebrow, "P4HOME // SCENE DIRECTOR");
+    lv_obj_set_style_text_font(eyebrow, ui_pages_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(eyebrow, lv_color_hex(UI_PIXEL_COLOR_MUTED),
+                                LV_PART_MAIN);
+    lv_obj_align(eyebrow, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    s_director_title = lv_label_create(s_director);
+    lv_label_set_text(s_director_title, "场景准备中");
+    lv_obj_set_width(s_director_title, 510);
+    lv_label_set_long_mode(s_director_title, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_font(s_director_title, ui_pages_text_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_director_title, lv_color_hex(UI_PIXEL_COLOR_INK),
+                                LV_PART_MAIN);
+    lv_obj_align(s_director_title, LV_ALIGN_TOP_LEFT, 0, 34);
+
+    s_director_stage = lv_label_create(s_director);
+    lv_label_set_text(s_director_stage, "01 // 确认场景可用");
+    lv_obj_set_width(s_director_stage, 510);
+    lv_obj_set_style_text_font(s_director_stage, ui_pages_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_director_stage, lv_color_hex(0xb7c8d0), LV_PART_MAIN);
+    lv_obj_align(s_director_stage, LV_ALIGN_TOP_LEFT, 0, 70);
+
+    for (size_t i = 0; i < 3U; ++i) {
+        s_director_steps[i] = lv_obj_create(s_director);
+        ESP_RETURN_ON_FALSE(s_director_steps[i] != NULL, ESP_ERR_NO_MEM, TAG,
+                            "director step alloc failed");
+        lv_obj_set_size(s_director_steps[i], 154, 8);
+        lv_obj_set_pos(s_director_steps[i], (int32_t)(i * 176U), 112);
+        ui_pixel_style_surface(s_director_steps[i], UI_PIXEL_COLOR_GRID,
+                               UI_PIXEL_COLOR_GRID);
+        lv_obj_set_style_border_width(s_director_steps[i], 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(s_director_steps[i], 0, LV_PART_MAIN);
+        lv_obj_clear_flag(s_director_steps[i],
+                          LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    }
+
+    s_director_progress = lv_bar_create(s_director);
+    ESP_RETURN_ON_FALSE(s_director_progress != NULL, ESP_ERR_NO_MEM, TAG,
+                        "director progress alloc failed");
+    lv_obj_set_size(s_director_progress, 510, 22);
+    lv_obj_align(s_director_progress, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_bar_set_range(s_director_progress, 0, 100);
+    lv_bar_set_value(s_director_progress, 8, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(s_director_progress, lv_color_hex(0x071014), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_director_progress, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_director_progress, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_director_progress, lv_color_hex(UI_PIXEL_COLOR_GRID),
+                                  LV_PART_MAIN);
+    lv_obj_set_style_radius(s_director_progress, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_director_progress,
+                              lv_color_hex(UI_PIXEL_COLOR_CYAN), LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_director_progress, 0, LV_PART_INDICATOR);
+
+    lv_obj_add_flag(s_director_depth, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_director, LV_OBJ_FLAG_HIDDEN);
+    s_director_timer = lv_timer_create(ui_page_quick_modes_director_timer_cb, 220, NULL);
+    ESP_RETURN_ON_FALSE(s_director_timer != NULL, ESP_ERR_NO_MEM, TAG,
+                        "director timer alloc failed");
+    lv_timer_pause(s_director_timer);
+    return ESP_OK;
 }
 
 static void ui_page_quick_modes_apply_sensor(void *user_data)
@@ -402,6 +608,8 @@ esp_err_t ui_page_quick_modes_init(void)
             s_views[i].available = sensor.available;
         }
     }
+    ESP_RETURN_ON_ERROR(ui_page_quick_modes_create_director(), TAG,
+                        "failed to create scene director");
     ui_page_quick_modes_refresh_buttons();
     ESP_RETURN_ON_ERROR(panel_data_store_add_observer(ui_page_quick_modes_store_observer, NULL),
                         TAG, "failed to attach quick modes observer");

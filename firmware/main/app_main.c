@@ -15,6 +15,8 @@
 #include "panel_data_store.h"
 #include "time_service.h"
 #include "ui_page_dashboard.h"
+#include "ui_page_home.h"
+#include "ui_status_banner.h"
 
 static const char *TAG = "p4home_main";
 
@@ -92,7 +94,7 @@ void app_main(void)
         }
     }
 
-    (void)display_service_show_page(DISPLAY_SERVICE_PAGE_DASHBOARD);
+    (void)display_service_show_page(DISPLAY_SERVICE_PAGE_HOME);
 
     ESP_LOGW(TAG, "network ready=%s stack_ready=%s event_loop_ready=%s sta_netif_ready=%s hostname=%s device_id=%s mac=%s",
              board_support_network_ready() ? "yes" : "no",
@@ -205,10 +207,13 @@ void app_main(void)
     log_verify_marker("panel_store", "ready", board_support_panel_entity_count() > 0U);
     log_verify_marker("panel_whitelist", "parsed", board_support_panel_whitelist_count() > 0U);
     log_verify_marker("display", "bootstrap", board_support_display_ready());
+    log_verify_marker("ui", "home_rendered",
+                      ui_page_home_ready() &&
+                          strcmp(display_service_current_page_text(), "home") == 0);
     log_verify_marker("ui", "dashboard_rendered",
-                      strcmp(display_service_current_page_text(), "dashboard") == 0);
-    log_verify_marker("ui", "status_banner_ready",
-                      strcmp(display_service_current_page_text(), "dashboard") == 0);
+                      ui_page_dashboard_ready() &&
+                          ui_page_dashboard_card_count() > 0U);
+    log_verify_marker("ui", "status_banner_ready", ui_status_banner_ready());
     log_verify_marker("touch", "detect", board_support_touch_detected());
     log_verify_marker("touch", "lvgl_indev", board_support_touch_indev_ready());
 #if CONFIG_P4HOME_SR_ENABLE || CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST

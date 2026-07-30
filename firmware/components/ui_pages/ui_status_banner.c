@@ -119,3 +119,9 @@ void ui_status_banner_tick(void)
     }
     lv_obj_set_style_text_color(s_time_label, lv_color_hex(UI_PIXEL_COLOR_MUTED), LV_PART_MAIN);
 }
+
+bool ui_status_banner_ready(void)
+{
+    return s_banner != NULL && s_wifi_label != NULL && s_ha_label != NULL &&
+           s_time_label != NULL && s_timer != NULL;
+}

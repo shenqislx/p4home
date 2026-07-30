@@ -141,7 +141,20 @@ static esp_err_t display_service_add_lvgl_psram_pool(void)
 
 static inline ui_pages_page_t display_to_ui_page(display_service_page_t page)
 {
-    return (ui_pages_page_t)page;
+    switch (page) {
+    case DISPLAY_SERVICE_PAGE_HOME:
+        return UI_PAGES_PAGE_HOME;
+    case DISPLAY_SERVICE_PAGE_DASHBOARD:
+        return UI_PAGES_PAGE_DASHBOARD;
+    case DISPLAY_SERVICE_PAGE_CLIMATE:
+        return UI_PAGES_PAGE_CLIMATE;
+    case DISPLAY_SERVICE_PAGE_QUICK_MODES:
+        return UI_PAGES_PAGE_QUICK_MODES;
+    case DISPLAY_SERVICE_PAGE_ENERGY:
+        return UI_PAGES_PAGE_ENERGY;
+    default:
+        return UI_PAGES_PAGE_HOME;
+    }
 }
 
 static esp_err_t display_service_start_lcd_without_touch(void)

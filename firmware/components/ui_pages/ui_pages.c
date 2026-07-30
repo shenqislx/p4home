@@ -9,6 +9,7 @@
 #include "ui_page_climate.h"
 #include "ui_page_dashboard.h"
 #include "ui_page_energy.h"
+#include "ui_page_home.h"
 #include "ui_page_quick_modes.h"
 #include "ui_pixel_theme.h"
 
@@ -16,15 +17,18 @@ static const char *TAG = "ui_pages";
 static bool s_display_ready;
 static bool s_backlight_enabled;
 static bool s_touch_attached;
+static lv_obj_t *s_home_nav_button;
 static lv_obj_t *s_dashboard_nav_button;
 static lv_obj_t *s_climate_nav_button;
 static lv_obj_t *s_quick_modes_nav_button;
 static lv_obj_t *s_energy_nav_button;
-static ui_pages_page_t s_current_page = UI_PAGES_PAGE_DASHBOARD;
+static ui_pages_page_t s_current_page = UI_PAGES_PAGE_HOME;
 
 const char *ui_pages_page_to_text(ui_pages_page_t page)
 {
     switch (page) {
+    case UI_PAGES_PAGE_HOME:
+        return "home";
     case UI_PAGES_PAGE_DASHBOARD:
         return "dashboard";
     case UI_PAGES_PAGE_CLIMATE:
@@ -51,11 +55,20 @@ static void ui_pages_style_nav_button_locked(lv_obj_t *button, bool selected)
 
 void ui_pages_show_page_locked(ui_pages_page_t page)
 {
-    if (page < UI_PAGES_PAGE_DASHBOARD || page > UI_PAGES_PAGE_ENERGY) {
-        ESP_LOGW(TAG, "unsupported page=%d; falling back to dashboard", (int)page);
-        page = UI_PAGES_PAGE_DASHBOARD;
+    if (page < UI_PAGES_PAGE_HOME || page > UI_PAGES_PAGE_ENERGY) {
+        ESP_LOGW(TAG, "unsupported page=%d; falling back to home", (int)page);
+        page = UI_PAGES_PAGE_HOME;
     }
     s_current_page = page;
+
+    if (ui_page_home_root() != NULL) {
+        if (page == UI_PAGES_PAGE_HOME) {
+            lv_obj_clear_flag(ui_page_home_root(), LV_OBJ_FLAG_HIDDEN);
+            ui_page_home_show();
+        } else {
+            lv_obj_add_flag(ui_page_home_root(), LV_OBJ_FLAG_HIDDEN);
+        }
+    }
 
     if (ui_page_dashboard_root() != NULL) {
         if (page == UI_PAGES_PAGE_DASHBOARD) {
@@ -93,6 +106,7 @@ void ui_pages_show_page_locked(ui_pages_page_t page)
         }
     }
 
+    ui_pages_style_nav_button_locked(s_home_nav_button, page == UI_PAGES_PAGE_HOME);
     ui_pages_style_nav_button_locked(s_dashboard_nav_button, page == UI_PAGES_PAGE_DASHBOARD);
     ui_pages_style_nav_button_locked(s_climate_nav_button, page == UI_PAGES_PAGE_CLIMATE);
     ui_pages_style_nav_button_locked(s_quick_modes_nav_button, page == UI_PAGES_PAGE_QUICK_MODES);
@@ -119,7 +133,7 @@ static lv_obj_t *ui_pages_create_nav_button(lv_obj_t *screen,
     if (button == NULL) {
         return NULL;
     }
-    lv_obj_set_size(button, 104, 44);
+    lv_obj_set_size(button, 96, 44);
     lv_obj_align(button, LV_ALIGN_TOP_RIGHT, x_offset, 28);
     lv_obj_add_event_cb(button, ui_pages_nav_button_event_cb, LV_EVENT_CLICKED,
                         (void *)(intptr_t)page);
@@ -148,7 +162,7 @@ esp_err_t ui_pages_render_bootstrap(void)
 
     lv_obj_t *title = lv_label_create(screen);
     lv_label_set_text(title, "P4HOME // CTRL");
-    lv_obj_set_width(title, 520);
+    lv_obj_set_width(title, 360);
     lv_label_set_long_mode(title, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_font(title, ui_pages_pixel_font(), LV_PART_MAIN);
     lv_obj_set_style_text_color(title, lv_color_hex(UI_PIXEL_COLOR_CYAN), LV_PART_MAIN);
@@ -156,7 +170,7 @@ esp_err_t ui_pages_render_bootstrap(void)
 
     lv_obj_t *subtitle = lv_label_create(screen);
     lv_label_set_text(subtitle, "ESP32-P4 // SYS:READY");
-    lv_obj_set_width(subtitle, 520);
+    lv_obj_set_width(subtitle, 360);
     lv_label_set_long_mode(subtitle, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_font(subtitle, ui_pages_pixel_font(), LV_PART_MAIN);
     lv_obj_set_style_text_color(subtitle, lv_color_hex(UI_PIXEL_COLOR_MUTED), LV_PART_MAIN);
@@ -172,22 +186,28 @@ esp_err_t ui_pages_render_bootstrap(void)
     lv_obj_set_style_pad_all(header_rule, 0, LV_PART_MAIN);
     lv_obj_clear_flag(header_rule, LV_OBJ_FLAG_SCROLLABLE);
 
+    s_home_nav_button =
+        ui_pages_create_nav_button(screen, "HOME", -472, UI_PAGES_PAGE_HOME);
     s_quick_modes_nav_button =
-        ui_pages_create_nav_button(screen, "MODES", -376, UI_PAGES_PAGE_QUICK_MODES);
+        ui_pages_create_nav_button(screen, "MODES", -364, UI_PAGES_PAGE_QUICK_MODES);
     s_energy_nav_button =
-        ui_pages_create_nav_button(screen, "ENERGY", -264, UI_PAGES_PAGE_ENERGY);
+        ui_pages_create_nav_button(screen, "ENERGY", -256, UI_PAGES_PAGE_ENERGY);
     s_dashboard_nav_button =
-        ui_pages_create_nav_button(screen, "LIGHTS", -152, UI_PAGES_PAGE_DASHBOARD);
+        ui_pages_create_nav_button(screen, "LIGHTS", -148, UI_PAGES_PAGE_DASHBOARD);
     s_climate_nav_button =
         ui_pages_create_nav_button(screen, "CLIMATE", -40, UI_PAGES_PAGE_CLIMATE);
-    if (s_quick_modes_nav_button == NULL || s_energy_nav_button == NULL ||
+    if (s_home_nav_button == NULL || s_quick_modes_nav_button == NULL ||
+        s_energy_nav_button == NULL ||
         s_dashboard_nav_button == NULL ||
         s_climate_nav_button == NULL) {
         bsp_display_unlock();
         return ESP_ERR_NO_MEM;
     }
 
-    esp_err_t err = ui_page_dashboard_init();
+    esp_err_t err = ui_page_home_init();
+    if (err == ESP_OK) {
+        err = ui_page_dashboard_init();
+    }
     if (err == ESP_OK) {
         err = ui_page_climate_init();
     }
@@ -203,6 +223,9 @@ esp_err_t ui_pages_render_bootstrap(void)
         return err;
     }
 
+    if (ui_page_dashboard_root() != NULL) {
+        lv_obj_add_flag(ui_page_dashboard_root(), LV_OBJ_FLAG_HIDDEN);
+    }
     if (ui_page_climate_root() != NULL) {
         lv_obj_add_flag(ui_page_climate_root(), LV_OBJ_FLAG_HIDDEN);
     }
@@ -212,11 +235,11 @@ esp_err_t ui_pages_render_bootstrap(void)
     if (ui_page_energy_root() != NULL) {
         lv_obj_add_flag(ui_page_energy_root(), LV_OBJ_FLAG_HIDDEN);
     }
-    ui_pages_show_page_locked(UI_PAGES_PAGE_DASHBOARD);
+    ui_pages_show_page_locked(UI_PAGES_PAGE_HOME);
 
     s_display_ready = true;
     bsp_display_unlock();
-    ESP_LOGI(TAG, "product UI ready: Modes, Energy, Lights, Climate");
+    ESP_LOGI(TAG, "product UI ready: Home, Modes, Energy, Lights, Climate");
     return ESP_OK;
 }
 
