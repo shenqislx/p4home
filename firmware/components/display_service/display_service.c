@@ -177,7 +177,14 @@ static esp_err_t display_service_start_lcd_without_touch(void)
             .buff_dma = true,
 #endif
             .buff_spiram = false,
-            .sw_rotate = true,
+            /* Must stay false. esp_lvgl_port_disp.c:440 allocates a third
+             * buffer_size * color_bytes block (1024 * 50 * 2 = 100 KB of
+             * internal DMA RAM) whenever sw_rotate is set, but :644 only ever
+             * reads it when the display rotation is non-zero. This panel never
+             * rotates - the mirroring it does need is done in hardware by
+             * esp_lcd_panel_mirror() - so leaving this true burned 100 KB for
+             * nothing. That headroom is what pays for the LVGL heap below. */
+            .sw_rotate = false,
         },
     };
 
@@ -236,8 +243,14 @@ esp_err_t display_service_init(void)
     }
 
     ESP_LOGI(TAG, "starting display bootstrap for ESP32-P4 EVB V1.4 without touch");
+    size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     ESP_RETURN_ON_ERROR(display_service_start_lcd_without_touch(), TAG,
                         "failed to start LCD/LVGL bootstrap");
+    size_t internal_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    /* One draw buffer of 1024x50 RGB565 is 100 KB. With sw_rotate disabled the
+     * cost here should be roughly that, not double it. */
+    ESP_LOGW(TAG, "VERIFY:display:draw_buffers:cost=%uKB sw_rotate=off",
+             (unsigned)((internal_before - internal_after) / 1024U));
     ESP_RETURN_ON_ERROR(display_service_add_lvgl_psram_pool(), TAG,
                         "failed to extend LVGL memory pool");
     ESP_RETURN_ON_ERROR(bsp_display_backlight_on(), TAG,

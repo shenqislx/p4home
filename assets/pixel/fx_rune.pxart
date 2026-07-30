@@ -1,0 +1,11 @@
+# name: fx_rune
+# palette: a=ACCENT_CYAN A=COOL_HI v=ACCENT_VIOLET
+# The projectile fired from the HUD towards a room when a scene is cast.
+--frame--
+.A.
+ava
+.A.
+--frame--
+.a.
+AvA
+.a.

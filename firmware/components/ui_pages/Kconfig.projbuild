@@ -22,4 +22,13 @@ config P4HOME_UI_STATUS_BANNER_ENABLE_IP_SUFFIX
     bool "Show IP suffix in banner"
     default y
 
+config P4HOME_UI_PIXEL_CRT_OVERLAY
+    bool "Pixel home CRT scanline overlay"
+    default y
+    help
+        Tiles a static scanline pattern over the pixel home page. It is drawn
+        once and never animated, so it costs nothing per frame, but it changes
+        the page from a widget dashboard into a game screen. Turn it off to
+        compare on real hardware, where panel gamma may make it too dark.
+
 endmenu

@@ -1,0 +1,18 @@
+# name: actor_blink
+# palette: h=SHELL_DARK s=LAMP_BASE S=LAMP_HI r=FABRIC_LIGHT R=FABRIC_DARK b=COOL_DARK e=SHADOW
+# Single frame, held for one tick. Only the eye row differs from actor_idle
+# frame 0, so the dirty area stays tiny.
+--frame--
+..hhhh..
+.hhhhhh.
+.hsSSsh.
+.seeees.
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+rRrrrrRr
+.RrrrrR.
+..b..b..
+..b..b..
+.ee..ee.

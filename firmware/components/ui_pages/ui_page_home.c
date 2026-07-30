@@ -2,350 +2,694 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #include "esp_check.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "sdkconfig.h"
 #include "ha_client.h"
 #include "panel_data_store.h"
-#include "time_service.h"
 #include "ui_fonts.h"
+#include "ui_home_actor.h"
+#include "ui_home_rooms.h"
 #include "ui_pages.h"
-#include "ui_pixel_theme.h"
+#include "ui_pixel_art.h"
+#include "ui_pixel_fx.h"
+#include "ui_pixel_palette.h"
+#include "ui_time_source.h"
 
 static const char *TAG = "ui_home";
 
-#define UI_HOME_ROOM_COUNT 4U
-#define UI_HOME_STAR_COUNT 5U
-#define UI_HOME_AIR_LINE_COUNT 3U
+/* Layout in device pixels. The banner and navigation bar above are unchanged. */
+#define UI_HOME_ROOT_X 40
+#define UI_HOME_ROOT_Y 104
+#define UI_HOME_ROOT_W 944
+#define UI_HOME_ROOT_H 456
+
+#define UI_HOME_SKY_H 96
+#define UI_HOME_HOUSE_W (UI_PX(UI_HOME_HOUSE_ART_W))  /* 704 */
+#define UI_HOME_HOUSE_H (UI_PX(UI_HOME_HOUSE_ART_H))  /* 360 */
+#define UI_HOME_HUD_X 712
+#define UI_HOME_HUD_W 232
+#define UI_HOME_HUD_H 360
+
+/* Sky band in art pixels: 236 x 24. */
+#define UI_HOME_SKY_ART_W 236
+#define UI_HOME_SKY_ART_H 24
+
+#define UI_HOME_STAR_COUNT 9U
+#define UI_HOME_CLOUD_COUNT 3U
+#define UI_HOME_PARTICLE_COUNT 12U
+#define UI_HOME_FOG_BAND_COUNT 3U
+#define UI_HOME_HUD_DIALOG_ART_H 22
+
+/* HH:MM drawn from hud_digits sprites. The bundled pixel fonts only carry the
+ * CJK ranges they were generated for, and LVGL cannot scale a font, so a hero
+ * clock has to be sprites if it is to sit on the same 4 px grid. */
+#define UI_HOME_CLOCK_GLYPHS 5U
+#define UI_HOME_CLOCK_COLON_INDEX 10U
+#define UI_HOME_DIGIT_ART_W 7
+#define UI_HOME_DIGIT_ADVANCE 8
+
+typedef enum {
+    UI_HOME_SKY_DAWN = 0,
+    UI_HOME_SKY_DAY,
+    UI_HOME_SKY_DUSK,
+    UI_HOME_SKY_NIGHT,
+} ui_home_sky_phase_t;
+
+typedef enum {
+    UI_HOME_WEATHER_CLEAR = 0,
+    UI_HOME_WEATHER_CLOUDY,
+    UI_HOME_WEATHER_RAIN,
+    UI_HOME_WEATHER_SNOW,
+    UI_HOME_WEATHER_FOG,
+} ui_home_weather_t;
 
 typedef struct {
-    const char *title;
-    const char *group_a;
-    const char *group_b;
-    uint32_t floor;
-    uint32_t floor_alt;
-    uint32_t accent;
-} ui_home_room_def_t;
-
-typedef struct {
-    lv_obj_t *floor;
-    lv_obj_t *light_glow;
-    lv_obj_t *lamp;
-    lv_obj_t *window;
-    lv_obj_t *title;
-    lv_obj_t *meta;
-    lv_obj_t *air_lines[UI_HOME_AIR_LINE_COUNT];
-    size_t light_total;
-    size_t light_online;
-    size_t light_on;
-    size_t climate_total;
-    size_t climate_on;
-    double temperature_sum;
-    size_t temperature_count;
-} ui_home_room_view_t;
-
-typedef struct {
-    size_t entities;
-    size_t online;
-    size_t lights_on;
-    size_t climates_on;
-} ui_home_summary_t;
-
-static const ui_home_room_def_t s_room_defs[UI_HOME_ROOM_COUNT] = {
-    {
-        .title = "客厅",
-        .group_a = "客厅",
-        .group_b = "玄关",
-        .floor = 0x18313a,
-        .floor_alt = 0x1d3942,
-        .accent = UI_PIXEL_COLOR_CYAN,
-    },
-    {
-        .title = "主卧",
-        .group_a = "主卧",
-        .group_b = "阳台卧",
-        .floor = 0x2b2741,
-        .floor_alt = 0x332d4c,
-        .accent = 0xc084fc,
-    },
-    {
-        .title = "餐厨",
-        .group_a = "餐厅",
-        .group_b = "厨房",
-        .floor = 0x3a3020,
-        .floor_alt = 0x443925,
-        .accent = UI_PIXEL_COLOR_YELLOW,
-    },
-    {
-        .title = "书房",
-        .group_a = "书房",
-        .group_b = "阳台",
-        .floor = 0x203249,
-        .floor_alt = 0x263b54,
-        .accent = UI_PIXEL_COLOR_BLUE,
-    },
-};
+    lv_obj_t *sprite;
+    int16_t art_x;
+    int16_t art_y;
+    bool splashing;
+} ui_home_particle_t;
 
 static lv_obj_t *s_root;
-static lv_obj_t *s_house;
-static lv_obj_t *s_sky_strip;
+static lv_obj_t *s_sky;
+static lv_obj_t *s_sky_fill;
+static lv_obj_t *s_hill_far;
+static lv_obj_t *s_hill_near;
+static lv_obj_t *s_sun;
 static lv_obj_t *s_moon;
+static lv_obj_t *s_clouds[UI_HOME_CLOUD_COUNT];
+static lv_obj_t *s_fog_bands[UI_HOME_FOG_BAND_COUNT];
 static lv_obj_t *s_stars[UI_HOME_STAR_COUNT];
-static lv_obj_t *s_player;
-static lv_obj_t *s_player_shadow;
-static lv_obj_t *s_companion;
-static lv_obj_t *s_dialog_panel;
-static lv_obj_t *s_dialog_message;
-static lv_obj_t *s_home_summary;
-static lv_obj_t *s_connection_badge;
-static ui_home_room_view_t s_rooms[UI_HOME_ROOM_COUNT];
-static lv_timer_t *s_animation_timer;
+static lv_obj_t *s_house;
+static lv_obj_t *s_window_light;
+static lv_obj_t *s_hud;
+static lv_obj_t *s_hud_clock[UI_HOME_CLOCK_GLYPHS];
+static lv_obj_t *s_hud_summary;
+static lv_obj_t *s_hud_badge;
+#if CONFIG_P4HOME_UI_PIXEL_CRT_OVERLAY
+static lv_obj_t *s_crt_overlay;
+#endif
+static ui_home_particle_t s_particles[UI_HOME_PARTICLE_COUNT];
+
 static portMUX_TYPE s_refresh_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_refresh_queued;
 static bool s_ready;
-static uint32_t s_animation_tick;
+static ui_home_sky_phase_t s_sky_phase = UI_HOME_SKY_NIGHT;
+static ui_home_weather_t s_weather = UI_HOME_WEATHER_CLEAR;
+static bool s_night = true;
+static int8_t s_window_light_hour = -1;
+static uint8_t s_moon_phase;
+static int16_t s_cloud_offset;
+static int16_t s_hill_offset;
 
-static void ui_page_home_make_passive(lv_obj_t *object)
+static const lv_image_dsc_t *const s_rain_frames[] = FX_RAIN_FRAMES;
+static const lv_image_dsc_t *const s_splash_frames[] = FX_SPLASH_FRAMES;
+static const lv_image_dsc_t *const s_snow_frames[] = FX_SNOW_FRAMES;
+static const lv_image_dsc_t *const s_sun_frames[] = ENV_SUN_FRAMES;
+static const lv_image_dsc_t *const s_moon_frames[] = ENV_MOON_FRAMES;
+static const lv_image_dsc_t *const s_digit_frames[] = HUD_DIGITS_FRAMES;
+
+/* Star positions in sky art pixels, spread so no two blink in the same column. */
+static const int8_t s_star_art[UI_HOME_STAR_COUNT][2] = {
+    {14, 4}, {38, 9}, {62, 3}, {90, 11}, {118, 6},
+    {148, 2}, {176, 10}, {198, 5}, {222, 8},
+};
+
+static void ui_page_home_passive(lv_obj_t *object)
 {
-    lv_obj_clear_flag(object, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    if (object != NULL) {
+        lv_obj_clear_flag(object, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    }
 }
 
-static void ui_page_home_style_block(lv_obj_t *object, uint32_t background,
-                                     uint32_t border, int32_t border_width)
+static lv_obj_t *ui_page_home_panel(lv_obj_t *parent, int32_t x, int32_t y,
+                                    int32_t width, int32_t height, uint32_t colour)
 {
-    lv_obj_set_style_bg_color(object, lv_color_hex(background), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(object, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(object, border_width, LV_PART_MAIN);
-    lv_obj_set_style_border_color(object, lv_color_hex(border), LV_PART_MAIN);
-    lv_obj_set_style_radius(object, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(object, 0, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(object, 0, LV_PART_MAIN);
-}
-
-static lv_obj_t *ui_page_home_rect(lv_obj_t *parent, int32_t x, int32_t y,
-                                   int32_t width, int32_t height,
-                                   uint32_t background, uint32_t border,
-                                   int32_t border_width)
-{
-    lv_obj_t *object = lv_obj_create(parent);
-    if (object == NULL) {
+    lv_obj_t *panel = lv_obj_create(parent);
+    if (panel == NULL) {
         return NULL;
     }
-    lv_obj_set_size(object, width, height);
-    lv_obj_set_pos(object, x, y);
-    ui_page_home_style_block(object, background, border, border_width);
-    ui_page_home_make_passive(object);
-    return object;
+    lv_obj_set_size(panel, width, height);
+    lv_obj_set_pos(panel, x, y);
+    lv_obj_set_style_bg_color(panel, lv_color_hex(colour), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(panel, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(panel, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(panel, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(panel, 0, LV_PART_MAIN);
+    ui_page_home_passive(panel);
+    return panel;
 }
 
-static lv_obj_t *ui_page_home_label(lv_obj_t *parent, const char *text,
-                                    int32_t x, int32_t y, uint32_t color,
-                                    const lv_font_t *font)
-{
-    lv_obj_t *label = lv_label_create(parent);
-    if (label == NULL) {
-        return NULL;
-    }
-    lv_label_set_text(label, text);
-    lv_obj_set_pos(label, x, y);
-    lv_obj_set_style_text_font(label, font, LV_PART_MAIN);
-    lv_obj_set_style_text_color(label, lv_color_hex(color), LV_PART_MAIN);
-    ui_page_home_make_passive(label);
-    return label;
-}
+/* --- Environment ---------------------------------------------------------- */
 
-static bool ui_page_home_room_matches(size_t index, const char *group)
+static const lv_image_dsc_t *ui_page_home_sky_src(ui_home_sky_phase_t phase)
 {
-    if (index >= UI_HOME_ROOM_COUNT || group == NULL) {
-        return false;
-    }
-    return strcmp(group, s_room_defs[index].group_a) == 0 ||
-           strcmp(group, s_room_defs[index].group_b) == 0;
-}
-
-static bool ui_page_home_is_binary_on(const panel_sensor_t *sensor)
-{
-    return sensor != NULL && sensor->available &&
-           (strcmp(sensor->value_text, "on") == 0 ||
-            strcmp(sensor->value_text, "true") == 0 ||
-            strcmp(sensor->value_text, "1") == 0);
-}
-
-static void ui_page_home_reset_aggregates(void)
-{
-    for (size_t i = 0; i < UI_HOME_ROOM_COUNT; ++i) {
-        s_rooms[i].light_total = 0U;
-        s_rooms[i].light_online = 0U;
-        s_rooms[i].light_on = 0U;
-        s_rooms[i].climate_total = 0U;
-        s_rooms[i].climate_on = 0U;
-        s_rooms[i].temperature_sum = 0.0;
-        s_rooms[i].temperature_count = 0U;
+    switch (phase) {
+    case UI_HOME_SKY_DAWN:
+        return &env_sky_dawn;
+    case UI_HOME_SKY_DAY:
+        return &env_sky_day;
+    case UI_HOME_SKY_DUSK:
+        return &env_sky_dusk;
+    case UI_HOME_SKY_NIGHT:
+    default:
+        return &env_sky_night;
     }
 }
 
-static bool ui_page_home_collect(const panel_sensor_t *sensor, void *user_data)
+static ui_home_sky_phase_t ui_page_home_phase_for_hour(int hour)
 {
-    ui_home_summary_t *summary = (ui_home_summary_t *)user_data;
-    if (sensor == NULL || summary == NULL) {
-        return true;
+    if (hour >= 5 && hour < 8) {
+        return UI_HOME_SKY_DAWN;
+    }
+    if (hour >= 8 && hour < 17) {
+        return UI_HOME_SKY_DAY;
+    }
+    if (hour >= 17 && hour < 20) {
+        return UI_HOME_SKY_DUSK;
+    }
+    return UI_HOME_SKY_NIGHT;
+}
+
+/* Lamp colour temperature drifts with the hour: yellow at dawn, white at noon,
+ * orange at dusk. */
+static uint32_t ui_page_home_window_tint(int hour)
+{
+    if (hour < 9) {
+        return UI_PAL_LAMP_BASE;
+    }
+    if (hour < 15) {
+        return UI_PAL_LAMP_HI;
+    }
+    if (hour < 19) {
+        return UI_PAL_LAMP_LIGHT;
+    }
+    return UI_PAL_LAMP_DARK;
+}
+
+static void ui_page_home_apply_environment(void)
+{
+    struct tm local = {0};
+    bool clock_ready = ui_time_source_local(&local);
+    int hour = clock_ready ? local.tm_hour : 21;
+
+    ui_home_sky_phase_t phase = ui_page_home_phase_for_hour(hour);
+    s_night = (phase == UI_HOME_SKY_NIGHT);
+
+    if (phase != s_sky_phase) {
+        /* One src swap for the whole band; the gradient itself is pre-dithered
+         * because LVGL v9 has no runtime gradient dithering. */
+        lv_obj_set_style_bg_image_src(s_sky_fill, ui_page_home_sky_src(phase), LV_PART_MAIN);
+        s_sky_phase = phase;
     }
 
-    summary->entities++;
-    summary->online += sensor->available ? 1U : 0U;
-    if (sensor->kind == PANEL_SENSOR_KIND_BINARY && ui_page_home_is_binary_on(sensor)) {
-        summary->lights_on++;
+    /* This whole function runs once a second, so anything unconditional here is
+     * an invalidation every second. LVGL style writes do not compare before
+     * invalidating, so the guards have to be explicit. */
+    static int8_t s_stars_night = -1;
+    bool night_changed = (s_stars_night != (int8_t)s_night);
+    if (night_changed) {
+        s_stars_night = (int8_t)s_night;
+        for (size_t i = 0; i < UI_HOME_STAR_COUNT; ++i) {
+            if (s_stars[i] != NULL) {
+                lv_obj_set_style_bg_opa(s_stars[i], s_night ? LV_OPA_COVER : LV_OPA_TRANSP,
+                                        LV_PART_MAIN);
+            }
+        }
     }
-    if (sensor->kind == PANEL_SENSOR_KIND_CLIMATE && sensor->available &&
-        strcmp(sensor->value_text, "off") != 0) {
-        summary->climates_on++;
+    if (s_moon != NULL) {
+        uint8_t moon_phase = 4U;
+        if (ui_time_source_moon_phase(&moon_phase) && moon_phase != s_moon_phase) {
+            ui_pixel_fx_sprite_set_src(s_moon, s_moon_frames[moon_phase % ENV_MOON_FRAME_COUNT]);
+            s_moon_phase = moon_phase;
+        }
+        /* lv_obj_add_flag(LV_OBJ_FLAG_HIDDEN) invalidates unconditionally, so it
+         * must not be called on every pass. */
+        if (night_changed) {
+            if (s_night) {
+                lv_obj_clear_flag(s_moon, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(s_moon, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    }
+    if (s_sun != NULL) {
+        /* Overcast hides the sun. A sun disc sitting behind falling rain is the
+         * kind of detail that breaks the whole illusion. */
+        bool sun_visible = !s_night && (s_weather == UI_HOME_WEATHER_CLEAR ||
+                                        s_weather == UI_HOME_WEATHER_CLOUDY);
+        static int8_t s_sun_shown = -1;
+        if (s_sun_shown != (int8_t)sun_visible) {
+            s_sun_shown = (int8_t)sun_visible;
+            if (sun_visible) {
+                lv_obj_clear_flag(s_sun, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(s_sun, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        if (sun_visible) {
+            /* Arc across the band between 06:00 and 19:00. */
+            int32_t span = 13;
+            int32_t progress = hour - 6;
+            progress = progress < 0 ? 0 : (progress > span ? span : progress);
+            int32_t art_x = 12 + (progress * (UI_HOME_SKY_ART_W - 30)) / span;
+            int32_t rise = progress <= span / 2 ? progress : span - progress;
+            int32_t art_y = 14 - rise * 2;
+            ui_pixel_fx_sprite_move(s_sun, art_x, art_y < 1 ? 1 : art_y);
+        }
     }
 
-    for (size_t i = 0; i < UI_HOME_ROOM_COUNT; ++i) {
-        if (!ui_page_home_room_matches(i, sensor->group)) {
+    /* Landscape and shell tint. Recolouring is a style write on an existing
+     * object, so a phase change costs one invalidation per layer and no extra
+     * art. Without it the hills stay midday-green against a night sky, which is
+     * the single most obvious tell that the scene is faked.
+     *
+     * Tracked separately from s_sky_phase, which starts at NIGHT to match the
+     * initial sky src: comparing against it would skip the very first tint pass
+     * whenever the panel boots at night and leave the hills midday-green. */
+    static int8_t s_tinted_phase = -1;
+    bool tint_changed = (s_tinted_phase != (int8_t)phase);
+    static const struct {
+        uint32_t colour;
+        lv_opa_t opa;
+    } tint_by_phase[] = {
+        [UI_HOME_SKY_DAWN] = {UI_PAL_SKY_DAWN_HI, LV_OPA_30},
+        [UI_HOME_SKY_DAY] = {UI_PAL_SKY_DAY_HI, LV_OPA_TRANSP},
+        [UI_HOME_SKY_DUSK] = {UI_PAL_SKY_DUSK_BASE, LV_OPA_50},
+        [UI_HOME_SKY_NIGHT] = {UI_PAL_SKY_NIGHT_DARK, LV_OPA_80},
+    };
+    if (tint_changed) {
+        s_tinted_phase = (int8_t)phase;
+        lv_obj_t *const tinted[] = {s_hill_far, s_hill_near};
+        for (size_t i = 0; i < sizeof(tinted) / sizeof(tinted[0]); ++i) {
+            if (tinted[i] == NULL) {
+                continue;
+            }
+            lv_obj_set_style_bg_image_recolor(tinted[i],
+                                              lv_color_hex(tint_by_phase[phase].colour),
+                                              LV_PART_MAIN);
+            lv_obj_set_style_bg_image_recolor_opa(tinted[i], tint_by_phase[phase].opa,
+                                                  LV_PART_MAIN);
+            lv_obj_set_style_image_recolor(tinted[i],
+                                           lv_color_hex(tint_by_phase[phase].colour),
+                                           LV_PART_MAIN);
+            lv_obj_set_style_image_recolor_opa(tinted[i], tint_by_phase[phase].opa,
+                                               LV_PART_MAIN);
+        }
+        ui_home_rooms_set_shell_tint(tint_by_phase[phase].colour, tint_by_phase[phase].opa);
+
+        /* Backdrop showing in the corners either side of the roof. It has to be
+         * the tinted hillside tone rather than the shadow colour, otherwise the
+         * roof is silhouetted against a black void that no other part of the
+         * scene explains. Same mix the hill recolour applies, then darkened so
+         * the backdrop always sits tonally behind the shell: at night both
+         * converge on the sky colour and the roof would otherwise vanish. */
+        if (s_house != NULL) {
+            lv_color_t hill = lv_color_mix(lv_color_hex(tint_by_phase[phase].colour),
+                                           lv_color_hex(UI_PAL_LEAF_DARK),
+                                           tint_by_phase[phase].opa);
+            lv_obj_set_style_bg_color(s_house, lv_color_darken(hill, LV_OPA_40),
+                                      LV_PART_MAIN);
+        }
+    }
+
+    /* Interior ambient follows the same phase. Daylight through the windows is
+     * strong enough that an unlit room still reads as furnished; after dark the
+     * same room drops to a silhouette, which is what makes turning a lamp on feel
+     * like it did something. */
+    static const ui_home_ambient_t ambient_by_phase[] = {
+        [UI_HOME_SKY_DAWN] = {LV_OPA_70, UI_PAL_PANEL},
+        [UI_HOME_SKY_DAY] = {LV_OPA_COVER, UI_PAL_PANEL_ALT},
+        [UI_HOME_SKY_DUSK] = {LV_OPA_60, UI_PAL_PANEL},
+        [UI_HOME_SKY_NIGHT] = {LV_OPA_30, UI_PAL_PANEL},
+    };
+    ui_home_rooms_set_ambient(&ambient_by_phase[phase]);
+
+    /* The window light band only moves four times an hour, so it costs almost
+     * nothing but sells the passage of time better than anything animated. */
+    if (s_window_light != NULL && hour != s_window_light_hour) {
+        s_window_light_hour = (int8_t)hour;
+        bool visible = clock_ready && !s_night;
+        if (visible) {
+            lv_obj_clear_flag(s_window_light, LV_OBJ_FLAG_HIDDEN);
+            int32_t step = ((hour - 6) * 4) % (UI_HOME_ROOM_ART_W - 26);
+            if (step < 0) {
+                step = 0;
+            }
+            lv_obj_set_pos(s_window_light,
+                           UI_PX(UI_HOME_LOWER_ART_Y == 0 ? 0 : 62 + step),
+                           UI_PX(UI_HOME_LOWER_ART_Y + UI_HOME_ROOM_ART_H - 8));
+            lv_obj_set_style_bg_color(s_window_light,
+                                      lv_color_hex(ui_page_home_window_tint(hour)),
+                                      LV_PART_MAIN);
+        } else {
+            lv_obj_add_flag(s_window_light, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    /* Only the glyphs that changed get a new src, so a minute tick invalidates
+     * two 28x44 rectangles rather than the whole HUD. */
+    uint8_t glyphs[UI_HOME_CLOCK_GLYPHS] = {
+        (uint8_t)(clock_ready ? local.tm_hour / 10 : 0),
+        (uint8_t)(clock_ready ? local.tm_hour % 10 : 0),
+        UI_HOME_CLOCK_COLON_INDEX,
+        (uint8_t)(clock_ready ? local.tm_min / 10 : 0),
+        (uint8_t)(clock_ready ? local.tm_min % 10 : 0),
+    };
+    static uint8_t s_shown_glyphs[UI_HOME_CLOCK_GLYPHS] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    static int8_t s_shown_ready = -1;
+    for (size_t i = 0; i < UI_HOME_CLOCK_GLYPHS; ++i) {
+        if (s_hud_clock[i] == NULL) {
             continue;
         }
-        ui_home_room_view_t *room = &s_rooms[i];
-        if (sensor->kind == PANEL_SENSOR_KIND_BINARY && strcmp(sensor->icon, "light") == 0) {
-            room->light_total++;
-            room->light_online += sensor->available ? 1U : 0U;
-            room->light_on += ui_page_home_is_binary_on(sensor) ? 1U : 0U;
-        } else if (sensor->kind == PANEL_SENSOR_KIND_CLIMATE) {
-            room->climate_total++;
-            if (sensor->available && strcmp(sensor->value_text, "off") != 0) {
-                room->climate_on++;
-            }
-            if (sensor->available && sensor->has_current_temperature) {
-                double temperature = sensor->current_temperature;
-                if (strcmp(sensor->unit, "F") == 0) {
-                    temperature = (temperature - 32.0) * (5.0 / 9.0);
-                }
-                room->temperature_sum += temperature;
-                room->temperature_count++;
-            }
+        if (s_shown_glyphs[i] != glyphs[i]) {
+            s_shown_glyphs[i] = glyphs[i];
+            ui_pixel_fx_sprite_set_src(s_hud_clock[i], s_digit_frames[glyphs[i]]);
+        }
+        if (s_shown_ready != (int8_t)clock_ready) {
+            lv_obj_set_style_opa(s_hud_clock[i], clock_ready ? LV_OPA_COVER : LV_OPA_40,
+                                 LV_PART_MAIN);
+        }
+    }
+    s_shown_ready = (int8_t)clock_ready;
+}
+
+/* --- Weather ------------------------------------------------------------- */
+
+static ui_home_weather_t ui_page_home_weather_from_text(const char *value_text)
+{
+    /* weather_service publishes "Today|<condition>|..." into a TEXT entity, so
+     * the condition is the second pipe-delimited field. */
+    const char *separator = strchr(value_text, '|');
+    if (separator == NULL) {
+        return UI_HOME_WEATHER_CLEAR;
+    }
+    separator++;
+    if (strncmp(separator, "Rain", 4) == 0 || strncmp(separator, "Thunder", 7) == 0) {
+        return UI_HOME_WEATHER_RAIN;
+    }
+    if (strncmp(separator, "Snow", 4) == 0) {
+        return UI_HOME_WEATHER_SNOW;
+    }
+    if (strncmp(separator, "Fog", 3) == 0) {
+        return UI_HOME_WEATHER_FOG;
+    }
+    if (strncmp(separator, "Cloudy", 6) == 0) {
+        return UI_HOME_WEATHER_CLOUDY;
+    }
+    return UI_HOME_WEATHER_CLEAR;
+}
+
+static void ui_page_home_reseed_particle(size_t index)
+{
+    ui_home_particle_t *particle = &s_particles[index];
+    if (particle->sprite == NULL) {
+        return;
+    }
+    /* Deterministic spread instead of rand(): identical every run, which is what
+     * makes simulator frame dumps comparable between builds. */
+    particle->art_x = (int16_t)(4 + (index * 19U) % (UI_HOME_SKY_ART_W - 8));
+    particle->art_y = (int16_t)(-(int16_t)((index * 7U) % UI_HOME_SKY_ART_H));
+    particle->splashing = false;
+}
+
+static void ui_page_home_apply_weather(ui_home_weather_t weather)
+{
+    if (weather == s_weather) {
+        return;
+    }
+    s_weather = weather;
+    bool particles_active = (weather == UI_HOME_WEATHER_RAIN ||
+                             weather == UI_HOME_WEATHER_SNOW);
+    for (size_t i = 0; i < UI_HOME_PARTICLE_COUNT; ++i) {
+        if (s_particles[i].sprite == NULL) {
+            continue;
+        }
+        if (particles_active) {
+            ui_pixel_fx_sprite_set_src(s_particles[i].sprite,
+                             weather == UI_HOME_WEATHER_RAIN ? s_rain_frames[0]
+                                                            : s_snow_frames[0]);
+            lv_obj_clear_flag(s_particles[i].sprite, LV_OBJ_FLAG_HIDDEN);
+            ui_page_home_reseed_particle(i);
+        } else {
+            lv_obj_add_flag(s_particles[i].sprite, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    /* Fog and heavy cloud dim the whole sky rather than adding objects. */
+    lv_opa_t cloud_opa = LV_OPA_COVER;
+    if (weather == UI_HOME_WEATHER_FOG) {
+        cloud_opa = LV_OPA_40;
+    } else if (weather == UI_HOME_WEATHER_CLEAR) {
+        cloud_opa = LV_OPA_60;
+    }
+    for (size_t i = 0; i < UI_HOME_CLOUD_COUNT; ++i) {
+        if (s_clouds[i] != NULL) {
+            lv_obj_set_style_opa(s_clouds[i], cloud_opa, LV_PART_MAIN);
+        }
+    }
+
+    for (size_t i = 0; i < UI_HOME_FOG_BAND_COUNT; ++i) {
+        if (s_fog_bands[i] == NULL) {
+            continue;
+        }
+        if (weather == UI_HOME_WEATHER_FOG) {
+            lv_obj_clear_flag(s_fog_bands[i], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_fog_bands[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    ESP_LOGI(TAG, "weather effect -> %d", (int)weather);
+}
+
+/* Wall-clock effects are not driven by Home Assistant, so they need their own
+ * heartbeat: without this the clock digits, sky phase, moon and window light only
+ * change when an entity happens to update. Every 8 ticks is once a second, which
+ * is the coarsest rate at which a minute rollover still looks immediate. */
+static bool ui_page_home_clock_tick(uint32_t tick, void *user_data)
+{
+    (void)tick;
+    (void)user_data;
+    ui_home_sky_phase_t before = s_sky_phase;
+    ui_page_home_apply_environment();
+    /* Crossing into a new sky phase changes the interior ambient, so the rooms
+     * have to be repainted even though no entity changed. */
+    if (s_sky_phase != before) {
+        for (size_t i = 0; i < UI_HOME_ROOM_COUNT; ++i) {
+            ui_home_rooms_apply(i);
         }
     }
     return true;
 }
 
-static void ui_page_home_apply_environment(void)
+/* Clear weather gets a breathing halo instead of particles: 4 dithered frames
+ * ping-ponged so the sun never snaps back to frame 0. */
+static bool ui_page_home_sun_tick(uint32_t tick, void *user_data)
 {
-    time_t now = time(NULL);
-    struct tm local = {0};
-    bool clock_ready = time_service_is_synced() && localtime_r(&now, &local) != NULL;
-    bool daytime = clock_ready && local.tm_hour >= 7 && local.tm_hour < 18;
+    (void)user_data;
+    if (s_sun == NULL || lv_obj_has_flag(s_sun, LV_OBJ_FLAG_HIDDEN)) {
+        return true;
+    }
+    if (s_weather != UI_HOME_WEATHER_CLEAR) {
+        return true;
+    }
+    static const uint8_t pingpong[] = {0, 1, 2, 3, 2, 1};
+    uint8_t frame = pingpong[(tick / 4U) % (sizeof(pingpong) / sizeof(pingpong[0]))];
+    ui_pixel_fx_sprite_set_src(s_sun, s_sun_frames[frame]);
+    return true;
+}
 
-    lv_obj_set_style_bg_color(s_sky_strip,
-                              lv_color_hex(daytime ? 0x397e92 : 0x11152e),
-                              LV_PART_MAIN);
-    lv_obj_set_style_bg_color(s_moon,
-                              lv_color_hex(daytime ? UI_PIXEL_COLOR_YELLOW : 0xd8e4ff),
-                              LV_PART_MAIN);
+static bool ui_page_home_particle_tick(uint32_t tick, void *user_data)
+{
+    (void)user_data;
+    if (s_weather != UI_HOME_WEATHER_RAIN && s_weather != UI_HOME_WEATHER_SNOW) {
+        return true;
+    }
+    bool rain = (s_weather == UI_HOME_WEATHER_RAIN);
+    /* Snow falls at half the rate and drifts sideways; rain falls straight and
+     * fast, then splashes. */
+    if (!rain && (tick % 2U) != 0U) {
+        return true;
+    }
+
+    for (size_t i = 0; i < UI_HOME_PARTICLE_COUNT; ++i) {
+        ui_home_particle_t *particle = &s_particles[i];
+        if (particle->sprite == NULL) {
+            continue;
+        }
+        particle->art_y = (int16_t)(particle->art_y + (rain ? 3 : 1));
+        if (!rain) {
+            /* Quantised sway: a smooth sine would be sub-pixel at this scale. */
+            int8_t sway = ((tick / 4U + i) % 2U) ? 1 : -1;
+            particle->art_x = (int16_t)(particle->art_x + sway);
+        }
+
+        if (particle->art_y >= UI_HOME_SKY_ART_H - 2) {
+            if (rain && !particle->splashing) {
+                particle->splashing = true;
+                ui_pixel_fx_play_once(particle->sprite, s_splash_frames,
+                                      FX_SPLASH_FRAME_COUNT, 1);
+            } else {
+                ui_pixel_fx_sprite_set_src(particle->sprite,
+                                 rain ? s_rain_frames[0] : s_snow_frames[0]);
+                lv_obj_clear_flag(particle->sprite, LV_OBJ_FLAG_HIDDEN);
+                ui_page_home_reseed_particle(i);
+            }
+        } else if (rain) {
+            ui_pixel_fx_sprite_set_src(particle->sprite, s_rain_frames[tick % FX_RAIN_FRAME_COUNT]);
+        }
+        ui_pixel_fx_sprite_move(particle->sprite, particle->art_x, particle->art_y);
+    }
+    return true;
+}
+
+static bool ui_page_home_parallax_tick(uint32_t tick, void *user_data)
+{
+    (void)tick;
+    (void)user_data;
+    /* Three layers at different rates. The far hills never move, which is what
+     * gives the other two something to be parallax against. */
+    s_cloud_offset = (int16_t)((s_cloud_offset + 1) % UI_HOME_SKY_ART_W);
+    for (size_t i = 0; i < UI_HOME_CLOUD_COUNT; ++i) {
+        if (s_clouds[i] == NULL) {
+            continue;
+        }
+        int16_t base = (int16_t)(i * 74);
+        int16_t art_x = (int16_t)((base + s_cloud_offset) % UI_HOME_SKY_ART_W);
+        ui_pixel_fx_sprite_move(s_clouds[i], art_x, (int16_t)(3 + i * 4));
+    }
+    if (s_hill_near != NULL) {
+        /* Scrolled by moving the whole (oversized) tiled panel one art pixel at
+         * a time and wrapping at the tile width, so the seam never shows. */
+        s_hill_offset = (int16_t)((s_hill_offset + 1) % 32);
+        lv_obj_set_pos(s_hill_near, UI_PX(-s_hill_offset),
+                       UI_PX(UI_HOME_SKY_ART_H - 10));
+    }
+
+    /* Fog drifts on the same slow beat, each band at its own rate so the layers
+     * separate. Only three tiled panels, so it costs three moves per beat. */
+    if (s_weather == UI_HOME_WEATHER_FOG) {
+        for (size_t i = 0; i < UI_HOME_FOG_BAND_COUNT; ++i) {
+            if (s_fog_bands[i] == NULL) {
+                continue;
+            }
+            int16_t drift = (int16_t)((s_hill_offset * (int16_t)(i + 1)) % 16);
+            lv_obj_set_pos(s_fog_bands[i], UI_PX(-drift),
+                           UI_PX((int16_t)(6 + i * 5)));
+        }
+    }
+    return true;
+}
+
+static bool ui_page_home_star_tick(uint32_t tick, void *user_data)
+{
+    (void)user_data;
+    if (!s_night) {
+        return true;
+    }
+    /* Each star has its own phase so the field twinkles instead of strobing. */
     for (size_t i = 0; i < UI_HOME_STAR_COUNT; ++i) {
-        lv_obj_set_style_bg_opa(s_stars[i], daytime ? LV_OPA_20 : LV_OPA_COVER,
-                                LV_PART_MAIN);
+        if (s_stars[i] == NULL) {
+            continue;
+        }
+        bool bright = ((tick + i * 3U) % 6U) < 4U;
+        lv_obj_set_style_bg_color(s_stars[i],
+                                  lv_color_hex(bright ? UI_PAL_INK : UI_PAL_SKY_NIGHT_HI),
+                                  LV_PART_MAIN);
     }
+    return true;
 }
 
-static void ui_page_home_apply_room(size_t index)
+/* --- Aggregation and refresh --------------------------------------------- */
+
+static bool ui_page_home_collect(const panel_sensor_t *sensor, void *user_data)
 {
-    ui_home_room_view_t *room = &s_rooms[index];
-    const ui_home_room_def_t *def = &s_room_defs[index];
-    bool has_data = room->light_online > 0U || room->temperature_count > 0U;
-    bool lit = room->light_on > 0U;
-    bool climate = room->climate_on > 0U;
-
-    lv_obj_set_style_bg_color(room->floor,
-                              lv_color_hex(lit ? def->floor_alt : def->floor),
-                              LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(room->light_glow, lit ? LV_OPA_30 : LV_OPA_TRANSP,
-                            LV_PART_MAIN);
-    lv_obj_set_style_bg_color(room->lamp,
-                              lv_color_hex(lit ? UI_PIXEL_COLOR_YELLOW : 0x56636a),
-                              LV_PART_MAIN);
-    lv_obj_set_style_border_color(room->lamp,
-                                  lv_color_hex(lit ? 0xffefad : 0x27343a),
-                                  LV_PART_MAIN);
-    lv_obj_set_style_bg_color(room->window,
-                              lv_color_hex(lit ? 0xffd36a : 0x142a43),
-                              LV_PART_MAIN);
-    lv_obj_set_style_border_color(room->window,
-                                  lv_color_hex(lit ? UI_PIXEL_COLOR_YELLOW
-                                                   : UI_PIXEL_COLOR_BLUE),
-                                  LV_PART_MAIN);
-    lv_obj_set_style_text_color(room->title,
-                                lv_color_hex(lit || climate ? def->accent
-                                                           : UI_PIXEL_COLOR_INK),
-                                LV_PART_MAIN);
-
-    for (size_t i = 0; i < UI_HOME_AIR_LINE_COUNT; ++i) {
-        lv_obj_set_style_bg_opa(room->air_lines[i],
-                                climate ? (i == (s_animation_tick % UI_HOME_AIR_LINE_COUNT)
-                                               ? LV_OPA_COVER
-                                               : LV_OPA_40)
-                                        : LV_OPA_TRANSP,
-                                LV_PART_MAIN);
+    ui_home_summary_t *summary = (ui_home_summary_t *)user_data;
+    if (sensor == NULL) {
+        return true;
     }
-
-    char meta[64];
-    if (!has_data) {
-        snprintf(meta, sizeof(meta), "WAITING...");
-    } else if (room->temperature_count > 0U) {
-        snprintf(meta, sizeof(meta), "LAMP %u/%u  AIR %s  %.1fC",
-                 (unsigned)room->light_on,
-                 (unsigned)room->light_total,
-                 climate ? "ON" : "OFF",
-                 room->temperature_sum / (double)room->temperature_count);
-    } else {
-        snprintf(meta, sizeof(meta), "LAMP %u/%u",
-                 (unsigned)room->light_on,
-                 (unsigned)room->light_total);
+    if (sensor->kind == PANEL_SENSOR_KIND_TEXT && strcmp(sensor->icon, "weather") == 0) {
+        ui_page_home_apply_weather(ui_page_home_weather_from_text(sensor->value_text));
+        return true;
     }
-    lv_label_set_text(room->meta, meta);
-    lv_obj_set_style_text_color(room->meta,
-                                lv_color_hex(lit || climate ? def->accent
-                                                           : UI_PIXEL_COLOR_MUTED),
-                                LV_PART_MAIN);
+    ui_home_rooms_collect(sensor, summary);
+    return true;
 }
 
-static void ui_page_home_apply_dialog(const ui_home_summary_t *summary)
+static void ui_page_home_apply_actor(const ui_home_summary_t *summary)
 {
     bool connected = ha_client_ready();
-    const char *message = "任务：等待家园连接";
-    uint32_t accent = UI_PIXEL_COLOR_YELLOW;
 
-    if (connected && summary->lights_on == 0U && summary->climates_on == 0U) {
-        message = "家园很安静，可以休息";
-        accent = UI_PIXEL_COLOR_CYAN;
-    } else if (connected && summary->lights_on >= 6U) {
-        message = "灯火通明！氛围值拉满";
-        accent = UI_PIXEL_COLOR_YELLOW;
-    } else if (connected && summary->climates_on > 0U) {
-        message = "清凉魔法正在生效";
-        accent = UI_PIXEL_COLOR_BLUE;
-    } else if (connected) {
-        message = "欢迎回家，勇者";
-        accent = UI_PIXEL_COLOR_CYAN;
+    if (!connected || summary->online == 0U) {
+        ui_home_actor_set_state(UI_ACTOR_STATE_DOZE);
+        ui_home_actor_say("信号断了…先打个盹", UI_PAL_MUTED);
+        return;
+    }
+    if (summary->lights_on == 0U && summary->climates_on == 0U) {
+        ui_home_actor_go_to_room(0U, true); /* master bedroom */
+        if (ui_home_actor_state() == UI_ACTOR_STATE_IDLE) {
+            ui_home_actor_set_state(UI_ACTOR_STATE_SLEEP);
+        }
+        ui_home_actor_say("全屋熄灯，去睡了", UI_PAL_ACCENT_VIOLET);
+        return;
     }
 
-    lv_label_set_text(s_dialog_message, message);
-    lv_obj_set_style_border_color(s_dialog_panel, lv_color_hex(accent), LV_PART_MAIN);
+    if (ui_home_actor_state() == UI_ACTOR_STATE_SLEEP ||
+        ui_home_actor_state() == UI_ACTOR_STATE_DOZE) {
+        ui_home_actor_set_state(UI_ACTOR_STATE_IDLE);
+    }
 
-    char summary_text[80];
-    snprintf(summary_text, sizeof(summary_text), "LIGHT %02u  AIR %02u\nONLINE %02u/%02u",
-             (unsigned)summary->lights_on,
+    /* Walk to the most interesting room: cooling beats merely lit. */
+    size_t destination = ui_home_actor_room();
+    bool found = false;
+    for (size_t i = 0; i < UI_HOME_ROOM_COUNT && !found; ++i) {
+        if (ui_home_room_has_climate_on(i)) {
+            destination = i;
+            found = true;
+        }
+    }
+    for (size_t i = 0; i < UI_HOME_ROOM_COUNT && !found; ++i) {
+        if (ui_home_room_is_lit(i)) {
+            destination = i;
+            found = true;
+        }
+    }
+    if (found) {
+        ui_home_actor_go_to_room(destination, false);
+    }
+
+    const ui_home_room_def_t *def = ui_home_room_def(destination);
+    char message[96];
+    if (ui_home_room_has_climate_on(destination)) {
+        snprintf(message, sizeof(message), "%s在制冷，好凉快", def->title);
+        ui_home_actor_say(message, UI_PAL_COOL_LIGHT);
+    } else if (summary->lights_on >= 8U) {
+        ui_home_actor_say("灯火通明！氛围值拉满", UI_PAL_LAMP_HI);
+    } else {
+        snprintf(message, sizeof(message), "去%s看看", def->title);
+        ui_home_actor_say(message, UI_PAL_ACCENT_CYAN);
+    }
+}
+
+static void ui_page_home_apply_hud(const ui_home_summary_t *summary)
+{
+    bool connected = ha_client_ready();
+
+    char text[96];
+    snprintf(text, sizeof(text), "灯 %02u/%02u\n空调 %02u\n在线 %02u/%02u",
+             (unsigned)summary->lights_on, (unsigned)summary->lights_total,
              (unsigned)summary->climates_on,
-             (unsigned)summary->online,
-             (unsigned)summary->entities);
-    lv_label_set_text(s_home_summary, summary_text);
+             (unsigned)summary->online, (unsigned)summary->entities);
+    lv_label_set_text(s_hud_summary, text);
 
-    lv_label_set_text(s_connection_badge, connected ? "WORLD // ONLINE"
-                                                     : "WORLD // CONNECTING");
-    lv_obj_set_style_text_color(s_connection_badge,
-                                lv_color_hex(connected ? UI_PIXEL_COLOR_CYAN
-                                                       : UI_PIXEL_COLOR_YELLOW),
+    lv_label_set_text(s_hud_badge, connected ? "ONLINE" : "LINKING");
+    lv_obj_set_style_text_color(s_hud_badge,
+                                lv_color_hex(connected ? UI_PAL_ACCENT_CYAN
+                                                       : UI_PAL_LAMP_LIGHT),
                                 LV_PART_MAIN);
 }
 
@@ -355,13 +699,15 @@ static void ui_page_home_refresh_locked(void)
         return;
     }
     ui_home_summary_t summary = {0};
-    ui_page_home_reset_aggregates();
+    ui_home_rooms_reset_aggregates();
     panel_data_store_iterate(ui_page_home_collect, &summary);
-    for (size_t i = 0; i < UI_HOME_ROOM_COUNT; ++i) {
-        ui_page_home_apply_room(i);
-    }
+
     ui_page_home_apply_environment();
-    ui_page_home_apply_dialog(&summary);
+    for (size_t i = 0; i < UI_HOME_ROOM_COUNT; ++i) {
+        ui_home_rooms_apply(i);
+    }
+    ui_page_home_apply_actor(&summary);
+    ui_page_home_apply_hud(&summary);
 }
 
 static void ui_page_home_refresh_async(void *user_data)
@@ -376,9 +722,12 @@ static void ui_page_home_refresh_async(void *user_data)
 static void ui_page_home_store_observer(const panel_sensor_t *sensor, void *user_data)
 {
     (void)user_data;
-    if (sensor == NULL ||
-        (sensor->kind != PANEL_SENSOR_KIND_BINARY &&
-         sensor->kind != PANEL_SENSOR_KIND_CLIMATE)) {
+    if (sensor == NULL) {
+        return;
+    }
+    if (sensor->kind != PANEL_SENSOR_KIND_BINARY &&
+        sensor->kind != PANEL_SENSOR_KIND_CLIMATE &&
+        sensor->kind != PANEL_SENSOR_KIND_TEXT) {
         return;
     }
     bool should_queue = false;
@@ -397,571 +746,209 @@ static void ui_page_home_store_observer(const panel_sensor_t *sensor, void *user
     }
 }
 
+/* --- Events --------------------------------------------------------------- */
+
 static void ui_page_home_room_event(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
         return;
     }
     size_t index = (size_t)(uintptr_t)lv_event_get_user_data(event);
-    if (index >= UI_HOME_ROOM_COUNT) {
+    const ui_home_room_def_t *def = ui_home_room_def(index);
+    if (def == NULL) {
         return;
     }
-    ui_pages_page_t target = s_rooms[index].climate_total > 0U
+    const ui_home_room_state_t *state = ui_home_room_state(index);
+    ui_pages_page_t target = (state != NULL && state->climate_total > 0U)
                                  ? UI_PAGES_PAGE_CLIMATE
                                  : UI_PAGES_PAGE_DASHBOARD;
-    ESP_LOGW(TAG, "VERIFY:ui:rpg_room:PASS room=%s target=%s",
-             s_room_defs[index].title, ui_pages_page_to_text(target));
+
+    ESP_LOGW(TAG, "VERIFY:ui:pixel_room:PASS room=%s target=%s", def->title,
+             ui_pages_page_to_text(target));
     ui_pages_show_page_locked(target);
 }
 
-static void ui_page_home_shortcut_event(lv_event_t *event)
+/* --- Construction --------------------------------------------------------- */
+
+static esp_err_t ui_page_home_create_sky(lv_obj_t *parent)
 {
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
-        return;
+    s_sky = ui_page_home_panel(parent, 0, 0, UI_HOME_ROOT_W, UI_HOME_SKY_H,
+                               UI_PAL_SKY_NIGHT_BASE);
+    ESP_RETURN_ON_FALSE(s_sky != NULL, ESP_ERR_NO_MEM, TAG, "sky alloc failed");
+    lv_obj_set_style_clip_corner(s_sky, true, LV_PART_MAIN);
+
+    /* The gradient is a 4 px wide tile stretched across the band, so a whole
+     * dithered sky costs 288 bytes of flash. */
+    s_sky_fill = ui_page_home_panel(s_sky, 0, 0, UI_HOME_ROOT_W, UI_HOME_SKY_H,
+                                    UI_PAL_SKY_NIGHT_BASE);
+    ESP_RETURN_ON_FALSE(s_sky_fill != NULL, ESP_ERR_NO_MEM, TAG, "sky fill alloc failed");
+    lv_obj_set_style_bg_image_src(s_sky_fill, &env_sky_night, LV_PART_MAIN);
+    lv_obj_set_style_bg_image_tiled(s_sky_fill, true, LV_PART_MAIN);
+
+    for (size_t i = 0; i < UI_HOME_STAR_COUNT; ++i) {
+        s_stars[i] = ui_page_home_panel(s_sky, UI_PX(s_star_art[i][0]),
+                                        UI_PX(s_star_art[i][1]), UI_PX(1), UI_PX(1),
+                                        UI_PAL_INK);
+        ESP_RETURN_ON_FALSE(s_stars[i] != NULL, ESP_ERR_NO_MEM, TAG, "star alloc failed");
     }
-    ui_pages_page_t target = (ui_pages_page_t)(intptr_t)lv_event_get_user_data(event);
-    ui_pages_show_page_locked(target);
-}
 
-static void ui_page_home_add_floor_grid(lv_obj_t *room, int32_t width, int32_t height,
-                                        uint32_t color)
-{
-    for (int32_t x = 30; x < width; x += 32) {
-        lv_obj_t *line = ui_page_home_rect(room, x, 0, 1, height, color, color, 0);
-        if (line != NULL) {
-            lv_obj_set_style_bg_opa(line, LV_OPA_10, LV_PART_MAIN);
-        }
+    s_moon = ui_pixel_fx_sprite(s_sky, &env_moon_4, UI_HOME_SKY_ART_W - 26, 3);
+    ESP_RETURN_ON_FALSE(s_moon != NULL, ESP_ERR_NO_MEM, TAG, "moon alloc failed");
+
+    s_sun = ui_pixel_fx_sprite(s_sky, &env_sun_0, 20, 4);
+    ESP_RETURN_ON_FALSE(s_sun != NULL, ESP_ERR_NO_MEM, TAG, "sun alloc failed");
+    lv_obj_add_flag(s_sun, LV_OBJ_FLAG_HIDDEN);
+
+    for (size_t i = 0; i < UI_HOME_CLOUD_COUNT; ++i) {
+        s_clouds[i] = ui_pixel_fx_sprite(s_sky, &env_cloud, (int32_t)(i * 74),
+                                         (int32_t)(3 + i * 4));
+        ESP_RETURN_ON_FALSE(s_clouds[i] != NULL, ESP_ERR_NO_MEM, TAG, "cloud alloc failed");
     }
-    for (int32_t y = 30; y < height; y += 32) {
-        lv_obj_t *line = ui_page_home_rect(room, 0, y, width, 1, color, color, 0);
-        if (line != NULL) {
-            lv_obj_set_style_bg_opa(line, LV_OPA_10, LV_PART_MAIN);
-        }
+
+    /* Far hills are a single static sprite; near hills tile and scroll. */
+    s_hill_far = ui_pixel_fx_sprite(s_sky, &env_hill, 40, UI_HOME_SKY_ART_H - 10);
+    ESP_RETURN_ON_FALSE(s_hill_far != NULL, ESP_ERR_NO_MEM, TAG, "far hill alloc failed");
+    lv_obj_set_style_opa(s_hill_far, LV_OPA_60, LV_PART_MAIN);
+
+    s_hill_near = ui_page_home_panel(s_sky, 0, UI_PX(UI_HOME_SKY_ART_H - 10),
+                                     UI_HOME_ROOT_W + UI_PX(32), UI_PX(10),
+                                     UI_PAL_LEAF_DARK);
+    ESP_RETURN_ON_FALSE(s_hill_near != NULL, ESP_ERR_NO_MEM, TAG, "near hill alloc failed");
+    lv_obj_set_style_bg_image_src(s_hill_near, &env_hill_near, LV_PART_MAIN);
+    lv_obj_set_style_bg_image_tiled(s_hill_near, true, LV_PART_MAIN);
+
+    /* Fog is three drifting dithered bands rather than particles: fog has no
+     * discrete elements to animate, and a translucent tiled band is both cheaper
+     * and a better read than a cloud of sprites. */
+    for (size_t i = 0; i < UI_HOME_FOG_BAND_COUNT; ++i) {
+        s_fog_bands[i] = ui_page_home_panel(s_sky, 0, UI_PX(6 + (int32_t)i * 5),
+                                            UI_HOME_ROOT_W + UI_PX(16), UI_PX(3),
+                                            UI_PAL_SKY_DAY_HI);
+        ESP_RETURN_ON_FALSE(s_fog_bands[i] != NULL, ESP_ERR_NO_MEM, TAG,
+                            "fog band alloc failed");
+        lv_obj_set_style_bg_image_src(s_fog_bands[i], &fx_scanline, LV_PART_MAIN);
+        lv_obj_set_style_bg_image_tiled(s_fog_bands[i], true, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(s_fog_bands[i], (lv_opa_t)(LV_OPA_50 - i * 10U),
+                                LV_PART_MAIN);
+        lv_obj_add_flag(s_fog_bands[i], LV_OBJ_FLAG_HIDDEN);
     }
-}
 
-static void ui_page_home_add_air_effect(ui_home_room_view_t *room,
-                                        int32_t x, int32_t y)
-{
-    static const int32_t widths[UI_HOME_AIR_LINE_COUNT] = {28, 20, 12};
-    for (size_t i = 0; i < UI_HOME_AIR_LINE_COUNT; ++i) {
-        room->air_lines[i] =
-            ui_page_home_rect(room->floor, x + (int32_t)i * 7,
-                              y + (int32_t)i * 8, widths[i], 3,
-                              UI_PIXEL_COLOR_BLUE, UI_PIXEL_COLOR_BLUE, 0);
-        if (room->air_lines[i] != NULL) {
-            lv_obj_set_style_bg_opa(room->air_lines[i], LV_OPA_TRANSP, LV_PART_MAIN);
-        }
+    for (size_t i = 0; i < UI_HOME_PARTICLE_COUNT; ++i) {
+        s_particles[i].sprite = ui_pixel_fx_sprite(s_sky, &fx_rain_0, 0, 0);
+        ESP_RETURN_ON_FALSE(s_particles[i].sprite != NULL, ESP_ERR_NO_MEM, TAG,
+                            "particle alloc failed");
+        lv_obj_add_flag(s_particles[i].sprite, LV_OBJ_FLAG_HIDDEN);
+        ui_page_home_reseed_particle(i);
     }
-}
-
-static esp_err_t ui_page_home_create_room(lv_obj_t *parent, size_t index,
-                                          int32_t x, int32_t y,
-                                          int32_t width, int32_t height)
-{
-    ui_home_room_view_t *room = &s_rooms[index];
-    const ui_home_room_def_t *def = &s_room_defs[index];
-
-    room->floor = lv_button_create(parent);
-    ESP_RETURN_ON_FALSE(room->floor != NULL, ESP_ERR_NO_MEM, TAG,
-                        "room floor alloc failed");
-    lv_obj_set_size(room->floor, width, height);
-    lv_obj_set_pos(room->floor, x, y);
-    ui_page_home_style_block(room->floor, def->floor, 0x594b3a, 2);
-    lv_obj_add_event_cb(room->floor, ui_page_home_room_event, LV_EVENT_CLICKED,
-                        (void *)(uintptr_t)index);
-
-    ui_page_home_add_floor_grid(room->floor, width, height, def->accent);
-
-    room->light_glow = ui_page_home_rect(room->floor, 22, 30, width - 44, height - 54,
-                                         UI_PIXEL_COLOR_YELLOW,
-                                         UI_PIXEL_COLOR_YELLOW, 0);
-    ESP_RETURN_ON_FALSE(room->light_glow != NULL, ESP_ERR_NO_MEM, TAG,
-                        "room glow alloc failed");
-    lv_obj_set_style_bg_opa(room->light_glow, LV_OPA_TRANSP, LV_PART_MAIN);
-
-    lv_obj_t *name_plate =
-        ui_page_home_rect(room->floor, 10, 9, 70, 28, 0x0b1015, def->accent, 2);
-    ESP_RETURN_ON_FALSE(name_plate != NULL, ESP_ERR_NO_MEM, TAG,
-                        "room name plate alloc failed");
-    room->title = ui_page_home_label(name_plate, def->title, 8, 3,
-                                     UI_PIXEL_COLOR_INK, ui_pages_text_font());
-    ESP_RETURN_ON_FALSE(room->title != NULL, ESP_ERR_NO_MEM, TAG,
-                        "room title alloc failed");
-
-    room->meta = ui_page_home_label(room->floor, "WAITING...", 11, height - 24,
-                                    UI_PIXEL_COLOR_MUTED, ui_pages_pixel_font());
-    ESP_RETURN_ON_FALSE(room->meta != NULL, ESP_ERR_NO_MEM, TAG,
-                        "room meta alloc failed");
-    lv_obj_set_width(room->meta, width - 20);
-    lv_label_set_long_mode(room->meta, LV_LABEL_LONG_CLIP);
-
-    room->window = ui_page_home_rect(room->floor, width - 76, 10, 54, 18,
-                                     0x142a43, UI_PIXEL_COLOR_BLUE, 2);
-    ESP_RETURN_ON_FALSE(room->window != NULL, ESP_ERR_NO_MEM, TAG,
-                        "room window alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(room->window, 25, 0, 2, 16,
-                                         0xd8e4ff, 0xd8e4ff, 0) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "window split alloc failed");
-
-    room->lamp = ui_page_home_rect(room->floor, width - 38, height - 43, 14, 14,
-                                   0x56636a, 0x27343a, 2);
-    ESP_RETURN_ON_FALSE(room->lamp != NULL, ESP_ERR_NO_MEM, TAG,
-                        "room lamp alloc failed");
-    ui_page_home_add_air_effect(room, width - 70, 42);
     return ESP_OK;
-}
-
-static esp_err_t ui_page_home_add_living_furniture(void)
-{
-    lv_obj_t *room = s_rooms[0].floor;
-    lv_obj_t *rug = ui_page_home_rect(room, 92, 78, 154, 88, 0x225563, 0x3b8391, 3);
-    ESP_RETURN_ON_FALSE(rug != NULL, ESP_ERR_NO_MEM, TAG, "living rug alloc failed");
-    for (int32_t x = 12; x < 140; x += 20) {
-        ESP_RETURN_ON_FALSE(ui_page_home_rect(rug, x, 10, 7, 64,
-                                             0x2e6a76, 0x2e6a76, 0) != NULL,
-                            ESP_ERR_NO_MEM, TAG, "rug pattern alloc failed");
-    }
-
-    lv_obj_t *sofa = ui_page_home_rect(room, 36, 55, 58, 120, 0x9b5b4b, 0xd18468, 3);
-    ESP_RETURN_ON_FALSE(sofa != NULL, ESP_ERR_NO_MEM, TAG, "sofa alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(sofa, 8, 12, 40, 42,
-                                         0xb96d58, 0x65392f, 2) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "sofa cushion alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(sofa, 8, 64, 40, 42,
-                                         0xb96d58, 0x65392f, 2) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "sofa cushion alloc failed");
-
-    lv_obj_t *table = ui_page_home_rect(room, 137, 98, 70, 42,
-                                       0x7d5434, 0xc18a50, 3);
-    ESP_RETURN_ON_FALSE(table != NULL, ESP_ERR_NO_MEM, TAG, "coffee table alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(table, 26, 13, 18, 14,
-                                         0x51a66f, 0x8bd18f, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "table plant alloc failed");
-
-    lv_obj_t *tv = ui_page_home_rect(room, 257, 58, 54, 78,
-                                    0x0b1015, 0x6b7880, 3);
-    ESP_RETURN_ON_FALSE(tv != NULL, ESP_ERR_NO_MEM, TAG, "tv alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(tv, 8, 9, 38, 52,
-                                         0x173c50, UI_PIXEL_COLOR_CYAN, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "tv screen alloc failed");
-    return ESP_OK;
-}
-
-static esp_err_t ui_page_home_add_bedroom_furniture(void)
-{
-    lv_obj_t *room = s_rooms[1].floor;
-    lv_obj_t *bed = ui_page_home_rect(room, 46, 52, 126, 132,
-                                     0x785b93, 0xc084fc, 3);
-    ESP_RETURN_ON_FALSE(bed != NULL, ESP_ERR_NO_MEM, TAG, "bed alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(bed, 10, 10, 48, 32,
-                                         0xe0d3eb, 0xffffff, 2) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "pillow alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(bed, 68, 10, 48, 32,
-                                         0xe0d3eb, 0xffffff, 2) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "pillow alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(bed, 9, 50, 108, 72,
-                                         0x9b76b5, 0x5a416d, 2) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "blanket alloc failed");
-
-    lv_obj_t *nightstand = ui_page_home_rect(room, 184, 58, 46, 46,
-                                            0x6b4936, 0xb97c52, 3);
-    ESP_RETURN_ON_FALSE(nightstand != NULL, ESP_ERR_NO_MEM, TAG,
-                        "nightstand alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(nightstand, 16, 15, 12, 12,
-                                         UI_PIXEL_COLOR_YELLOW, 0xffefad, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "night lamp alloc failed");
-
-    lv_obj_t *wardrobe = ui_page_home_rect(room, 251, 48, 70, 116,
-                                          0x614a3f, 0xa97d62, 3);
-    ESP_RETURN_ON_FALSE(wardrobe != NULL, ESP_ERR_NO_MEM, TAG,
-                        "wardrobe alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(wardrobe, 33, 8, 2, 98,
-                                         0xa97d62, 0xa97d62, 0) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "wardrobe split alloc failed");
-    return ESP_OK;
-}
-
-static esp_err_t ui_page_home_add_kitchen_furniture(void)
-{
-    lv_obj_t *room = s_rooms[2].floor;
-    lv_obj_t *counter = ui_page_home_rect(room, 36, 48, 54, 132,
-                                         0x6e6b5f, 0xbab298, 3);
-    ESP_RETURN_ON_FALSE(counter != NULL, ESP_ERR_NO_MEM, TAG,
-                        "counter alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(counter, 10, 15, 34, 30,
-                                         0x222b2d, 0x8fa3ad, 2) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "stove alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(counter, 10, 72, 34, 42,
-                                         0x456f79, 0x8fa3ad, 2) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "sink alloc failed");
-
-    lv_obj_t *table = ui_page_home_rect(room, 139, 81, 104, 72,
-                                       0x8a603c, 0xd19a5f, 3);
-    ESP_RETURN_ON_FALSE(table != NULL, ESP_ERR_NO_MEM, TAG,
-                        "dining table alloc failed");
-    static const int32_t chair_pos[4][2] = {
-        {152, 57}, {207, 57}, {152, 157}, {207, 157},
-    };
-    for (size_t i = 0; i < 4U; ++i) {
-        ESP_RETURN_ON_FALSE(ui_page_home_rect(room, chair_pos[i][0], chair_pos[i][1],
-                                             24, 18, 0x5a4535, 0xa97d62, 2) != NULL,
-                            ESP_ERR_NO_MEM, TAG, "chair alloc failed");
-    }
-
-    lv_obj_t *fridge = ui_page_home_rect(room, 273, 48, 52, 104,
-                                        0xb7c3c7, 0xe8f0f2, 3);
-    ESP_RETURN_ON_FALSE(fridge != NULL, ESP_ERR_NO_MEM, TAG,
-                        "fridge alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(fridge, 7, 47, 38, 3,
-                                         0x74858d, 0x74858d, 0) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "fridge split alloc failed");
-    return ESP_OK;
-}
-
-static esp_err_t ui_page_home_add_study_furniture(void)
-{
-    lv_obj_t *room = s_rooms[3].floor;
-    lv_obj_t *bookcase = ui_page_home_rect(room, 36, 47, 58, 135,
-                                          0x634833, 0xae7650, 3);
-    ESP_RETURN_ON_FALSE(bookcase != NULL, ESP_ERR_NO_MEM, TAG,
-                        "bookcase alloc failed");
-    static const uint32_t book_colors[4] = {
-        UI_PIXEL_COLOR_RED, UI_PIXEL_COLOR_BLUE, UI_PIXEL_COLOR_YELLOW,
-        UI_PIXEL_COLOR_CYAN,
-    };
-    for (size_t row = 0; row < 3U; ++row) {
-        for (size_t col = 0; col < 4U; ++col) {
-            ESP_RETURN_ON_FALSE(
-                ui_page_home_rect(bookcase, 7 + (int32_t)col * 11,
-                                  9 + (int32_t)row * 40, 7, 27,
-                                  book_colors[(row + col) % 4U],
-                                  book_colors[(row + col) % 4U], 0) != NULL,
-                ESP_ERR_NO_MEM, TAG, "book alloc failed");
-        }
-    }
-
-    lv_obj_t *desk = ui_page_home_rect(room, 136, 60, 151, 61,
-                                      0x7e573a, 0xc58c59, 3);
-    ESP_RETURN_ON_FALSE(desk != NULL, ESP_ERR_NO_MEM, TAG, "desk alloc failed");
-    lv_obj_t *monitor = ui_page_home_rect(desk, 48, 8, 56, 36,
-                                         0x101820, UI_PIXEL_COLOR_BLUE, 2);
-    ESP_RETURN_ON_FALSE(monitor != NULL, ESP_ERR_NO_MEM, TAG,
-                        "monitor alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(monitor, 7, 7, 42, 22,
-                                         0x214a67, UI_PIXEL_COLOR_CYAN, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "monitor screen alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(room, 190, 135, 44, 40,
-                                         0x50606a, 0x9aabb3, 3) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "desk chair alloc failed");
-    return ESP_OK;
-}
-
-static esp_err_t ui_page_home_create_player(lv_obj_t *parent)
-{
-    s_player_shadow = ui_page_home_rect(parent, 336, 204, 38, 14,
-                                        0x020405, 0x020405, 0);
-    ESP_RETURN_ON_FALSE(s_player_shadow != NULL, ESP_ERR_NO_MEM, TAG,
-                        "player shadow alloc failed");
-    lv_obj_set_style_bg_opa(s_player_shadow, LV_OPA_40, LV_PART_MAIN);
-
-    s_player = lv_obj_create(parent);
-    ESP_RETURN_ON_FALSE(s_player != NULL, ESP_ERR_NO_MEM, TAG,
-                        "player alloc failed");
-    lv_obj_set_size(s_player, 32, 48);
-    lv_obj_set_pos(s_player, 339, 164);
-    lv_obj_set_style_bg_opa(s_player, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_player, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(s_player, 0, LV_PART_MAIN);
-    ui_page_home_make_passive(s_player);
-
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_player, 7, 2, 18, 9,
-                                         0x382720, 0x382720, 0) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "player hair alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_player, 5, 10, 22, 13,
-                                         0xf1b886, 0x5e382c, 2) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "player face alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_player, 3, 23, 26, 16,
-                                         UI_PIXEL_COLOR_RED, 0x702f38, 2) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "player body alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_player, 4, 39, 9, 8,
-                                         0x354f7a, 0x17233a, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "player leg alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_player, 19, 39, 9, 8,
-                                         0x354f7a, 0x17233a, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "player leg alloc failed");
-
-    s_companion = lv_obj_create(parent);
-    ESP_RETURN_ON_FALSE(s_companion != NULL, ESP_ERR_NO_MEM, TAG,
-                        "companion alloc failed");
-    lv_obj_set_size(s_companion, 26, 30);
-    lv_obj_set_pos(s_companion, 385, 184);
-    lv_obj_set_style_bg_opa(s_companion, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_companion, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(s_companion, 0, LV_PART_MAIN);
-    ui_page_home_make_passive(s_companion);
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_companion, 4, 8, 18, 17,
-                                         UI_PIXEL_COLOR_CYAN, 0xd7fff8, 2) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "companion body alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_companion, 3, 3, 7, 8,
-                                         UI_PIXEL_COLOR_CYAN, 0xd7fff8, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "companion ear alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_companion, 16, 3, 7, 8,
-                                         UI_PIXEL_COLOR_CYAN, 0xd7fff8, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "companion ear alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_companion, 9, 13, 3, 3,
-                                         0x071014, 0x071014, 0) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "companion eye alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_companion, 15, 13, 3, 3,
-                                         0x071014, 0x071014, 0) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "companion eye alloc failed");
-    return ESP_OK;
-}
-
-static lv_obj_t *ui_page_home_create_shortcut(lv_obj_t *parent, int32_t y,
-                                               const char *title, const char *meta,
-                                               uint32_t accent,
-                                               ui_pages_page_t target)
-{
-    lv_obj_t *button = lv_button_create(parent);
-    if (button == NULL) {
-        return NULL;
-    }
-    lv_obj_set_size(button, 196, 54);
-    lv_obj_set_pos(button, 8, y);
-    ui_pixel_style_button(button, 0x101820, accent);
-    lv_obj_set_style_pad_all(button, 0, LV_PART_MAIN);
-    lv_obj_add_event_cb(button, ui_page_home_shortcut_event, LV_EVENT_CLICKED,
-                        (void *)(intptr_t)target);
-
-    lv_obj_t *label = ui_page_home_label(button, title, 12, 7,
-                                         UI_PIXEL_COLOR_INK, ui_pages_text_font());
-    if (label == NULL) {
-        lv_obj_delete(button);
-        return NULL;
-    }
-    lv_obj_t *meta_label = ui_page_home_label(button, meta, 12, 31,
-                                              accent, ui_pages_pixel_font());
-    if (meta_label == NULL) {
-        lv_obj_delete(button);
-        return NULL;
-    }
-    lv_obj_t *arrow = ui_page_home_label(button, ">", 176, 18,
-                                         accent, ui_pages_pixel_font());
-    if (arrow == NULL) {
-        lv_obj_delete(button);
-        return NULL;
-    }
-    return button;
 }
 
 static esp_err_t ui_page_home_create_hud(lv_obj_t *parent)
 {
-    lv_obj_t *hud = lv_obj_create(parent);
-    ESP_RETURN_ON_FALSE(hud != NULL, ESP_ERR_NO_MEM, TAG, "hud alloc failed");
-    lv_obj_set_size(hud, 212, 456);
-    lv_obj_set_pos(hud, 732, 0);
-    ui_page_home_style_block(hud, 0x080c10, UI_PIXEL_COLOR_GRID, 2);
-    lv_obj_clear_flag(hud, LV_OBJ_FLAG_SCROLLABLE);
+    s_hud = ui_page_home_panel(parent, UI_HOME_HUD_X, UI_HOME_SKY_H, UI_HOME_HUD_W,
+                               UI_HOME_HUD_H, UI_PAL_PANEL);
+    ESP_RETURN_ON_FALSE(s_hud != NULL, ESP_ERR_NO_MEM, TAG, "hud alloc failed");
+    lv_obj_set_style_border_width(s_hud, UI_PX(1), LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_hud, lv_color_hex(UI_PAL_GRID), LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_hud, UI_PX(3), LV_PART_MAIN);
 
-    s_sky_strip = ui_page_home_rect(hud, 8, 8, 196, 58,
-                                    0x11152e, UI_PIXEL_COLOR_GRID, 2);
-    ESP_RETURN_ON_FALSE(s_sky_strip != NULL, ESP_ERR_NO_MEM, TAG,
-                        "sky strip alloc failed");
-    static const int32_t star_pos[UI_HOME_STAR_COUNT][2] = {
-        {14, 14}, {45, 35}, {82, 12}, {119, 31}, {151, 15},
-    };
-    for (size_t i = 0; i < UI_HOME_STAR_COUNT; ++i) {
-        s_stars[i] = ui_page_home_rect(s_sky_strip, star_pos[i][0], star_pos[i][1],
-                                       i == 2U ? 4 : 3, i == 2U ? 4 : 3,
-                                       0xdce7ff, 0xdce7ff, 0);
-        ESP_RETURN_ON_FALSE(s_stars[i] != NULL, ESP_ERR_NO_MEM, TAG,
-                            "star alloc failed");
+    for (size_t i = 0; i < UI_HOME_CLOCK_GLYPHS; ++i) {
+        s_hud_clock[i] = ui_pixel_fx_sprite(s_hud, s_digit_frames[0],
+                                            (int32_t)(i * UI_HOME_DIGIT_ADVANCE), 0);
+        ESP_RETURN_ON_FALSE(s_hud_clock[i] != NULL, ESP_ERR_NO_MEM, TAG,
+                            "clock glyph alloc failed");
     }
-    s_moon = ui_page_home_rect(s_sky_strip, 168, 13, 20, 20,
-                               0xd8e4ff, 0xffffff, 2);
-    ESP_RETURN_ON_FALSE(s_moon != NULL, ESP_ERR_NO_MEM, TAG,
-                        "moon alloc failed");
 
-    s_connection_badge = ui_page_home_label(hud, "WORLD // CONNECTING", 12, 75,
-                                            UI_PIXEL_COLOR_YELLOW,
-                                            ui_pages_pixel_font());
-    ESP_RETURN_ON_FALSE(s_connection_badge != NULL, ESP_ERR_NO_MEM, TAG,
-                        "connection badge alloc failed");
+    s_hud_badge = lv_label_create(s_hud);
+    ESP_RETURN_ON_FALSE(s_hud_badge != NULL, ESP_ERR_NO_MEM, TAG, "badge alloc failed");
+    lv_label_set_text(s_hud_badge, "LINKING");
+    lv_obj_set_style_text_font(s_hud_badge, ui_pages_pixel_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_hud_badge, lv_color_hex(UI_PAL_LAMP_LIGHT), LV_PART_MAIN);
+    lv_obj_set_pos(s_hud_badge, 0, UI_PX(14));
 
-    lv_obj_t *avatar = ui_page_home_rect(hud, 8, 102, 62, 62,
-                                         0x17212a, UI_PIXEL_COLOR_CYAN, 2);
-    ESP_RETURN_ON_FALSE(avatar != NULL, ESP_ERR_NO_MEM, TAG,
-                        "avatar alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(avatar, 15, 13, 32, 34,
-                                         UI_PIXEL_COLOR_CYAN, 0xd7fff8, 2) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "avatar face alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(avatar, 21, 25, 5, 5,
-                                         0x071014, 0x071014, 0) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "avatar eye alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(avatar, 36, 25, 5, 5,
-                                         0x071014, 0x071014, 0) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "avatar eye alloc failed");
+    s_hud_summary = lv_label_create(s_hud);
+    ESP_RETURN_ON_FALSE(s_hud_summary != NULL, ESP_ERR_NO_MEM, TAG, "summary alloc failed");
+    lv_label_set_text(s_hud_summary, "灯 --/--\n空调 --\n在线 --/--");
+    lv_obj_set_style_text_font(s_hud_summary, ui_pages_text_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_hud_summary, lv_color_hex(UI_PAL_INK), LV_PART_MAIN);
+    lv_obj_set_style_text_line_space(s_hud_summary, UI_PX(1), LV_PART_MAIN);
+    lv_obj_set_pos(s_hud_summary, 0, UI_PX(21));
 
-    ESP_RETURN_ON_FALSE(ui_page_home_label(hud, "HOME KEEPER", 80, 108,
-                                          UI_PIXEL_COLOR_INK,
-                                          ui_pages_pixel_font()) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "keeper title alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_label(hud, "LV.04", 80, 135,
-                                          UI_PIXEL_COLOR_YELLOW,
-                                          ui_pages_pixel_font()) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "keeper level alloc failed");
-
-    s_dialog_panel = lv_obj_create(hud);
-    ESP_RETURN_ON_FALSE(s_dialog_panel != NULL, ESP_ERR_NO_MEM, TAG,
-                        "dialog panel alloc failed");
-    lv_obj_set_size(s_dialog_panel, 196, 104);
-    lv_obj_set_pos(s_dialog_panel, 8, 174);
-    ui_page_home_style_block(s_dialog_panel, 0x101820, UI_PIXEL_COLOR_CYAN, 2);
-    ui_page_home_make_passive(s_dialog_panel);
-    s_dialog_message = ui_page_home_label(s_dialog_panel, "任务：等待家园连接",
-                                          10, 10, UI_PIXEL_COLOR_INK,
-                                          ui_pages_text_font());
-    ESP_RETURN_ON_FALSE(s_dialog_message != NULL, ESP_ERR_NO_MEM, TAG,
-                        "dialog message alloc failed");
-    lv_obj_set_width(s_dialog_message, 176);
-    lv_label_set_long_mode(s_dialog_message, LV_LABEL_LONG_WRAP);
-
-    s_home_summary = ui_page_home_label(s_dialog_panel,
-                                        "LIGHT 00  AIR 00\nONLINE 00/00",
-                                        10, 52, UI_PIXEL_COLOR_MUTED,
-                                        ui_pages_pixel_font());
-    ESP_RETURN_ON_FALSE(s_home_summary != NULL, ESP_ERR_NO_MEM, TAG,
-                        "home summary alloc failed");
-
-    ESP_RETURN_ON_FALSE(ui_page_home_create_shortcut(hud, 290, "施放场景",
-                                                     "SCENE MAGIC",
-                                                     UI_PIXEL_COLOR_CYAN,
-                                                     UI_PAGES_PAGE_QUICK_MODES) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "mode shortcut create failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_create_shortcut(hud, 352, "查看背包",
-                                                     "ALL DEVICES",
-                                                     UI_PIXEL_COLOR_BLUE,
-                                                     UI_PAGES_PAGE_DASHBOARD) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "device shortcut create failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_label(hud, "TAP A ROOM TO ENTER", 18, 425,
-                                          UI_PIXEL_COLOR_MUTED,
-                                          ui_pages_pixel_font()) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "hud hint alloc failed");
+    ESP_RETURN_ON_ERROR(ui_home_actor_create_dialog(s_hud, 52, UI_HOME_HUD_DIALOG_ART_H),
+                        TAG, "dialog create failed");
+    lv_obj_align(lv_obj_get_child(s_hud, -1), LV_ALIGN_BOTTOM_LEFT, 0, 0);
     return ESP_OK;
-}
-
-static void ui_page_home_animation_cb(lv_timer_t *timer)
-{
-    (void)timer;
-    s_animation_tick++;
-    int32_t player_offset = (s_animation_tick & 1U) != 0U ? -2 : 0;
-    int32_t companion_offset = (s_animation_tick % 3U) == 0U ? -3 : 0;
-    lv_obj_set_style_translate_y(s_player, player_offset, LV_PART_MAIN);
-    lv_obj_set_width(s_player_shadow,
-                     (s_animation_tick & 1U) != 0U ? 34 : 38);
-    lv_obj_set_style_translate_y(s_companion, companion_offset, LV_PART_MAIN);
-
-    size_t star = s_animation_tick % UI_HOME_STAR_COUNT;
-    lv_obj_set_style_bg_opa(s_stars[star],
-                            (s_animation_tick & 1U) != 0U ? LV_OPA_30 : LV_OPA_COVER,
-                            LV_PART_MAIN);
-    for (size_t i = 0; i < UI_HOME_ROOM_COUNT; ++i) {
-        bool climate = s_rooms[i].climate_on > 0U;
-        for (size_t line = 0; line < UI_HOME_AIR_LINE_COUNT; ++line) {
-            lv_obj_set_style_bg_opa(
-                s_rooms[i].air_lines[line],
-                climate ? (line == (s_animation_tick % UI_HOME_AIR_LINE_COUNT)
-                               ? LV_OPA_COVER
-                               : LV_OPA_40)
-                        : LV_OPA_TRANSP,
-                LV_PART_MAIN);
-        }
-    }
-    if ((s_animation_tick % 8U) == 0U) {
-        ui_page_home_refresh_locked();
-    }
 }
 
 esp_err_t ui_page_home_init(void)
 {
-    if (s_ready) {
-        return ESP_OK;
-    }
+    lv_obj_t *screen = lv_screen_active();
+    ESP_RETURN_ON_FALSE(screen != NULL, ESP_ERR_INVALID_STATE, TAG, "no active screen");
 
-    s_root = lv_obj_create(lv_screen_active());
+    s_root = ui_page_home_panel(screen, UI_HOME_ROOT_X, UI_HOME_ROOT_Y,
+                                UI_HOME_ROOT_W, UI_HOME_ROOT_H, UI_PAL_SCREEN);
     ESP_RETURN_ON_FALSE(s_root != NULL, ESP_ERR_NO_MEM, TAG, "home root alloc failed");
-    lv_obj_set_size(s_root, 944, 456);
-    lv_obj_align(s_root, LV_ALIGN_TOP_LEFT, 40, 104);
-    lv_obj_set_style_bg_opa(s_root, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_root, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(s_root, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
 
-    s_house = lv_obj_create(s_root);
+    ESP_RETURN_ON_ERROR(ui_pixel_fx_init(), TAG, "fx init failed");
+    ESP_RETURN_ON_ERROR(ui_page_home_create_sky(s_root), TAG, "sky create failed");
+
+    s_house = ui_page_home_panel(s_root, 0, UI_HOME_SKY_H, UI_HOME_HOUSE_W,
+                                 UI_HOME_HOUSE_H, UI_PAL_SHADOW);
     ESP_RETURN_ON_FALSE(s_house != NULL, ESP_ERR_NO_MEM, TAG, "house alloc failed");
-    lv_obj_set_size(s_house, 720, 456);
-    lv_obj_set_pos(s_house, 0, 0);
-    ui_page_home_style_block(s_house, 0x090b0d, 0xc59a62, 6);
-    lv_obj_set_style_pad_all(s_house, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(s_house, LV_OBJ_FLAG_SCROLLABLE);
 
-    ESP_RETURN_ON_ERROR(ui_page_home_create_room(s_house, 0, 6, 6, 352, 218),
-                        TAG, "living room create failed");
-    ESP_RETURN_ON_ERROR(ui_page_home_create_room(s_house, 1, 358, 6, 352, 218),
-                        TAG, "bedroom create failed");
-    ESP_RETURN_ON_ERROR(ui_page_home_create_room(s_house, 2, 6, 224, 352, 222),
-                        TAG, "kitchen create failed");
-    ESP_RETURN_ON_ERROR(ui_page_home_create_room(s_house, 3, 358, 224, 352, 222),
-                        TAG, "study create failed");
+    ESP_RETURN_ON_ERROR(ui_home_rooms_create(s_house, ui_page_home_room_event), TAG,
+                        "rooms create failed");
 
-    ESP_RETURN_ON_ERROR(ui_page_home_add_living_furniture(), TAG,
-                        "living furniture create failed");
-    ESP_RETURN_ON_ERROR(ui_page_home_add_bedroom_furniture(), TAG,
-                        "bedroom furniture create failed");
-    ESP_RETURN_ON_ERROR(ui_page_home_add_kitchen_furniture(), TAG,
-                        "kitchen furniture create failed");
-    ESP_RETURN_ON_ERROR(ui_page_home_add_study_furniture(), TAG,
-                        "study furniture create failed");
+    /* Daylight cast onto the living-room floor. Sized in art pixels, moved on
+     * the hour, hidden at night. */
+    s_window_light = ui_page_home_panel(s_house, UI_PX(62),
+                                        UI_PX(UI_HOME_LOWER_ART_Y + UI_HOME_ROOM_ART_H - 8),
+                                        UI_PX(22), UI_PX(4), UI_PAL_LAMP_HI);
+    ESP_RETURN_ON_FALSE(s_window_light != NULL, ESP_ERR_NO_MEM, TAG,
+                        "window light alloc failed");
+    /* Dithered rather than a flat wash: a solid band reads as a shelf, the
+     * scanline tile reads as light falling through glass. */
+    lv_obj_set_style_bg_image_src(s_window_light, &fx_scanline, LV_PART_MAIN);
+    lv_obj_set_style_bg_image_tiled(s_window_light, true, LV_PART_MAIN);
+    lv_obj_set_style_bg_image_recolor_opa(s_window_light, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_window_light, LV_OPA_50, LV_PART_MAIN);
+    lv_obj_add_flag(s_window_light, LV_OBJ_FLAG_HIDDEN);
 
-    /* Shared walls and door thresholds make the four spaces read as one map,
-     * rather than four independent dashboard cards. */
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_house, 351, 6, 8, 74,
-                                         0x8b6544, 0xc59a62, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "wall alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_house, 351, 135, 8, 89,
-                                         0x8b6544, 0xc59a62, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "wall alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_house, 351, 224, 8, 72,
-                                         0x8b6544, 0xc59a62, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "wall alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_house, 351, 352, 8, 94,
-                                         0x8b6544, 0xc59a62, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "wall alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_house, 6, 217, 286, 8,
-                                         0x8b6544, 0xc59a62, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "wall alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_house, 418, 217, 292, 8,
-                                         0x8b6544, 0xc59a62, 1) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "wall alloc failed");
-    ESP_RETURN_ON_FALSE(ui_page_home_rect(s_house, 292, 215, 126, 12,
-                                         0xd4ab70, 0x745032, 2) != NULL,
-                        ESP_ERR_NO_MEM, TAG, "hallway threshold alloc failed");
+    ESP_RETURN_ON_ERROR(ui_home_actor_create(s_house), TAG, "actor create failed");
+    ESP_RETURN_ON_ERROR(ui_page_home_create_hud(s_root), TAG, "hud create failed");
 
-    ESP_RETURN_ON_ERROR(ui_page_home_create_player(s_house), TAG,
-                        "player create failed");
-    ESP_RETURN_ON_ERROR(ui_page_home_create_hud(s_root), TAG,
-                        "hud create failed");
+#if CONFIG_P4HOME_UI_PIXEL_CRT_OVERLAY
+    /* Fully static scanline and vignette layer. Costs one draw at creation and
+     * nothing afterwards, and it is the single highest-yield change for making
+     * the page read as a game screen rather than a widget dashboard. */
+    s_crt_overlay = ui_page_home_panel(s_root, 0, 0, UI_HOME_ROOT_W, UI_HOME_ROOT_H,
+                                       UI_PAL_SHADOW);
+    ESP_RETURN_ON_FALSE(s_crt_overlay != NULL, ESP_ERR_NO_MEM, TAG, "crt alloc failed");
+    lv_obj_set_style_bg_opa(s_crt_overlay, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_bg_image_src(s_crt_overlay, &fx_scanline, LV_PART_MAIN);
+    lv_obj_set_style_bg_image_tiled(s_crt_overlay, true, LV_PART_MAIN);
+    lv_obj_add_flag(s_crt_overlay, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    ui_page_home_passive(s_crt_overlay);
+#endif
+
+    ESP_RETURN_ON_ERROR(ui_pixel_fx_register(ui_page_home_particle_tick, NULL, 1, 0), TAG,
+                        "particle tick failed");
+    ESP_RETURN_ON_ERROR(ui_pixel_fx_register(ui_page_home_parallax_tick, NULL, 8, 1), TAG,
+                        "parallax tick failed");
+    ESP_RETURN_ON_ERROR(ui_pixel_fx_register(ui_page_home_star_tick, NULL, 4, 2), TAG,
+                        "star tick failed");
+    ESP_RETURN_ON_ERROR(ui_pixel_fx_register(ui_page_home_sun_tick, NULL, 4, 3), TAG,
+                        "sun tick failed");
+    ESP_RETURN_ON_ERROR(ui_pixel_fx_register(ui_page_home_clock_tick, NULL, 8, 5), TAG,
+                        "clock tick failed");
 
     ESP_RETURN_ON_ERROR(panel_data_store_add_observer(ui_page_home_store_observer, NULL),
                         TAG, "failed to attach home observer");
-    s_animation_timer = lv_timer_create(ui_page_home_animation_cb, 600, NULL);
-    ESP_RETURN_ON_FALSE(s_animation_timer != NULL, ESP_ERR_NO_MEM, TAG,
-                        "home animation timer alloc failed");
+
     s_ready = true;
     ui_page_home_refresh_locked();
-    ESP_LOGW(TAG, "RPG home map ready rooms=%u furniture=4 hero=1",
-             (unsigned)UI_HOME_ROOM_COUNT);
+    ESP_LOGW(TAG, "VERIFY:ui:pixel_home:PASS rooms=%u groups=12 grid=%upx",
+             (unsigned)UI_HOME_ROOM_COUNT, (unsigned)UI_PX_SCALE);
     return ESP_OK;
 }
 
@@ -969,6 +956,7 @@ void ui_page_home_show(void)
 {
     if (s_root != NULL) {
         lv_obj_clear_flag(s_root, LV_OBJ_FLAG_HIDDEN);
+        ui_pixel_fx_set_active(true);
         ui_page_home_refresh_locked();
     }
 }

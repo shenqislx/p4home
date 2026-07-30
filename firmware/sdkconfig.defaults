@@ -7,7 +7,11 @@ CONFIG_LV_BUILD_EXAMPLES=n
 CONFIG_LV_BUILD_DEMOS=n
 CONFIG_LV_FONT_UNSCII_16=y
 CONFIG_LV_FONT_SOURCE_HAN_SANS_SC_16_CJK=n
-CONFIG_LV_MEM_SIZE_KILOBYTES=64
+# 96 KB internal + 64 KB PSRAM overflow. Raised from 64 KB after display_service
+# stopped allocating the unused 100 KB software-rotation buffer; the pixel home
+# page needs the extra headroom for lv_snapshot and for the transform scratch the
+# 4x nearest-neighbour sprite path uses.
+CONFIG_LV_MEM_SIZE_KILOBYTES=96
 CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=64
 CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
 CONFIG_ESP32P4_REV_MIN_100=y

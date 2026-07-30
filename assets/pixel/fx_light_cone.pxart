@@ -1,0 +1,15 @@
+# name: fx_light_cone
+# gen: cone
+# size: 28x25
+# from: LAMP_LIGHT
+# top_width: 6
+# max_alpha: 64
+# falloff: 1.2
+# Baked Bayer 4x4 light cone, hung under each room's lamp and reaching the floor.
+# LVGL v9 removed gradient dithering, so the only way to get a believable
+# pixel-art falloff is to bake the ordered dither here at asset build time.
+#
+# The cone must stay mostly transparent: it is light, not paint. falloff 2.2 keeps
+# the bright core in the top third and lets the bottom two thirds break up into
+# scattered dither pixels, which is what makes the furniture underneath still
+# readable while clearly being lit.

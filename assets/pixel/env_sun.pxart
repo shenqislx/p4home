@@ -1,0 +1,33 @@
+# name: env_sun
+# size: 6x6
+# palette: y=LAMP_HI Y=LAMP_LIGHT o=LAMP_BASE
+# Four-frame breathing corona. Only the outer ring changes between frames, so
+# the dirty area is a thin border rather than the whole disc.
+--frame--
+..oo..
+.yyyy.
+oyyyyo
+oyyyyo
+.yyyy.
+..oo..
+--frame--
+..YY..
+.yyyy.
+YyyyyY
+YyyyyY
+.yyyy.
+..YY..
+--frame--
+.Y..Y.
+Y.yy.Y
+.yyyy.
+.yyyy.
+Y.yy.Y
+.Y..Y.
+--frame--
+..YY..
+.yyyy.
+oyyyyo
+oyyyyo
+.yyyy.
+..YY..

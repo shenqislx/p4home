@@ -1,0 +1,18 @@
+# name: pet_idle
+# palette: c=ACCENT_CYAN C=COOL_HI e=SHADOW t=COOL_BASE
+# The companion. Frame 1 flicks the tail and lowers the ears, an independent
+# small motion that keeps it from looking like a decal glued to the actor.
+--frame--
+..cc...cc.
+..cCc.cCc.
+.cccccccc.
+.cCeccecC.
+.cccccccc.
+..cc.cc.t.
+--frame--
+..cc...cc.
+..ccc.ccc.
+.cccccccc.
+.cCeccecC.
+.cccccccc.
+..cc.cc..t

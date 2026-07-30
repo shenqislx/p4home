@@ -1,0 +1,10 @@
+# name: fx_scanline
+# gen: scanline
+# size: 4x4
+# from: SHADOW
+# period: 2
+# max_alpha: 34
+# Static CRT overlay tile. Applied once via bg_image_tiled and then never
+# touched, so it costs nothing per frame.
+# bake_scale: 4
+# Same reason as the sky tiles: bg_image_tiled ignores lv_image_set_scale.

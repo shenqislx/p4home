@@ -3,17 +3,22 @@
 #include <stdint.h>
 
 #include "lvgl.h"
+#include "ui_pixel_palette.h"
 
-#define UI_PIXEL_COLOR_SCREEN 0x080c10
-#define UI_PIXEL_COLOR_PANEL 0x101820
-#define UI_PIXEL_COLOR_PANEL_ALT 0x151f29
-#define UI_PIXEL_COLOR_INK 0xe8f0f2
-#define UI_PIXEL_COLOR_MUTED 0x8fa3ad
-#define UI_PIXEL_COLOR_GRID 0x29404b
-#define UI_PIXEL_COLOR_CYAN 0x35d0ba
-#define UI_PIXEL_COLOR_BLUE 0x45a6ff
-#define UI_PIXEL_COLOR_YELLOW 0xf3c64e
-#define UI_PIXEL_COLOR_RED 0xe56b6f
+/* Aliases onto the fixed palette in ui_pixel_palette.h, which is the single
+ * source of truth (scripts/pixel_palette.py parses that header so the sprite
+ * generator cannot drift from it). Kept as separate names so the other four
+ * pages do not need touching. */
+#define UI_PIXEL_COLOR_SCREEN UI_PAL_SCREEN
+#define UI_PIXEL_COLOR_PANEL UI_PAL_PANEL
+#define UI_PIXEL_COLOR_PANEL_ALT UI_PAL_PANEL_ALT
+#define UI_PIXEL_COLOR_INK UI_PAL_INK
+#define UI_PIXEL_COLOR_MUTED UI_PAL_MUTED
+#define UI_PIXEL_COLOR_GRID UI_PAL_GRID
+#define UI_PIXEL_COLOR_CYAN UI_PAL_ACCENT_CYAN
+#define UI_PIXEL_COLOR_BLUE UI_PAL_COOL_LIGHT
+#define UI_PIXEL_COLOR_YELLOW UI_PAL_LAMP_LIGHT
+#define UI_PIXEL_COLOR_RED UI_PAL_FABRIC_LIGHT
 
 static inline void ui_pixel_style_surface(lv_obj_t *obj, uint32_t background, uint32_t border)
 {
@@ -35,7 +40,7 @@ static inline void ui_pixel_style_card(lv_obj_t *obj, uint32_t background, uint3
     lv_obj_set_style_shadow_spread(obj, 0, LV_PART_MAIN);
     lv_obj_set_style_shadow_offset_x(obj, 4, LV_PART_MAIN);
     lv_obj_set_style_shadow_offset_y(obj, 4, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(obj, lv_color_hex(0x020405), LV_PART_MAIN);
+    lv_obj_set_style_shadow_color(obj, lv_color_hex(UI_PAL_SHADOW), LV_PART_MAIN);
     lv_obj_set_style_shadow_opa(obj, LV_OPA_60, LV_PART_MAIN);
     lv_obj_set_style_outline_width(obj, 1, LV_PART_MAIN);
     lv_obj_set_style_outline_pad(obj, 1, LV_PART_MAIN);
@@ -49,7 +54,7 @@ static inline void ui_pixel_style_button(lv_obj_t *button, uint32_t background, 
     lv_obj_set_style_shadow_width(button, 5, LV_PART_MAIN);
     lv_obj_set_style_shadow_offset_x(button, 3, LV_PART_MAIN);
     lv_obj_set_style_shadow_offset_y(button, 3, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(button, lv_color_hex(0x020405), LV_PART_MAIN);
+    lv_obj_set_style_shadow_color(button, lv_color_hex(UI_PAL_SHADOW), LV_PART_MAIN);
     lv_obj_set_style_shadow_opa(button, LV_OPA_60, LV_PART_MAIN);
     lv_obj_set_style_outline_width(button, 1, LV_PART_MAIN);
     lv_obj_set_style_outline_pad(button, 0, LV_PART_MAIN);

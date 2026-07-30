@@ -1,0 +1,32 @@
+# name: actor_idle
+# palette: h=SHELL_DARK s=LAMP_BASE S=LAMP_HI r=FABRIC_LIGHT R=FABRIC_DARK b=COOL_DARK e=SHADOW
+# Two-frame breathing loop. Frame 1 drops the head one art pixel and squashes
+# the torso, which reads as a breath at 8 FPS without any sub-pixel motion.
+--frame--
+..hhhh..
+.hhhhhh.
+.hsSSsh.
+.sSeSes.
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+rRrrrrRr
+.RrrrrR.
+..b..b..
+..b..b..
+.ee..ee.
+--frame--
+........
+..hhhh..
+.hhhhhh.
+.hsSSsh.
+.sSeSes.
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+.RrrrrR.
+..b..b..
+..b..b..
+.ee..ee.

@@ -10,10 +10,37 @@ import subprocess
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ENTITIES_PATH = REPO_ROOT / "firmware/components/panel_data_store/panel_entities.json"
-SOURCE_FONT_PATH = (
-    REPO_ROOT
-    / "firmware/managed_components/lvgl__lvgl/scripts/built_in_font/SourceHanSansSC-Normal.otf"
-)
+FONT_RELATIVE = "scripts/built_in_font/SourceHanSansSC-Normal.otf"
+
+
+def find_source_font() -> Path:
+    """Locate SourceHanSansSC in the LVGL component.
+
+    Prefers the extracted managed_components copy, but falls back to the
+    component manager download cache so the font can be regenerated without a
+    prior `idf.py build`.
+    """
+    managed = REPO_ROOT / "firmware/managed_components/lvgl__lvgl" / FONT_RELATIVE
+    if managed.is_file():
+        return managed
+
+    cache_roots = [
+        Path(os.environ.get("IDF_COMPONENT_MANAGER_CACHE_PATH", ""))
+        if os.environ.get("IDF_COMPONENT_MANAGER_CACHE_PATH")
+        else None,
+        Path.home() / ".cache/Espressif/ComponentManager",
+    ]
+    for root in cache_roots:
+        if root is None or not root.is_dir():
+            continue
+        candidates = sorted(root.glob(f"*/lvgl__lvgl_9.*/{FONT_RELATIVE}"), reverse=True)
+        if candidates:
+            return candidates[0]
+
+    raise SystemExit(
+        f"SourceHanSansSC not found. Expected {managed} (run idf.py build once) "
+        "or an lvgl__lvgl_9.* entry in the component manager cache."
+    )
 OUTPUT_PATH = (
     REPO_ROOT
     / "firmware/components/ui_pages/fonts/ui_font_source_han_sans_sc_16.c"
@@ -26,6 +53,12 @@ STATIC_UI_TEXT = (
     "像素之家我在等这个家上线家里很安静状态正常今晚的家很明亮"
     "正在为你保持舒适欢迎回来客厅餐厨书房场景准备中已启程未发送"
     "确认场景可用发送至等待家庭响应指令已交给连接或服务调用失败"
+    # Pixel home cutaway: the six room plates plus the four groups the previous
+    # four-room layout dropped.
+    "次卧玄关拱门客卫主卫衣帽间阳台"
+    # Actor dialogue. Punctuation included on purpose: a missing ，or …renders as
+    # a tofu box just like a missing glyph.
+    "灯火通明氛围值拉满在制冷好凉快去看看全屋熄灯去睡了信号断了先打个盹！，…"
 )
 
 
@@ -57,7 +90,7 @@ def main() -> None:
         raise SystemExit("No CJK symbols found in panel_entities.json")
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    source_font = SOURCE_FONT_PATH.relative_to(REPO_ROOT)
+    source_font = find_source_font()
     output = OUTPUT_PATH.relative_to(REPO_ROOT)
     command = converter_command(args.converter) + [
         "--size",

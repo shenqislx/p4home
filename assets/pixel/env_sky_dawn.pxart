@@ -1,0 +1,8 @@
+# name: env_sky_dawn
+# gen: vgrad
+# size: 4x24
+# from: SKY_DAWN_DARK
+# to: SKY_DAWN_HI
+# bake_scale: 4
+# Tiled as a style bg_image, and bg_image is drawn at native size (it does
+# not go through lv_image_set_scale), so the 4x upscale has to be baked in.

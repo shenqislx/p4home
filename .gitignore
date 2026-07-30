@@ -38,3 +38,14 @@ firmware/host_test/sdkconfig.old
 firmware/host_test/dependencies.lock
 firmware/host_test/managed_components/
 evidence/
+
+# Local ESP-IDF / component-manager caches under the firmware tree
+firmware/.cache/
+
+# Pixel-home host simulator (built artifacts and frame dumps)
+sim/build/
+sim/out/
+sim/.cache/
+
+# Sprite pipeline preview PNGs (`generate-pixel-sprites.py --preview`)
+build-preview/

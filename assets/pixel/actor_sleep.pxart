@@ -1,0 +1,22 @@
+# name: actor_sleep
+# palette: h=SHELL_DARK s=LAMP_BASE S=LAMP_HI r=FABRIC_LIGHT R=FABRIC_DARK e=SHADOW z=ACCENT_CYAN
+# Lying down, shown when the whole house goes dark. Frame 1 raises the Z bubble
+# one pixel so the sleep reads as ongoing rather than frozen.
+--frame--
+............
+.........z..
+............
+..hhh.......
+.hsSs.rrrrr.
+.hsee.rRRRr.
+..ss..rrrrr.
+.....eeeeee.
+--frame--
+............
+..........z.
+.........z..
+..hhh.......
+.hsSs.rrrrr.
+.hsee.rRRRr.
+..ss..rrrrr.
+.....eeeeee.

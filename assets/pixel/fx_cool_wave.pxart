@@ -1,0 +1,13 @@
+# name: fx_cool_wave
+# palette: c=COOL_LIGHT+COOL_BASE/170 C=COOL_HI/200
+# A cold-air wave that crawls across the floor when climate turns on. The `+`
+# in the palette entry is an ordered-dither blend of two ramp steps, which is
+# how LVGL v9 has to express a mid tone now that gradient dithering is gone.
+--frame--
+..CC..
+.cccc.
+cc..cc
+--frame--
+.CC...
+cccc..
+c..cc.

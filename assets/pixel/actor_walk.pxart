@@ -1,0 +1,57 @@
+# name: actor_walk
+# palette: h=SHELL_DARK s=LAMP_BASE S=LAMP_HI r=FABRIC_LIGHT R=FABRIC_DARK b=COOL_DARK e=SHADOW
+# Four-frame walk cycle: contact, pass, contact (mirrored), pass. Advanced one
+# frame per 125 ms tick while the actor moves 4 device px, so one art pixel of
+# travel maps to one animation frame.
+--frame--
+..hhhh..
+.hhhhhh.
+.hsSSsh.
+.sSeSes.
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+.RrrrrR.
+.b....b.
+b......b
+ee....ee
+--frame--
+..hhhh..
+.hhhhhh.
+.hsSSsh.
+.sSeSes.
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+.RrrrrR.
+..b..b..
+..b..b..
+.ee.ee..
+--frame--
+..hhhh..
+.hhhhhh.
+.hsSSsh.
+.sSeSes.
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+.RrrrrR.
+.b....b.
+b......b
+ee....ee
+--frame--
+..hhhh..
+.hhhhhh.
+.hsSSsh.
+.sSeSes.
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+.RrrrrR.
+..b..b..
+..b..b..
+..ee.ee.

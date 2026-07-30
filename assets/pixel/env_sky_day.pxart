@@ -1,0 +1,9 @@
+# name: env_sky_day
+# gen: vgrad
+# size: 4x24
+# from: SKY_DAY_DARK
+# to: SKY_DAY_HI
+# Tiled horizontally as a style bg_image, so 4 px of width is enough.
+# bake_scale: 4
+# Tiled as a style bg_image, and bg_image is drawn at native size (it does
+# not go through lv_image_set_scale), so the 4x upscale has to be baked in.

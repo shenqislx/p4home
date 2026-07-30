@@ -1,0 +1,14 @@
+# name: fx_rain
+# palette: b=COOL_LIGHT B=COOL_HI
+--frame--
+.B.
+.b.
+.b.
+.b.
+.b.
+--frame--
+.b.
+.b.
+.b.
+.B.
+...
