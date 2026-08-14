@@ -27,8 +27,7 @@ static display_backlight_state_t s_backlight_state = DISPLAY_BACKLIGHT_BRIGHT;
 
 #define DISPLAY_SERVICE_LVGL_EXT_POOL_BYTES (64U * 1024U)
 #define DISPLAY_SERVICE_DIM_AFTER_MS         (60U * 1000U)
-#define DISPLAY_SERVICE_OFF_AFTER_MS         (5U * 60U * 1000U)
-#define DISPLAY_SERVICE_DIM_PERCENT          25
+#define DISPLAY_SERVICE_DIM_PERCENT          20
 
 static esp_err_t display_service_apply_backlight_locked(display_backlight_state_t state)
 {
@@ -77,9 +76,7 @@ static void display_service_backlight_timer_cb(lv_timer_t *timer)
         return;
     }
     uint32_t inactive_ms = lv_display_get_inactive_time(s_display);
-    display_backlight_state_t next = inactive_ms >= DISPLAY_SERVICE_OFF_AFTER_MS
-                                         ? DISPLAY_BACKLIGHT_OFF
-                                     : inactive_ms >= DISPLAY_SERVICE_DIM_AFTER_MS
+    display_backlight_state_t next = inactive_ms >= DISPLAY_SERVICE_DIM_AFTER_MS
                                          ? DISPLAY_BACKLIGHT_DIM
                                          : DISPLAY_BACKLIGHT_BRIGHT;
     (void)display_service_apply_backlight_locked(next);
@@ -108,9 +105,8 @@ static esp_err_t display_service_start_backlight_policy(void)
 
     ESP_RETURN_ON_FALSE(s_wake_overlay != NULL && s_backlight_timer != NULL,
                         ESP_ERR_NO_MEM, TAG, "failed to create backlight policy objects");
-    ESP_LOGW(TAG, "adaptive backlight enabled default=100%% dim=%u ms/%d%% off=%u ms",
-             (unsigned)DISPLAY_SERVICE_DIM_AFTER_MS, DISPLAY_SERVICE_DIM_PERCENT,
-             (unsigned)DISPLAY_SERVICE_OFF_AFTER_MS);
+    ESP_LOGW(TAG, "adaptive backlight enabled default=100%% dim=%u ms/%d%%",
+             (unsigned)DISPLAY_SERVICE_DIM_AFTER_MS, DISPLAY_SERVICE_DIM_PERCENT);
     return ESP_OK;
 }
 
