@@ -46,6 +46,7 @@
 - 固件构建前先使用 `scripts/activate-idf-v5.5.4.sh`；
 - v5.5.4 manifest 要求的 RISC-V 工具链已经补齐，Phase 0 干净构建和实机烧录均已通过；
 - 激活入口支持 `set -euo pipefail` 严格 shell，CI/runner 不得绕过该统一入口。
+- `firmware/dependencies.lock` 纳入版本控制；managed component 升级必须显式 review，构建不得在线漂移。
 
 ## 主要目录
 

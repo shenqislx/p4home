@@ -52,6 +52,7 @@ jobs:
               raise SystemExit("monitor_seconds must be between 10 and 7200")
           PY
           test -f scripts/activate-idf-v5.5.4.sh
+          test -s firmware/dependencies.lock
           test -f "$HOME/.espressif/tools/activate_idf_v5.5.4.sh"
           echo "BUILD_DIR=$RUNNER_TEMP/p4home-hardware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
 
@@ -107,6 +108,7 @@ jobs:
             -D SDKCONFIG="$HARDWARE_SDKCONFIG" \
             build
           grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
+          git diff --exit-code -- firmware/dependencies.lock
 
       - name: Flash firmware and capture serial
         run: |
@@ -137,6 +139,7 @@ jobs:
           import pathlib
 
           image = pathlib.Path(os.environ["BUILD_DIR"]) / "p4home_firmware.bin"
+          dependency_lock = pathlib.Path("firmware/dependencies.lock")
           sdkconfig = pathlib.Path(os.environ["HARDWARE_SDKCONFIG"])
           main_stack_prefix = "CONFIG_ESP_MAIN_TASK_STACK_SIZE="
           main_stack_size = None
@@ -164,6 +167,11 @@ jobs:
                   else None
               ),
               "main_task_stack_size_bytes": main_stack_size,
+              "dependency_lock_sha256": (
+                  hashlib.sha256(dependency_lock.read_bytes()).hexdigest()
+                  if dependency_lock.is_file()
+                  else None
+              ),
           }
           pathlib.Path("firmware/hardware-validation-manifest.json").write_text(
               json.dumps(manifest, ensure_ascii=True, indent=2) + "\n",

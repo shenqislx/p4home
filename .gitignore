@@ -17,12 +17,11 @@ venv/
 
 # -----------------------------------------------------------------------------
 # ESP-IDF — main firmware (`firmware/`)
-# docs/sdkconfig-file-roles.md: commit sdkconfig.defaults; do not commit sdkconfig.
+# Commit sdkconfig.defaults and dependencies.lock; do not commit generated sdkconfig.
 # -----------------------------------------------------------------------------
 firmware/build/
 firmware/sdkconfig
 firmware/sdkconfig.old
-firmware/dependencies.lock
 firmware/managed_components/
 
 # Self-hosted flash / serial capture (local or CI checkout artifacts under firmware/)

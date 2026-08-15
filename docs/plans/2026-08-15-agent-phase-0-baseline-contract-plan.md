@@ -46,6 +46,10 @@
 本机未安装 Ninja，CMake 实际使用
 Unix Makefiles。详见 [build baseline](../../evidence/agent-phase-0/build-baseline.md)。
 
+runner 回归进一步确认忽略 `firmware/dependencies.lock` 会令全新 checkout 在线解析到不兼容的
+`esp_hosted 3.0.6`，与本地已验证的 `2.12.3` 漂移。Phase 0 改为提交 lock 文件，并在 workflow
+构建后强制检查 lock 未被改写；managed component 升级必须单独 review。
+
 ### P0.2 固化 C6 Hosted 配置
 
 - [x] 从 `sdkconfig.defaults` 独立生成配置；
@@ -173,6 +177,10 @@ contracts/device-protocol/v1/
 实际 main stack 配置；因 `github.com:443` 接收超时尚未同步远端，精确 SHA 的 7,200 秒 workflow 仍待重跑。
 配置合并器的 2 项单测与合并后全新固件构建均已通过；workflow 会在 build 前运行同一组单测，并动态
 核对最终配置与 `firmware/sdkconfig.defaults` 的 main stack 基线一致。
+精确 SHA `c51fa4a` 的 run
+[`31875154927`](https://github.com/shenqislx/p4home/actions/runs/31875154927) 已通过 checkout、harness 单测和
+私密配置合并，但因仓库忽略 dependency lock 而解析到 `esp_hosted 3.0.6`，SDIO Kconfig 不兼容，仍判为
+`infra-fail`；flash/capture 未执行。依赖锁修复提交后需再次触发同一分支的 7,200 秒 run。
 
 ## 4. 验证矩阵
 
