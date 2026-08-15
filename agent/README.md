@@ -26,7 +26,31 @@ Node 主版本时产生假通过。
 - `packages/contracts`：AJV 加载并验证仓库根目录冻结的两份 v1 契约；
 - `packages/core`：核心实体类型、取消、相对 timeout、最多四项的顺序 Tool Loop；
 - `packages/domain-p4home`：无需真实设备的五工具 Mock 与 allowlist；
-- `packages/provider-ollama`：Ollama capability 边界，具体 adapter 待实现；
+- `packages/provider-ollama`：原生 HTTP capability probe、非流式 generate、NDJSON stream、
+  `AbortSignal` 取消和相对 timeout；
 - `packages/storage-sqlite`：审计存储接口，SQLite 实现待补充。
 
 Phase 1 不得导入真实 P4 WebSocket 执行链，也不得把 token 暴露给模型或日志。
+
+## Ollama Provider
+
+`OllamaHttpProvider` 默认连接 `http://127.0.0.1:11434`，不依赖 Ollama SDK：
+
+- `probe()` 依次读取 `/api/version`、`/api/tags`，仅在模型存在时调用 `/api/show`；
+  probe 本身不会加载模型；
+- `generate()` 使用 `/api/generate` 的 `stream: false` 响应；
+- `stream()` 按 NDJSON 增量解析并要求出现 `done: true` 终态；
+- 不可达、超时、取消、模型不存在、HTTP 错误和非法响应使用稳定错误码；
+- capability 中的 `structuredOutput` 仅表示 completion 模型可使用 API `format` 字段，
+  具体 JSON Schema 校验和原生 Tool Calling 属于下一项工作。
+
+确定性测试不要求 Ollama 服务。真实本机 smoke 必须显式启用：
+
+```bash
+P4HOME_OLLAMA_LIVE=1 OLLAMA_MODEL=qwen3:8b pnpm test:ollama-live
+```
+
+接口依据：[Ollama API](https://docs.ollama.com/api/introduction)、
+[model details](https://docs.ollama.com/api-reference/show-model-details)、
+[generate](https://docs.ollama.com/api/generate) 和
+[streaming](https://docs.ollama.com/api/streaming)。

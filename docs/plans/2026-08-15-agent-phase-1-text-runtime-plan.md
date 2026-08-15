@@ -30,7 +30,7 @@
 - [x] 定义 `AgentProfile / Session / Run / ToolCall / Action / Event` 核心类型；
 - [x] 实现 `AbortSignal`、相对 timeout、重复 ID 拒绝和最多四项的顺序 Tool Loop；
 - [x] 实现不连接真实 P4 的五工具 Mock、房间 allowlist 与精确错误码；
-- [ ] 实现 Ollama capability probe、generate、stream 与 cancel；
+- [x] 实现 Ollama capability probe、generate、stream 与 cancel；
 - [ ] 实现 SQLite 审计存储与结构化日志；
 - [ ] 建立模型 eval、性能基线与最小调试入口。
 
@@ -40,6 +40,15 @@ TypeScript 严格类型检查通过，首批 8 项测试覆盖顺序执行、失
 相对超时、取消、Mock 房间移动/说话和未知房间拒绝。依赖锁已生成，pnpm 安装脚本 allowlist
 仅包含 `esbuild`。升级后在 Node 24.19.0 下重新执行 runtime preflight、严格类型检查、契约校验
 和 8 项 Agent 测试，并回归既有 30 项协议测试与 2 项 harness 测试，全部通过。
+
+Ollama provider 里程碑（2026-08-16）：使用 Node 原生 `fetch` 实现 `/api/version`、
+`/api/tags`、`/api/show` 的无模型加载 probe，以及 `/api/generate` 的非流式响应和 NDJSON
+流式解析；外部取消、100–600,000 ms 相对 timeout、模型不存在、HTTP 失败、不可达与非法响应
+均映射为稳定错误码并 fail closed。新增 11 项 provider 测试，覆盖传输分片、缺少终态、generate
+和 stream 取消等边界。本机 Ollama `0.32.6` 使用已安装的 `qwen3:8b` 完成 1 项显式 live smoke，
+probe 返回 `completion / tools / thinking`，冷启动 probe + generate 用例约 4.6 秒。该数字不是正式
+性能基线；运行日志显示模型上下文被钳制到 40,960、KV cache 约 5.76 GiB，模型对比阶段必须
+固定 `num_ctx` 后重新测量。原生 Tool Calling 与 structured output schema 校验仍属于下一项工作。
 
 ## 4. 验证
 

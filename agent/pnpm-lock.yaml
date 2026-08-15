@@ -17,6 +17,9 @@ importers:
       '@p4home/domain-p4home':
         specifier: workspace:*
         version: link:packages/domain-p4home
+      '@p4home/provider-ollama':
+        specifier: workspace:*
+        version: link:packages/provider-ollama
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3

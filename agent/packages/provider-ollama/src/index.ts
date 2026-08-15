@@ -1,11 +1,3 @@
-export interface OllamaCapabilities {
-  readonly model: string;
-  readonly toolCalling: boolean;
-  readonly structuredOutput: boolean;
-  readonly streaming: boolean;
-  readonly cancellation: boolean;
-}
-
-export interface OllamaProvider {
-  probe(signal?: AbortSignal): Promise<OllamaCapabilities>;
-}
+export * from "./errors.ts";
+export * from "./provider.ts";
+export * from "./types.ts";
