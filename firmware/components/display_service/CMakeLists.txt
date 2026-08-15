@@ -1,3 +1,3 @@
 idf_component_register(SRCS "display_service.c"
                        INCLUDE_DIRS "include"
-                       REQUIRES esp32_p4_function_ev_board lvgl ui_pages)
+                       REQUIRES esp32_p4_function_ev_board esp_driver_ledc lvgl ui_pages)

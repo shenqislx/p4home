@@ -1,6 +1,7 @@
 #include "display_service.h"
 
 #include "bsp/esp32_p4_function_ev_board.h"
+#include "driver/ledc.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -28,6 +29,37 @@ static display_backlight_state_t s_backlight_state = DISPLAY_BACKLIGHT_BRIGHT;
 #define DISPLAY_SERVICE_LVGL_EXT_POOL_BYTES (64U * 1024U)
 #define DISPLAY_SERVICE_DIM_AFTER_MS         (60U * 1000U)
 #define DISPLAY_SERVICE_DIM_PERCENT          20
+#define DISPLAY_SERVICE_BACKLIGHT_PWM_HZ     20000U
+#define DISPLAY_SERVICE_BACKLIGHT_DUTY_MAX   1023U
+
+static esp_err_t display_service_configure_backlight_pwm(void)
+{
+    ESP_RETURN_ON_ERROR(ledc_set_freq(LEDC_LOW_SPEED_MODE, LEDC_TIMER_1,
+                                      DISPLAY_SERVICE_BACKLIGHT_PWM_HZ),
+                        TAG, "failed to configure stable backlight PWM");
+    ESP_RETURN_ON_ERROR(ledc_fade_func_install(0), TAG,
+                        "failed to install thread-safe backlight updates");
+    uint32_t actual_hz = ledc_get_freq(LEDC_LOW_SPEED_MODE, LEDC_TIMER_1);
+    ESP_RETURN_ON_FALSE(actual_hz == DISPLAY_SERVICE_BACKLIGHT_PWM_HZ,
+                        ESP_FAIL, TAG, "unexpected backlight PWM frequency: %u Hz",
+                        (unsigned)actual_hz);
+    ESP_LOGW(TAG, "stable backlight PWM configured frequency=%u Hz",
+             (unsigned)actual_hz);
+    return ESP_OK;
+}
+
+static esp_err_t display_service_set_backlight_percent(int percent)
+{
+    if (percent < 0) {
+        percent = 0;
+    } else if (percent > 100) {
+        percent = 100;
+    }
+    uint32_t duty = (DISPLAY_SERVICE_BACKLIGHT_DUTY_MAX * (uint32_t)percent) / 100U;
+    return ledc_set_duty_and_update(LEDC_LOW_SPEED_MODE,
+                                    (ledc_channel_t)CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH,
+                                    duty, 0);
+}
 
 static esp_err_t display_service_apply_backlight_locked(display_backlight_state_t state)
 {
@@ -38,13 +70,13 @@ static esp_err_t display_service_apply_backlight_locked(display_backlight_state_
     int percent = state == DISPLAY_BACKLIGHT_BRIGHT ? 100
                   : state == DISPLAY_BACKLIGHT_DIM ? DISPLAY_SERVICE_DIM_PERCENT
                                                    : 0;
-    ESP_RETURN_ON_ERROR(bsp_display_brightness_set(percent), TAG,
+    ESP_RETURN_ON_ERROR(display_service_set_backlight_percent(percent), TAG,
                         "failed to set adaptive backlight");
     s_backlight_state = state;
     ui_pages_set_backlight_enabled(state != DISPLAY_BACKLIGHT_OFF);
 
     if (s_wake_overlay != NULL) {
-        if (state == DISPLAY_BACKLIGHT_OFF) {
+        if (state != DISPLAY_BACKLIGHT_BRIGHT) {
             lv_obj_clear_flag(s_wake_overlay, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_foreground(s_wake_overlay);
         } else {
@@ -88,6 +120,10 @@ static esp_err_t display_service_start_backlight_policy(void)
                         "failed to lock LVGL for backlight policy");
     s_wake_overlay = lv_obj_create(lv_layer_top());
     if (s_wake_overlay != NULL) {
+        /* A theme can add an opaque blue pressed state to a plain lv_obj.
+         * Remove every inherited style so this touch catcher is transparent in
+         * all states and can never cover the panel with a blue flash. */
+        lv_obj_remove_style_all(s_wake_overlay);
         lv_obj_set_size(s_wake_overlay, LV_PCT(100), LV_PCT(100));
         lv_obj_align(s_wake_overlay, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_bg_opa(s_wake_overlay, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -242,6 +278,8 @@ esp_err_t display_service_init(void)
     size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     ESP_RETURN_ON_ERROR(display_service_start_lcd_without_touch(), TAG,
                         "failed to start LCD/LVGL bootstrap");
+    ESP_RETURN_ON_ERROR(display_service_configure_backlight_pwm(), TAG,
+                        "failed to stabilize display backlight PWM");
     size_t internal_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     /* One draw buffer of 1024x50 RGB565 is 100 KB. With sw_rotate disabled the
      * cost here should be roughly that, not double it. */
@@ -249,7 +287,7 @@ esp_err_t display_service_init(void)
              (unsigned)((internal_before - internal_after) / 1024U));
     ESP_RETURN_ON_ERROR(display_service_add_lvgl_psram_pool(), TAG,
                         "failed to extend LVGL memory pool");
-    ESP_RETURN_ON_ERROR(bsp_display_backlight_on(), TAG,
+    ESP_RETURN_ON_ERROR(display_service_set_backlight_percent(100), TAG,
                         "failed to enable display backlight");
     ESP_RETURN_ON_ERROR(ui_pages_render_bootstrap(), TAG,
                         "failed to render bootstrap screen");

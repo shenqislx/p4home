@@ -21,6 +21,18 @@
 #include "freertos/timers.h"
 #include "sdkconfig.h"
 
+#ifndef CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6
+#error "p4home requires the on-board ESP32-C6 ESP-Hosted coprocessor"
+#endif
+
+#ifndef CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD
+#error "p4home requires the ESP32-P4 Function EV Board ESP-Hosted pin map"
+#endif
+
+#ifndef CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE
+#error "p4home requires the SDIO ESP-Hosted transport"
+#endif
+
 static const char *TAG = "network_service";
 static const char *DEFAULT_HOSTNAME_PREFIX = "p4home-p4";
 
