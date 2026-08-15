@@ -280,6 +280,13 @@
       "group": "快捷模式",
       "kind": "action",
       "control": { "domain": "script", "on_service": "turn_on" }
+    },
+    {
+      "entity_id": "weather.forecast_wo_de_jia",
+      "label": "Weather",
+      "icon": "weather",
+      "group": "Outdoor",
+      "kind": "text"
     }
   ]
 }

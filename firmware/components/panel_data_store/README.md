@@ -15,3 +15,13 @@ instead of mixing boot uptime with HA timestamps.
 
 Observer callbacks may run from the HA client task. UI consumers must copy data
 and switch to the LVGL task with `lv_async_call` before touching LVGL objects.
+
+## Diagnostics Counters
+
+- `rejected` counts failed register/update operations, such as capacity exhaustion
+  or an explicit update for an unknown entity;
+- `ignored_untracked` counts HA `state_changed` events intentionally ignored because
+  the entity is not in the panel whitelist.
+
+Keeping these counters separate prevents normal whole-home HA traffic from looking
+like a panel-store or transport failure during long-running validation.

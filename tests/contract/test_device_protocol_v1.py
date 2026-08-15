@@ -9,6 +9,7 @@ from sim.fake.device_protocol_peer import (
     ContractError,
     FakeDeviceProtocolPeer,
     MAX_JSON_FRAME_BYTES,
+    MESSAGE_TYPES,
     ROOM_IDS,
     TOOL_NAMES,
     validate_message,
@@ -110,6 +111,71 @@ class ContractFixtureTests(unittest.TestCase):
                     self.assertIn("no_tool", scenario)
                 for call in scenario["expected"]:
                     validate_tool_call(call["name"], call["arguments"])
+
+    def test_message_type_sources_are_consistent(self) -> None:
+        envelope = json.loads((PROTOCOL / "envelope.schema.json").read_text())
+        message_schema = json.loads((PROTOCOL / "message.schema.json").read_text())
+        fixtures = json.loads((PROTOCOL / "examples" / "valid" / "messages.json").read_text())
+
+        envelope_types = set(envelope["properties"]["type"]["enum"])
+        dispatch_types = {
+            branch["properties"]["type"]["const"]
+            for branch in message_schema["allOf"][1]["oneOf"]
+        }
+        fixture_types = {fixture["type"] for fixture in fixtures}
+
+        self.assertEqual(set(MESSAGE_TYPES), envelope_types)
+        self.assertEqual(envelope_types, dispatch_types)
+        self.assertEqual(envelope_types, fixture_types)
+
+    def test_tool_schema_sources_are_consistent(self) -> None:
+        catalog = json.loads((TOOLS / "tool-catalog.json").read_text())
+        tool_result = json.loads((TOOLS / "tool-result.schema.json").read_text())
+        payloads = json.loads((PROTOCOL / "messages" / "payloads.schema.json").read_text())
+        scenarios = json.loads((TOOLS / "fixtures" / "golden-intents.json").read_text())
+
+        catalog_tools = {tool["name"] for tool in catalog["tools"]}
+        catalog_rooms = {room["id"] for room in catalog["rooms"]}
+        protocol_tools = set(payloads["$defs"]["toolName"]["enum"])
+        protocol_rooms = set(payloads["$defs"]["roomId"]["enum"])
+        result_tools = set(tool_result["properties"]["name"]["enum"])
+        result_errors = set(
+            tool_result["properties"]["error"]["oneOf"][1]["properties"]["code"]["enum"]
+        )
+        action_errors = set(payloads["$defs"]["actionError"]["properties"]["code"]["enum"])
+        no_tool_errors = {scenario["no_tool"]["code"] for scenario in scenarios if not scenario["expected"]}
+
+        self.assertEqual(set(TOOL_NAMES), catalog_tools)
+        self.assertEqual(catalog_tools, protocol_tools)
+        self.assertEqual(catalog_tools, result_tools)
+        self.assertEqual(set(ROOM_IDS), catalog_rooms)
+        self.assertEqual(catalog_rooms, protocol_rooms)
+        self.assertTrue(action_errors <= result_errors)
+        self.assertTrue(no_tool_errors <= result_errors)
+
+    def test_action_request_schema_dispatches_exact_tool_arguments(self) -> None:
+        catalog = json.loads((TOOLS / "tool-catalog.json").read_text())
+        payloads = json.loads((PROTOCOL / "messages" / "payloads.schema.json").read_text())
+        definitions = payloads["$defs"]
+        branches = definitions["actionRequest"]["allOf"][0]["oneOf"]
+        dispatch = {
+            branch["properties"]["tool"]["const"]: branch["properties"]["arguments"]["$ref"]
+            for branch in branches
+        }
+
+        expected_refs = {
+            "character.get_state": "#/$defs/emptyArguments",
+            "character.go_to_room": "#/$defs/goToRoomArguments",
+            "character.set_activity": "#/$defs/setActivityArguments",
+            "character.say": "#/$defs/sayArguments",
+            "world.get_snapshot": "#/$defs/emptyArguments",
+        }
+        self.assertEqual(expected_refs, dispatch)
+
+        catalog_parameters = {tool["name"]: tool["parameters"] for tool in catalog["tools"]}
+        for tool_name, reference in dispatch.items():
+            definition_name = reference.rsplit("/", 1)[-1]
+            self.assertEqual(catalog_parameters[tool_name], definitions[definition_name])
 
 
 class FakePeerTests(unittest.TestCase):

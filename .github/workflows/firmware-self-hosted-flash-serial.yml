@@ -1,0 +1,182 @@
+name: Firmware Self-Hosted Flash Serial
+
+on:
+  workflow_dispatch:
+    inputs:
+      serial_port:
+        description: macOS serial device path
+        required: true
+        default: /dev/cu.usbserial-210
+      monitor_seconds:
+        description: Serial capture duration in seconds (10-7200)
+        required: true
+        default: "120"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p4home-esp32p4-hardware
+  cancel-in-progress: false
+
+jobs:
+  flash-and-monitor:
+    name: Flash ESP32-P4 and capture serial logs
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - esp32-p4
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: zsh -l {0}
+    env:
+      SERIAL_PORT: ${{ inputs.serial_port }}
+      MONITOR_SECONDS: ${{ inputs.monitor_seconds }}
+      IDF_SKIP_CHECK_SUBMODULES: "1"
+      BUILD_DIR: ${{ runner.temp }}/p4home-hardware-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate runner and inputs
+        run: |
+          set -euo pipefail
+          test -c "$SERIAL_PORT"
+          python3 - <<'PY'
+          import os
+
+          seconds = int(os.environ["MONITOR_SECONDS"])
+          if not 10 <= seconds <= 7200:
+              raise SystemExit("monitor_seconds must be between 10 and 7200")
+          PY
+          test -f scripts/activate-idf-v5.5.4.sh
+          test -f "$HOME/.espressif/tools/activate_idf_v5.5.4.sh"
+
+      - name: Prepare private hardware sdkconfig
+        env:
+          SDKCONFIG_B64: ${{ secrets.P4HOME_HARDWARE_SDKCONFIG_B64 }}
+        run: |
+          set -euo pipefail
+          export HARDWARE_SDKCONFIG="$RUNNER_TEMP/p4home-hardware-sdkconfig"
+          python3 - <<'PY'
+          import base64
+          import os
+          import pathlib
+          import shutil
+
+          destination = pathlib.Path(os.environ["HARDWARE_SDKCONFIG"])
+          encoded = os.environ.get("SDKCONFIG_B64", "").strip()
+          fallback = pathlib.Path.home() / ".config" / "p4home" / "sdkconfig.hardware"
+
+          if encoded:
+              destination.write_bytes(base64.b64decode(encoded, validate=True))
+          elif fallback.is_file():
+              shutil.copyfile(fallback, destination)
+          else:
+              raise SystemExit(
+                  "Missing P4HOME_HARDWARE_SDKCONFIG_B64 and "
+                  "~/.config/p4home/sdkconfig.hardware"
+              )
+          destination.chmod(0o600)
+          PY
+          echo "HARDWARE_SDKCONFIG=$HARDWARE_SDKCONFIG" >> "$GITHUB_ENV"
+
+      - name: Build firmware
+        run: |
+          set -euo pipefail
+          . scripts/activate-idf-v5.5.4.sh
+          idf.py \
+            -C firmware \
+            -B "$BUILD_DIR" \
+            -D IDF_TARGET=esp32p4 \
+            -D SDKCONFIG="$HARDWARE_SDKCONFIG" \
+            build
+
+      - name: Flash firmware and capture serial
+        run: |
+          set -euo pipefail
+          . scripts/activate-idf-v5.5.4.sh
+          idf.py \
+            -C firmware \
+            -B "$BUILD_DIR" \
+            -D IDF_TARGET=esp32p4 \
+            -D SDKCONFIG="$HARDWARE_SDKCONFIG" \
+            -p "$SERIAL_PORT" \
+            flash > firmware/monitor.log 2>&1
+          python scripts/capture-esp-serial.py \
+            --port "$SERIAL_PORT" \
+            --seconds "$MONITOR_SECONDS" \
+            --output firmware/monitor.log \
+            --append \
+            --reset
+
+      - name: Write hardware validation manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+
+          image = pathlib.Path(os.environ["BUILD_DIR"]) / "p4home_firmware.bin"
+          manifest = {
+              "schema_version": 1,
+              "mode": "artifact-only",
+              "verdict_owner": "cloud-codex",
+              "git_sha": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "job": "flash-and-monitor",
+              "serial_port": os.environ["SERIAL_PORT"],
+              "monitor_seconds": int(os.environ["MONITOR_SECONDS"]),
+              "log_file": "monitor.log",
+              "app_image": image.name if image.is_file() else None,
+              "app_size_bytes": image.stat().st_size if image.is_file() else None,
+              "app_sha256": (
+                  hashlib.sha256(image.read_bytes()).hexdigest()
+                  if image.is_file()
+                  else None
+              ),
+          }
+          pathlib.Path("firmware/hardware-validation-manifest.json").write_text(
+              json.dumps(manifest, ensure_ascii=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Assert transport artifact is complete
+        run: |
+          set -euo pipefail
+          test -s firmware/monitor.log
+          test -s firmware/hardware-validation-manifest.json
+
+      - name: Write job summary
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## ESP32-P4 hardware validation artifact
+
+          The workflow transports build, flash and serial evidence only. Its job
+          status is not a firmware feature verdict. Read the manifest first, then
+          interpret `VERIFY:` markers in `monitor.log` for the requested behavior.
+          EOF
+
+      - name: Show monitor log tail on failure
+        if: failure()
+        run: tail -n 200 firmware/monitor.log || true
+
+      - name: Upload serial artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32-p4-monitor-log
+          path: |
+            firmware/monitor.log
+            firmware/hardware-validation-manifest.json
+          if-no-files-found: error
+          retention-days: 14

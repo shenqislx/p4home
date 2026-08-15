@@ -62,6 +62,7 @@ bool panel_data_store_get_snapshot(const char *entity_id, panel_sensor_t *sensor
 size_t panel_data_store_get_samples(const char *entity_id, panel_sensor_sample_t *samples, size_t max_samples);
 size_t panel_data_store_entity_count(void);
 size_t panel_data_store_rejected_count(void);
+size_t panel_data_store_ignored_untracked_count(void);
 void panel_data_store_tick_freshness(uint64_t now_ms);
 esp_err_t panel_data_store_set_observer(panel_data_store_observer_cb_t observer, void *user_data);
 esp_err_t panel_data_store_add_observer(panel_data_store_observer_cb_t observer, void *user_data);

@@ -42,7 +42,8 @@
 证据：构建命令、版本输出、最终 image size 摘要。
 
 实际结果（2026-08-15）：加入运行期诊断采样后的全量干净构建通过，`.bin` 为
-`1,437,792 bytes`，静态 DIRAM 为 `296,378 / 576,464 bytes`。本机未安装 Ninja，CMake 实际使用
+`1,448,448 bytes`（当前 Phase 0 候选），静态 DIRAM 为 `297,196 / 576,464 bytes`（51.55%）。
+本机未安装 Ninja，CMake 实际使用
 Unix Makefiles。详见 [build baseline](../../evidence/agent-phase-0/build-baseline.md)。
 
 ### P0.2 固化 C6 Hosted 配置
@@ -85,6 +86,7 @@ P4 实机也恢复 Wi-Fi/HA READY，并持续接收 `state_changed`。真实灯�
 - [ ] 连续运行现有 HA + Pixel Home 至少 2 小时；
 - [x] 记录 UI 8 FPS heartbeat、HA event rate、重连次数；
 - [x] 保存串口日志与基线摘要到 `evidence/agent-phase-0/`。
+- [x] 将非白名单 HA 事件与真实数据拒绝拆分为独立指标。
 
 实际结果（2026-08-15）：15 分钟实机窗口完成，HA 全程 READY、`reconnect=0`、事件数
 72→204，UI FX 到 tick 6912 且 `denied=0`。steady internal free 约 145 KB、minimum
@@ -92,6 +94,13 @@ P4 实机也恢复 Wi-Fi/HA READY，并持续接收 `state_changed`。真实灯�
 660 B，随后将默认栈由 3,584 B 扩到 5,120 B，实机复测稳定为 2,196 B，Wi-Fi、HA、UI 与
 heap 无回归；异步 SNTP 也新增明确 PASS 标记。2 小时长跑仍未完成。详见
 [hardware regression](../../evidence/agent-phase-0/hardware-regression-2026-08-15.md)。
+
+指标语义修正（2026-08-15）：`rejected` 只统计已跟踪实体的无效/拒绝更新；HA 全屋广播中未被面板
+跟踪的实体改记为 `ignored_untracked`，避免把正常过滤误报成数据质量故障。该改动已通过构建，等待
+最终候选固件实机长跑验证。首次短回归进一步发现天气服务发布目标曾从扩展后的白名单中丢失，导致
+真实 `rejected` 持续增长；恢复 `weather.forecast_wo_de_jia` 注册项后，4 分钟复测中
+`rejected=0`、`ignored_untracked=0→3`，Open-Meteo、HA READY、UI heartbeat 与资源指标均通过。
+2 小时长跑仍为本工作包唯一未完成项。
 
 ### P0.5 冻结 Device Protocol v1
 
@@ -101,6 +110,7 @@ heap 无回归；异步 SNTP 也新增明确 PASS 标记。2 小时长跑仍未�
 - [x] 定义错误码、deadline、幂等和重连对账规则；
 - [x] 定义最大 JSON frame 与二进制音频边界；
 - [x] 生成 JSON Schema 示例和正反例 fixture；
+- [x] 完成协议、fixture、fake peer 与消息类型的一致性内部审查；
 - [ ] review 后标记 `protocol_version = 1`。
 
 建议落点：
@@ -114,7 +124,8 @@ contracts/device-protocol/v1/
 ```
 
 实际结果（2026-08-15）：schema、消息 fixture 与协议说明已落到
-`contracts/device-protocol/v1/`，实现标记为 v1 候选；等待用户 review 后正式冻结。
+`contracts/device-protocol/v1/`，实现标记为 v1 候选。内部审查补齐了 action tool 与精确参数 schema
+的分派约束，并验证 envelope、消息分派、fixture 和 fake peer 类型集合一致；等待用户 review 后正式冻结。
 
 ### P0.6 冻结 Tool Schema v1
 
@@ -123,9 +134,11 @@ contracts/device-protocol/v1/
 - [x] 定义工具参数、结果与稳定错误码；
 - [x] 明确 `sit/look_at/interact` 不属于 v1；
 - [x] 建立 20 个中文意图到 ToolCall 的黄金场景。
+- [x] 完成 tool catalog、protocol payload、result schema 与 golden intent 的一致性内部审查；
 
 实际结果（2026-08-15）：tool catalog、result schema、错误码和 20 条中文黄金场景已落到
-`contracts/tools/v1/`；其中对象级动作、未知房间和 Phase 4 HA 意图必须保持 no-tool。
+`contracts/tools/v1/`；其中对象级动作、未知房间和 Phase 4 HA 意图必须保持 no-tool。内部审查确认
+工具名、房间 ID、参数 schema 与错误码跨各来源一致；等待用户 review 后与 Device Protocol v1 一并冻结。
 
 ### P0.7 建立合约测试
 
@@ -135,8 +148,20 @@ contracts/device-protocol/v1/
 - [x] 验证队列满时 reject；
 - [x] 测试不依赖 Ollama 和真实 P4。
 
-实际结果（2026-08-15）：`./scripts/validate-agent-contracts.sh` 的 13 项标准库测试通过；
+实际结果（2026-08-15）：`./scripts/validate-agent-contracts.sh` 的 16 项标准库测试通过；
 详见 [contract test evidence](../../evidence/agent-phase-0/contract-tests.md)。
+
+### P0.8 固化硬件证据 harness
+
+- [x] 恢复 ESP32-P4 自托管 build/flash/serial workflow；
+- [x] 固定 artifact 名称与 `monitor.log`、`hardware-validation-manifest.json` 契约；
+- [x] workflow 只负责传输证据，不用日志 grep 代替功能判定；
+- [x] 将私密硬件配置限制在 GitHub Secret 或 runner 本机配置，不写入仓库；
+- [ ] 在 `feature/agent-harness` 的精确提交上完成一次 7,200 秒 workflow 回归并验证 artifact 完整性。
+
+实际结果（2026-08-15）：workflow 与操作说明已恢复并按当前 artifact contract 更新，YAML 解析通过；
+本地与 runner 已统一使用无交互 TTY 的原始串口采集脚本。远端自托管 runner 的 2 小时实机运行仍待
+提交候选版本后执行。
 
 ## 4. 验证矩阵
 

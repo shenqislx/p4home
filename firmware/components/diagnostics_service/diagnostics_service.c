@@ -216,7 +216,7 @@ void diagnostics_service_log_ha_summary(void)
              "ha_summary state=%s reconnect=%" PRIu32 " initial=%" PRIu32 " events=%" PRIu32 " epm=%" PRIu32
              " connected_ms=%" PRIu64 " last_ready_ms=%" PRIu64 " last_event_ms=%" PRIu64
              " entities=%" PRIu32 " stale=%" PRIu32 " unknown=%" PRIu32 " offline=%" PRIu32
-             " rejected=%u worker_stack_high_water=%" PRIu32 " bytes error=%s",
+             " rejected=%u ignored_untracked=%u worker_stack_high_water=%" PRIu32 " bytes error=%s",
              ha_client_state_text(),
              metrics.reconnect_count,
              metrics.initial_state_count,
@@ -230,6 +230,7 @@ void diagnostics_service_log_ha_summary(void)
              panel.unknown,
              panel.offline,
              (unsigned)panel_data_store_rejected_count(),
+             (unsigned)panel_data_store_ignored_untracked_count(),
              metrics.worker_stack_high_water_bytes,
              metrics.last_error_text != NULL ? metrics.last_error_text : "(none)");
 }

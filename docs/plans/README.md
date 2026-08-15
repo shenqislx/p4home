@@ -37,9 +37,9 @@
 3. 关闭 M6 剩余的真实灯具 `call_service → 物理动作 → state_changed` 验收；
 4. ~~采集固件短时 heap、stack、HA 与 UI 基线，并修复 main task 栈余量~~（2026-08-15 完成）；
 5. 连续运行现有 HA + Pixel Home 至少 2 小时，保存长跑日志；
-6. 明确恢复自托管硬件 workflow/artifact contract，或把本地证据流程固化进 harness；
-7. 澄清 `panel_data_store.rejected` 指标语义，拆分非白名单事件与真实拒绝；
-8. review 并正式冻结已实现的 Device Protocol v1 与 Tool Schema v1；
+6. ~~恢复自托管硬件 workflow/artifact contract，并固化 transport-only 判定边界~~（2026-08-15 完成，待 2 小时 workflow 实跑）；
+7. ~~澄清 `panel_data_store.rejected` 指标语义，拆分非白名单事件与真实拒绝~~（2026-08-15 完成并通过实机回归）；
+8. ~~完成 Device Protocol v1 与 Tool Schema v1 内部一致性 review~~，等待用户 review 后正式冻结；
 9. ~~用 simulator/fake backend 建立协议合约测试~~（2026-08-15 完成）。
 
 Phase 0 未通过前，不创建 `agent/` 生产实现，也不修改 P4 角色执行逻辑。

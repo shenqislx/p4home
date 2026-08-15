@@ -33,6 +33,7 @@ typedef struct {
     panel_sensor_history_t history[CONFIG_P4HOME_PANEL_STORE_MAX_ENTITIES];
     size_t count;
     size_t rejected_count;
+    size_t ignored_untracked_count;
     SemaphoreHandle_t mutex;
     panel_data_store_observer_cb_t observers[PANEL_DATA_STORE_MAX_OBSERVERS];
     void *observer_users[PANEL_DATA_STORE_MAX_OBSERVERS];
@@ -572,6 +573,15 @@ size_t panel_data_store_rejected_count(void)
     return count;
 }
 
+size_t panel_data_store_ignored_untracked_count(void)
+{
+    size_t count = 0;
+    xSemaphoreTake(s_store.mutex, portMAX_DELAY);
+    count = s_store.ignored_untracked_count;
+    xSemaphoreGive(s_store.mutex);
+    return count;
+}
+
 void panel_data_store_tick_freshness(uint64_t now_ms)
 {
     if (!s_store.initialized) {
@@ -698,8 +708,9 @@ void panel_data_store_log_summary(void)
             stale++;
         }
     }
-    ESP_LOGI(TAG, "panel_store count=%u rejected=%u stale=%u threshold_ms=%u",
-             (unsigned)s_store.count, (unsigned)s_store.rejected_count, (unsigned)stale,
+    ESP_LOGI(TAG, "panel_store count=%u rejected=%u ignored_untracked=%u stale=%u threshold_ms=%u",
+             (unsigned)s_store.count, (unsigned)s_store.rejected_count,
+             (unsigned)s_store.ignored_untracked_count, (unsigned)stale,
              (unsigned)CONFIG_P4HOME_PANEL_STORE_STALE_MS);
     xSemaphoreGive(s_store.mutex);
 }
@@ -714,7 +725,7 @@ void panel_data_store_on_ha_state_change(const ha_client_state_change_t *change,
     panel_sensor_t sensor = {0};
     if (!panel_data_store_get_snapshot(change->entity_id, &sensor)) {
         xSemaphoreTake(s_store.mutex, portMAX_DELAY);
-        s_store.rejected_count++;
+        s_store.ignored_untracked_count++;
         xSemaphoreGive(s_store.mutex);
         return;
     }

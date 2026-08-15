@@ -7,6 +7,35 @@
     "roomId": { "enum": ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"] },
     "activity": { "enum": ["idle", "sleep"] },
     "toolName": { "enum": ["character.get_state", "character.go_to_room", "character.set_activity", "character.say", "world.get_snapshot"] },
+    "emptyArguments": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "goToRoomArguments": {
+      "type": "object",
+      "required": ["room_id"],
+      "properties": {
+        "room_id": {
+          "enum": ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "setActivityArguments": {
+      "type": "object",
+      "required": ["activity"],
+      "properties": { "activity": { "enum": ["idle", "sleep"] } },
+      "additionalProperties": false
+    },
+    "sayArguments": {
+      "type": "object",
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "additionalProperties": false
+    },
     "characterState": {
       "type": "object",
       "required": ["room_id", "activity", "speaking", "active_action_id"],
@@ -102,6 +131,42 @@
         "deadline_at_ms": { "type": "integer", "minimum": 0 },
         "origin": { "enum": ["user", "agent", "autonomy", "test"] }
       },
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "tool": { "const": "character.get_state" },
+                "arguments": { "$ref": "#/$defs/emptyArguments" }
+              }
+            },
+            {
+              "properties": {
+                "tool": { "const": "character.go_to_room" },
+                "arguments": { "$ref": "#/$defs/goToRoomArguments" }
+              }
+            },
+            {
+              "properties": {
+                "tool": { "const": "character.set_activity" },
+                "arguments": { "$ref": "#/$defs/setActivityArguments" }
+              }
+            },
+            {
+              "properties": {
+                "tool": { "const": "character.say" },
+                "arguments": { "$ref": "#/$defs/sayArguments" }
+              }
+            },
+            {
+              "properties": {
+                "tool": { "const": "world.get_snapshot" },
+                "arguments": { "$ref": "#/$defs/emptyArguments" }
+              }
+            }
+          ]
+        }
+      ],
       "additionalProperties": false
     },
     "actionAccepted": {
