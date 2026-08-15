@@ -100,7 +100,12 @@ heap 无回归；异步 SNTP 也新增明确 PASS 标记。2 小时长跑仍未�
 最终候选固件实机长跑验证。首次短回归进一步发现天气服务发布目标曾从扩展后的白名单中丢失，导致
 真实 `rejected` 持续增长；恢复 `weather.forecast_wo_de_jia` 注册项后，4 分钟复测中
 `rejected=0`、`ignored_untracked=0→3`，Open-Meteo、HA READY、UI heartbeat 与资源指标均通过。
-2 小时长跑仍为本工作包唯一未完成项。
+精确提交 `d05eaa0` 的隔离构建产物为 `1,448,448 bytes`，SHA-256 为
+`4f1268051f454dabad0fbaa6a57fbde29a863bd2200c76b720d105527d31498b`；四个分区烧录后均通过
+写后哈希校验。首轮长跑约 4 分钟时确认 HA READY、`reconnect=0`、`offline=0`、`rejected=0`，
+但同时发现 runner 私密全量 sdkconfig 把仓库的 main task 5,120 B 栈配置回退为 3,584 B，故主动停止，
+不计为最终长跑证据。新增的配置合并器已通过单测和全新隔离构建，ESP-IDF 生成配置中的新旧栈符号
+均为 5,120；等待提交精确候选、重新烧录并从零开始 7,200 秒采集。
 
 ### P0.5 冻结 Device Protocol v1
 
@@ -160,8 +165,14 @@ contracts/device-protocol/v1/
 - [ ] 在 `feature/agent-harness` 的精确提交上完成一次 7,200 秒 workflow 回归并验证 artifact 完整性。
 
 实际结果（2026-08-15）：workflow 与操作说明已恢复并按当前 artifact contract 更新，YAML 解析通过；
-本地与 runner 已统一使用无交互 TTY 的原始串口采集脚本。远端自托管 runner 的 2 小时实机运行仍待
-提交候选版本后执行。
+本地与 runner 已统一使用无交互 TTY 的原始串口采集脚本。远端 run
+[`31873307218`](https://github.com/shenqislx/p4home/actions/runs/31873307218) 完成 checkout、输入校验和
+私密配置加载，但 build 因严格 shell 下用户级激活脚本读取未设置的 `$1` 失败，判定为
+`infra-fail`，其 artifact 不能作为功能通过证据。修复已提交为本地 `d05eaa0` 并通过严格 shell 构建、
+烧录和启动验证。随后进一步修复私密全量 sdkconfig 覆盖仓库 defaults 的配置漂移，并在 manifest 增加
+实际 main stack 配置；因 `github.com:443` 接收超时尚未同步远端，精确 SHA 的 7,200 秒 workflow 仍待重跑。
+配置合并器的 2 项单测与合并后全新固件构建均已通过；workflow 会在 build 前运行同一组单测，并动态
+核对最终配置与 `firmware/sdkconfig.defaults` 的 main stack 基线一致。
 
 ## 4. 验证矩阵
 

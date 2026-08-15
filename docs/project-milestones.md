@@ -9,9 +9,9 @@
 项目当前工作重点切换为 M7：本地语音、LLM 与 Agent Runtime。
 
 - M0–M5 已形成固件、显示、触摸、音频/ESP-SR 骨架、HA 读侧和 UI 基线；
-- M6 已实现 HA `call_service` 与主要控制 UI；2026-08-15 确认 HA 服务从开发机可达，
-  但 P4 未连接串口且既有地址离线，因此真实设备点击、状态回刷和米家闭环明确延期，
-  必须在 Phase 2 修改 P4 实时链路前补验；
+- M6 已实现 HA `call_service` 与主要控制 UI；2026-08-15 已恢复 P4 串口、Wi-Fi、HA READY 与
+  `state_changed` 接收，但真实设备点击、物理动作和对应状态回刷尚未执行，必须在 Phase 2 修改
+  P4 实时链路前补验；
 - 旧里程碑全文已归档到 [project-milestones-through-m6.md](./archive/records/project/project-milestones-through-m6.md)。
 
 ## 2. M7 分阶段里程碑
@@ -32,8 +32,8 @@
 | 项目 | 2026-08-15 状态 | 处理 |
 |---|---|---|
 | HAOS 服务 | `reachable` | `192.168.71.4:8123` TCP 成功、HTTP 200 |
-| P4 串口 | `unavailable` | 当前只有系统虚拟串口，无 P4 USB 串口 |
-| P4 既有 IP | `offline/unknown` | `192.168.110.87` 单包探测无响应 |
+| P4 串口 | `available` | `/dev/cu.usbserial-210`，已完成多轮烧录与原始串口采集 |
+| P4 网络与 HA | `ready` | DHCP 地址 `192.168.110.87`，HA 首次同步完成且持续接收事件 |
 | 真实灯具点击与状态回刷 | `deferred` | 板卡可用后在 Phase 0 硬件窗口补验 |
 | 米家闭环 | `deferred` | 不移出范围；Phase 2 前形成完成证据或独立债务裁决 |
 

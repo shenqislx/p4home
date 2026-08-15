@@ -33,7 +33,9 @@ Runner 还必须具备：
 
 推荐把已经验证可连接 Wi-Fi/HA 的 `firmware/sdkconfig` 做 base64 后保存为
 Actions secret。workflow 只把解码结果写入 `$RUNNER_TEMP`，不会复制到仓库、artifact
-或构建日志。不得把 SSID、密码、HA token 提交到 Git。
+或构建日志。私密配置先作为机器/凭据基线，再由 `scripts/merge-sdkconfig-defaults.py` 应用
+仓库中的 `firmware/sdkconfig.defaults`；同名配置始终以受版本控制的项目默认值为准，避免旧的
+全量私密配置回退安全或资源基线。不得把 SSID、密码、HA token 提交到 Git。
 
 ## 3. 触发参数
 
@@ -74,7 +76,8 @@ manifest schema version 1 的必需字段：
 ```
 
 workflow 还写入 app image 文件名、字节数与 SHA-256；这些字段用于确认刷写镜像，不能
-代替 `git_sha` 与 run identity 检查。
+代替 `git_sha` 与 run identity 检查。manifest 同时记录
+`main_task_stack_size_bytes`，用于确认私密全量配置没有覆盖仓库的栈安全基线。
 
 ## 5. 判定顺序
 

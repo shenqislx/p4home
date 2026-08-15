@@ -55,11 +55,15 @@ jobs:
           test -f "$HOME/.espressif/tools/activate_idf_v5.5.4.sh"
           echo "BUILD_DIR=$RUNNER_TEMP/p4home-hardware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
 
+      - name: Validate agent harness helpers
+        run: python3 -m unittest discover -s tests/harness -p 'test_*.py' -v
+
       - name: Prepare private hardware sdkconfig
         env:
           SDKCONFIG_B64: ${{ secrets.P4HOME_HARDWARE_SDKCONFIG_B64 }}
         run: |
           set -euo pipefail
+          export PRIVATE_HARDWARE_SDKCONFIG="$RUNNER_TEMP/p4home-private-hardware-sdkconfig"
           export HARDWARE_SDKCONFIG="$RUNNER_TEMP/p4home-hardware-sdkconfig"
           python3 - <<'PY'
           import base64
@@ -67,7 +71,7 @@ jobs:
           import pathlib
           import shutil
 
-          destination = pathlib.Path(os.environ["HARDWARE_SDKCONFIG"])
+          destination = pathlib.Path(os.environ["PRIVATE_HARDWARE_SDKCONFIG"])
           encoded = os.environ.get("SDKCONFIG_B64", "").strip()
           fallback = pathlib.Path.home() / ".config" / "p4home" / "sdkconfig.hardware"
 
@@ -82,7 +86,15 @@ jobs:
               )
           destination.chmod(0o600)
           PY
+          python3 scripts/merge-sdkconfig-defaults.py \
+            --base "$PRIVATE_HARDWARE_SDKCONFIG" \
+            --defaults firmware/sdkconfig.defaults \
+            --output "$HARDWARE_SDKCONFIG"
+          EXPECTED_MAIN_TASK_STACK_SIZE="$(sed -n 's/^CONFIG_ESP_MAIN_TASK_STACK_SIZE=//p' firmware/sdkconfig.defaults)"
+          test -n "$EXPECTED_MAIN_TASK_STACK_SIZE"
+          grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
           echo "HARDWARE_SDKCONFIG=$HARDWARE_SDKCONFIG" >> "$GITHUB_ENV"
+          echo "EXPECTED_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" >> "$GITHUB_ENV"
 
       - name: Build firmware
         run: |
@@ -94,6 +106,7 @@ jobs:
             -D IDF_TARGET=esp32p4 \
             -D SDKCONFIG="$HARDWARE_SDKCONFIG" \
             build
+          grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
 
       - name: Flash firmware and capture serial
         run: |
@@ -124,6 +137,14 @@ jobs:
           import pathlib
 
           image = pathlib.Path(os.environ["BUILD_DIR"]) / "p4home_firmware.bin"
+          sdkconfig = pathlib.Path(os.environ["HARDWARE_SDKCONFIG"])
+          main_stack_prefix = "CONFIG_ESP_MAIN_TASK_STACK_SIZE="
+          main_stack_size = None
+          if sdkconfig.is_file():
+              for line in sdkconfig.read_text(encoding="utf-8").splitlines():
+                  if line.startswith(main_stack_prefix):
+                      main_stack_size = int(line.removeprefix(main_stack_prefix))
+                      break
           manifest = {
               "schema_version": 1,
               "mode": "artifact-only",
@@ -142,6 +163,7 @@ jobs:
                   if image.is_file()
                   else None
               ),
+              "main_task_stack_size_bytes": main_stack_size,
           }
           pathlib.Path("firmware/hardware-validation-manifest.json").write_text(
               json.dumps(manifest, ensure_ascii=True, indent=2) + "\n",

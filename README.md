@@ -44,7 +44,8 @@
 - 固定使用 ESP-IDF v5.5.4；
 - 当前阶段不升级 `master` 或 v6.x；
 - 固件构建前先使用 `scripts/activate-idf-v5.5.4.sh`；
-- 当前本机缺少 v5.5.4 manifest 要求的 RISC-V 工具链，需在 Phase 0 修复后再把构建标记为通过。
+- v5.5.4 manifest 要求的 RISC-V 工具链已经补齐，Phase 0 干净构建和实机烧录均已通过；
+- 激活入口支持 `set -euo pipefail` 严格 shell，CI/runner 不得绕过该统一入口。
 
 ## 主要目录
 

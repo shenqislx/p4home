@@ -42,6 +42,8 @@ idf.py --version
 激活后至少执行：
 
 ```sh
+set -euo pipefail
+. /Users/andyhao/workspace/p4home/scripts/activate-idf-v5.5.4.sh
 idf.py --version
 idf.py --list-targets | rg '^esp32p4$'
 ```
@@ -50,6 +52,7 @@ idf.py --list-targets | rg '^esp32p4$'
 
 - 版本输出包含 `ESP-IDF v5.5.4`
 - target 列表包含 `esp32p4`
+- 在启用 `set -u` 时不会因用户级激活脚本读取未设置的 `$1` 而退出
 
 ## 6. 失败处理
 
