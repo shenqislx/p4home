@@ -94,6 +94,14 @@ pending → in_progress → implementation complete
 
 功能完成后必须先邀请用户 review，再推送。
 
+Agent 主线使用固定长期 feature branch：
+
+- 工作分支固定为 `feature/agent-harness`；
+- Phase 0–7 的文档、代码、测试、计划状态和归档改动全部提交到该分支；
+- 单个 Phase 完成和 review 只允许在该分支内提交、推送，不提前合入 `main`；
+- Phase 0–7 全部完成、所有退出门禁关闭并通过最终 review 后，才允许整体合入 `main`；
+- 发现当前分支不是 `feature/agent-harness` 时，先暂停写入并切回该分支。
+
 ```bash
 ./scripts/git-commit.sh "feat: add feature-name"
 ./scripts/git-push.sh --reviewed
@@ -102,6 +110,7 @@ pending → in_progress → implementation complete
 - commit 可以自动化；
 - push 必须有明确的已 review 确认；
 - commit 必须同时包含相应计划进度、证据索引或归档变更；
+- Phase 0–7 期间禁止直接向 `main` 提交或推送；
 - 不允许通过新增功能掩盖当前 Phase 的失败门禁。
 
 ## 8. 归档规则

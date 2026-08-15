@@ -2,6 +2,7 @@
 
 > Current Focus: [P4 Home 本地 LLM Agent 化架构](../p4-local-agent-architecture.md)
 > Updated: 2026-08-15
+> Working Branch: `feature/agent-harness`
 
 ## 工作规则
 
@@ -10,6 +11,8 @@
 - 后续 Phase 可以先定义边界，但只有前置退出门禁满足后才能启动；
 - 每完成一个任务，都要把验证证据写回对应 Phase plan；
 - Phase 完成并 review 后，计划移入 `docs/archive/plans/agent/`，长期结论更新到架构文档或正式技术记录；
+- Phase 0–7 的所有文档、代码和测试改动持续提交到 `feature/agent-harness`；
+- 单个 Phase 完成后不合入 `main`，全部 Phase 完成并通过最终 review 后再整体合入；
 - 旧 Smart Panel、M1–M6 计划均已归档，不再作为默认工作入口。
 
 ## 当前顺序

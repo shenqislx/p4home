@@ -23,6 +23,15 @@
 4. 只执行当前 `in_progress` Phase plan；
 5. 需要历史证据时再查 `docs/archive/`。
 
+## Agent 主线分支
+
+- Phase 0–7 的架构、计划、记录、代码和测试统一提交到 `feature/agent-harness`；
+- Agent 主线进行期间不得把阶段性改动直接提交或合入 `main`；
+- 每个 Phase 完成后在同一分支归档计划、更新记录，再继续下一个 Phase；
+- 只有 Phase 0–7 全部通过退出门禁并完成最终 review 后，才将
+  `feature/agent-harness` 整体合入 `main`；
+- 未经用户重新确认，不为单个 Phase 改用其他长期分支。
+
 ## 目录
 
 | 路径 | 职责 |
