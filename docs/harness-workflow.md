@@ -1,105 +1,127 @@
 # Harness Workflow
 
-## 目标
+## 1. 当前工作入口
 
-本文件定义本项目后续开发的最小流程约束，供未来上下文直接复用。
+任何新上下文开始工作时，按顺序读取：
 
-## 规则 1：新增功能必须先建 plan
+1. [AGENT.md](../AGENT.md)：仓库与组件边界；
+2. [当前架构基线](./p4-local-agent-architecture.md)：当前长期设计与硬约束；
+3. [当前工作计划](./plans/README.md)：唯一执行顺序与 Phase 状态；
+4. 当前 `in_progress` Phase plan：本轮允许实施的具体范围；
+5. 与本任务直接相关的代码和证据。
 
-每个新增功能开始前，必须先在 `docs/plans/` 下创建 plan 文件。
+不要默认读取 `docs/archive/`。只有追溯历史决策、验证旧行为或定位回归时才读取归档。
 
-命名建议：
+## 2. 架构基线优先
 
-- `docs/plans/YYYY-MM-DD-feature-name-plan.md`
+当前主线是 P4 Home 本地 LLM Agent 化。
 
-plan 至少必须包含：
+- 架构原则只维护在 `docs/p4-local-agent-architecture.md`；
+- 阶段状态只维护在 `docs/plans/README.md`；
+- 可执行任务、测试和证据只维护在对应 Phase plan；
+- 每日进度不得写回架构正文；
+- 若实现需要突破架构边界，先更新架构并邀请 review，再修改代码。
 
-- 背景与目标
-- 范围与非范围
-- 技术方案
-- 任务拆解
-- 测试方案
-- 风险与回滚点
-- 完成定义
+## 3. Plan 规则
 
-## 规则 2：plan 必须包含测试方案
+`docs/plans/` 只保存当前尚未归档的计划。
 
-测试方案不能只写“手工验证”，至少要区分：
+- 任意时刻最多一个 Phase 为 `in_progress`；
+- 只实施 `in_progress` Phase 范围内的任务；
+- 后续 Phase 可定义边界，但前置退出门禁未通过时不得启动；
+- 小任务优先写入现有 Phase plan，不为每个微小改动创建独立 plan；
+- 只有任务跨多个工作包、引入新架构决策或需要独立 review 时才新建子 plan；
+- 新 plan 必须引用当前架构、Phase、依赖与进入条件。
 
-- 编译/构建验证
-- 功能验证
-- 回归验证
-- 如适用，硬件联调验证
-
-## 规则 3：功能完成后先邀请 review，再提交/推送
-
-每个功能完成后，必须主动邀请用户 review code。
-
-默认流程：
-
-1. 功能实现完成
-2. 本地验证完成
-3. 邀请用户 review
-4. 用户确认通过
-5. 归档 plan 为正式技术文档
-6. 删除原 plan 文件
-7. 再进行 commit/push
-
-## 规则 4：push 前必须确认已 review
-
-本项目允许自动化 `git commit` 和 `git push`，但默认不允许跳过 review。
-
-推荐做法：
-
-- commit 可以自动化
-- push 需要明确带上“已 review”确认
-
-## 规则 5：推送时要同时完成文档沉淀
-
-当某个功能准备推送时，应将 plan 归档为正式技术文档，放在 `docs/` 下。
-
-推荐结果：
-
-- `docs/plans/2026-03-29-xxx-plan.md` 删除
-- `docs/xxx.md` 新增或更新
-
-为避免多一次无意义推送，默认采用以下解释：
-
-- 在 push 前完成 plan 更新、技术文档持久化、原 plan 删除
-- 这些变更与功能代码一同进入本次 commit/push
-
-## 规则 6：不确定时直接提问
-
-如出现以下情况，必须先问用户：
-
-- 范围不清
-- 方案存在明显二选一
-- 会影响目录结构或长期维护
-- 需要破坏性变更
-- 需要真正执行云端推送但仓库/远端状态不明确
-
-## 推荐命令
-
-创建新 plan：
+创建子 plan：
 
 ```bash
 ./scripts/new-plan.sh feature-name
 ```
 
-归档 plan：
+## 4. 每个计划必须包含
 
-```bash
-./scripts/finalize-plan.sh docs/plans/YYYY-MM-DD-feature-name-plan.md feature-name --delete-plan
+- 背景与目标；
+- 对应架构章节；
+- Phase、依赖和进入条件；
+- 范围与非范围；
+- 可按顺序执行的工作包；
+- 构建、功能、回归、故障和实机验证；
+- 风险、回滚点；
+- 需要保存的证据；
+- 完成定义与退出门禁；
+- review 清单。
+
+“手工验证正常”不能单独作为完成证据。
+
+## 5. 执行与证据
+
+每完成一个工作包：
+
+1. 更新对应 checkbox；
+2. 写明实际结果，而不是只写预期；
+3. 记录执行命令、关键版本和输出摘要；
+4. 串口、性能或长跑证据存入 `evidence/<phase-or-feature>/`；
+5. 若失败，保留失败原因和下一步，不把任务标记完成。
+
+涉及固件时至少检查可重复构建、image、static DIRAM、heap、task stack、UI/HA 回归与必要的实机证据。
+
+## 6. Review、完成与归档
+
+```text
+pending → in_progress → implementation complete
+→ local/equipment validation complete
+→ user review
+→ archive plan + write durable record
+→ commit/push
 ```
 
-自动化 commit：
+完成后：
+
+- 计划移入 `docs/archive/plans/agent/`；
+- 长期有效的实现与验证结论写入 `docs/records/`；
+- 架构变化更新当前架构基线；
+- `docs/plans/README.md` 将下一 Phase 标记为 `in_progress`；
+- 不删除计划，不把历史计划散落在当前目录。
+
+```bash
+./scripts/finalize-plan.sh docs/plans/YYYY-MM-DD-feature-name-plan.md feature-name --archive-plan
+```
+
+兼容旧命令的 `--delete-plan` 现在也只会归档，不再删除。
+
+## 7. Git 规则
+
+功能完成后必须先邀请用户 review，再推送。
 
 ```bash
 ./scripts/git-commit.sh "feat: add feature-name"
-```
-
-自动化 push：
-
-```bash
 ./scripts/git-push.sh --reviewed
 ```
+
+- commit 可以自动化；
+- push 必须有明确的已 review 确认；
+- commit 必须同时包含相应计划进度、证据索引或归档变更；
+- 不允许通过新增功能掩盖当前 Phase 的失败门禁。
+
+## 8. 归档规则
+
+```text
+docs/archive/
+├── architecture/     # 被取代的历史架构
+├── plans/
+│   ├── legacy/       # M1-M6 与旧主线计划
+│   └── agent/        # 已完成的 Agent Phase/子计划
+└── records/          # 历史实施、验证和项目记录
+```
+
+归档文件默认只读，不继续承载当前状态。需要恢复旧工作时，基于当前架构重新建立 plan，不直接把旧计划移回当前目录。
+
+## 9. 必须暂停并询问的情况
+
+- 会改变当前架构边界；
+- 需要跳过 Phase 退出门禁；
+- 会修改真实 HA、米家或家庭设备权限；
+- 会删除或覆盖历史证据；
+- 需要破坏性 git/flash 操作；
+- 需要真正执行远端 push，但 review 状态不明确。

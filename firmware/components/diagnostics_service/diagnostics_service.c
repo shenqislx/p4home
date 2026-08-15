@@ -6,12 +6,15 @@
 #include "esp_app_desc.h"
 #include "esp_chip_info.h"
 #include "esp_flash.h"
+#include "esp_heap_caps.h"
 #include "esp_idf_version.h"
 #include "esp_ota_ops.h"
 #include "esp_log.h"
 #include "esp_psram.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "ha_client.h"
 #include "panel_data_store.h"
 
@@ -139,10 +142,25 @@ void diagnostics_service_log_memory_summary(void)
 {
     size_t free_heap = esp_get_free_heap_size();
     size_t minimum_free_heap = esp_get_minimum_free_heap_size();
+    size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t internal_minimum = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    size_t internal_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t psram_minimum = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
+    size_t psram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
 
-    ESP_LOGI(TAG, "heap free=%u bytes min_free=%u bytes",
+    ESP_LOGW(TAG, "heap free=%u bytes min_free=%u bytes",
              (unsigned)free_heap,
              (unsigned)minimum_free_heap);
+    ESP_LOGW(TAG,
+             "heap_caps internal_free=%u internal_min=%u internal_largest=%u "
+             "psram_free=%u psram_min=%u psram_largest=%u bytes",
+             (unsigned)internal_free,
+             (unsigned)internal_minimum,
+             (unsigned)internal_largest,
+             (unsigned)psram_free,
+             (unsigned)psram_minimum,
+             (unsigned)psram_largest);
 }
 
 void diagnostics_service_log_runtime_heartbeat(void)
@@ -152,9 +170,12 @@ void diagnostics_service_log_runtime_heartbeat(void)
 
     s_last_heartbeat_us = uptime_us;
 
-    ESP_LOGI(TAG, "heartbeat uptime_ms=%" PRIi64 " delta_ms=%" PRIi64,
+    ESP_LOGW(TAG, "heartbeat uptime_ms=%" PRIi64 " delta_ms=%" PRIi64,
              uptime_us / 1000,
              delta_us / 1000);
+    ESP_LOGW(TAG, "task_stack task=main high_water=%u bytes",
+             (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    diagnostics_service_log_memory_summary();
 }
 
 typedef struct {
@@ -195,7 +216,7 @@ void diagnostics_service_log_ha_summary(void)
              "ha_summary state=%s reconnect=%" PRIu32 " initial=%" PRIu32 " events=%" PRIu32 " epm=%" PRIu32
              " connected_ms=%" PRIu64 " last_ready_ms=%" PRIu64 " last_event_ms=%" PRIu64
              " entities=%" PRIu32 " stale=%" PRIu32 " unknown=%" PRIu32 " offline=%" PRIu32
-             " rejected=%u error=%s",
+             " rejected=%u worker_stack_high_water=%" PRIu32 " bytes error=%s",
              ha_client_state_text(),
              metrics.reconnect_count,
              metrics.initial_state_count,
@@ -209,5 +230,6 @@ void diagnostics_service_log_ha_summary(void)
              panel.unknown,
              panel.offline,
              (unsigned)panel_data_store_rejected_count(),
+             metrics.worker_stack_high_water_bytes,
              metrics.last_error_text != NULL ? metrics.last_error_text : "(none)");
 }

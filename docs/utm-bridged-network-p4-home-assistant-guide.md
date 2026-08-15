@@ -316,6 +316,6 @@ P4 -> 路由器跨网段转发 -> UTM/HA -> 实际设备 -> HA state_changed -> 
 - UTM 虚拟机 `config.plist` 中的 `Mode=Bridged`、`BridgeInterface=en0`、`Hardware=e1000` 和虚拟机 MAC。
 - macOS 当前接口、路由表、`bridge100` 与 ARP 信息。
 - 项目 `2026-07-15` 和 `2026-07-16` 的 P4 实机串口验证记录。
-- [项目里程碑](./project-milestones.md) 和 [HA call_service 联调记录](./plans/2026-05-21-ha-client-call-service-writeback-plan.md)。
+- [项目里程碑](./project-milestones.md) 和 [HA call_service 历史联调记录](./archive/plans/legacy/2026-05-21-ha-client-call-service-writeback-plan.md)。
 
 接口名、IP 地址和串口号都属于成功环境实例。迁移到其他 Mac、路由器或开发板时，应重新识别，不应机械照抄。

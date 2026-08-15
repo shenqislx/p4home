@@ -1,0 +1,22 @@
+[
+  { "id": "zh-001", "text": "你现在在哪？", "expected": [{ "name": "character.get_state", "arguments": {} }] },
+  { "id": "zh-002", "text": "去客厅待一会儿。", "expected": [{ "name": "character.go_to_room", "arguments": { "room_id": "living_room" } }] },
+  { "id": "zh-003", "text": "回主卧。", "expected": [{ "name": "character.go_to_room", "arguments": { "room_id": "primary_bedroom" } }] },
+  { "id": "zh-004", "text": "去书房看看。", "expected": [{ "name": "character.go_to_room", "arguments": { "room_id": "study" } }] },
+  { "id": "zh-005", "text": "到客房等着。", "expected": [{ "name": "character.go_to_room", "arguments": { "room_id": "guest_room" } }] },
+  { "id": "zh-006", "text": "去玄关。", "expected": [{ "name": "character.go_to_room", "arguments": { "room_id": "entry" } }] },
+  { "id": "zh-007", "text": "到厨房去。", "expected": [{ "name": "character.go_to_room", "arguments": { "room_id": "kitchen" } }] },
+  { "id": "zh-008", "text": "睡觉吧。", "expected": [{ "name": "character.set_activity", "arguments": { "activity": "sleep" } }] },
+  { "id": "zh-009", "text": "醒醒，别睡了。", "expected": [{ "name": "character.set_activity", "arguments": { "activity": "idle" } }] },
+  { "id": "zh-010", "text": "说：你好呀。", "expected": [{ "name": "character.say", "arguments": { "text": "你好呀" } }] },
+  { "id": "zh-011", "text": "把你现在的状态告诉我。", "expected": [{ "name": "character.get_state", "arguments": {} }] },
+  { "id": "zh-012", "text": "给我看看当前世界状态。", "expected": [{ "name": "world.get_snapshot", "arguments": {} }] },
+  { "id": "zh-013", "text": "去客厅，然后说我到了。", "expected": [{ "name": "character.go_to_room", "arguments": { "room_id": "living_room" } }, { "name": "character.say", "arguments": { "text": "我到了" } }] },
+  { "id": "zh-014", "text": "去厨房，再进入睡眠状态。", "expected": [{ "name": "character.go_to_room", "arguments": { "room_id": "kitchen" } }, { "name": "character.set_activity", "arguments": { "activity": "sleep" } }] },
+  { "id": "zh-015", "text": "先查状态，再去书房。", "expected": [{ "name": "character.get_state", "arguments": {} }, { "name": "character.go_to_room", "arguments": { "room_id": "study" } }] },
+  { "id": "zh-016", "text": "去沙发坐一下。", "expected": [], "no_tool": { "code": "UNSUPPORTED_TOOL", "reason": "character.sit is not available in v1" } },
+  { "id": "zh-017", "text": "看着电视。", "expected": [], "no_tool": { "code": "UNSUPPORTED_TOOL", "reason": "character.look_at is not available in v1" } },
+  { "id": "zh-018", "text": "和台灯互动一下。", "expected": [], "no_tool": { "code": "UNSUPPORTED_TOOL", "reason": "character.interact is not available in v1" } },
+  { "id": "zh-019", "text": "去阳台。", "expected": [], "no_tool": { "code": "UNKNOWN_ROOM", "reason": "balcony is not a registered v1 room" } },
+  { "id": "zh-020", "text": "打开客厅灯。", "expected": [], "no_tool": { "code": "UNSUPPORTED_TOOL", "reason": "Home Assistant tools are introduced in Phase 4" } }
+]

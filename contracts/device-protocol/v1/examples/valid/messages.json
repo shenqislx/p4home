@@ -1,0 +1,221 @@
+[
+  {
+    "protocol_version": 1,
+    "message_id": "msg-001",
+    "correlation_id": null,
+    "device_id": "p4home-demo",
+    "session_id": "session-001",
+    "seq": 1,
+    "sent_at_ms": 1786761600000,
+    "type": "device.hello",
+    "payload": {
+      "boot_id": "boot-001",
+      "firmware_version": "0286408",
+      "protocol_versions": [1],
+      "connection_reason": "boot"
+    }
+  },
+  {
+    "protocol_version": 1,
+    "message_id": "msg-002",
+    "correlation_id": "msg-001",
+    "device_id": "p4home-demo",
+    "session_id": "session-001",
+    "seq": 2,
+    "sent_at_ms": 1786761600010,
+    "type": "device.capabilities",
+    "payload": {
+      "selected_protocol_version": 1,
+      "rooms": ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"],
+      "actions": ["character.get_state", "character.go_to_room", "character.set_activity", "character.say", "world.get_snapshot"],
+      "limits": {
+        "max_json_frame_bytes": 16384,
+        "action_queue_capacity": 8,
+        "say_text_max_chars": 256
+      }
+    }
+  },
+  {
+    "protocol_version": 1,
+    "message_id": "msg-003",
+    "correlation_id": null,
+    "device_id": "p4home-demo",
+    "session_id": "session-001",
+    "seq": 3,
+    "sent_at_ms": 1786761600020,
+    "type": "world.snapshot",
+    "payload": {
+      "snapshot_id": "snapshot-001",
+      "reason": "connect",
+      "state_version": 7,
+      "observed_at_ms": 1786761600020,
+      "character": {
+        "room_id": "living_room",
+        "activity": "idle",
+        "speaking": false,
+        "active_action_id": null
+      }
+    }
+  },
+  {
+    "protocol_version": 1,
+    "message_id": "msg-004",
+    "correlation_id": null,
+    "device_id": "p4home-demo",
+    "session_id": "session-001",
+    "seq": 4,
+    "sent_at_ms": 1786761600030,
+    "type": "world.changed",
+    "payload": {
+      "state_version": 8,
+      "observed_at_ms": 1786761600030,
+      "character": {
+        "room_id": "study",
+        "activity": "idle",
+        "speaking": false,
+        "active_action_id": "action-001"
+      }
+    }
+  },
+  {
+    "protocol_version": 1,
+    "message_id": "msg-005",
+    "correlation_id": null,
+    "device_id": "p4home-demo",
+    "session_id": "session-001",
+    "seq": 5,
+    "sent_at_ms": 1786761600040,
+    "type": "user.text",
+    "payload": {
+      "text": "去客厅待一会儿",
+      "locale": "zh-CN",
+      "source": "simulator"
+    }
+  },
+  {
+    "protocol_version": 1,
+    "message_id": "msg-006",
+    "correlation_id": null,
+    "device_id": "p4home-demo",
+    "session_id": "session-001",
+    "seq": 6,
+    "sent_at_ms": 1786761600050,
+    "type": "action.request",
+    "payload": {
+      "action_id": "action-001",
+      "tool": "character.go_to_room",
+      "arguments": { "room_id": "living_room" },
+      "deadline_at_ms": 1786761610050,
+      "origin": "agent"
+    }
+  },
+  {
+    "protocol_version": 1,
+    "message_id": "msg-007",
+    "correlation_id": "msg-006",
+    "device_id": "p4home-demo",
+    "session_id": "session-001",
+    "seq": 7,
+    "sent_at_ms": 1786761600060,
+    "type": "action.accepted",
+    "payload": {
+      "action_id": "action-001",
+      "queue_position": 0,
+      "accepted_at_ms": 1786761600060
+    }
+  },
+  {
+    "protocol_version": 1,
+    "message_id": "msg-008",
+    "correlation_id": "msg-006",
+    "device_id": "p4home-demo",
+    "session_id": "session-001",
+    "seq": 8,
+    "sent_at_ms": 1786761600070,
+    "type": "action.started",
+    "payload": {
+      "action_id": "action-001",
+      "started_at_ms": 1786761600070
+    }
+  },
+  {
+    "protocol_version": 1,
+    "message_id": "msg-009",
+    "correlation_id": "msg-006",
+    "device_id": "p4home-demo",
+    "session_id": "session-001",
+    "seq": 9,
+    "sent_at_ms": 1786761600080,
+    "type": "action.completed",
+    "payload": {
+      "action_id": "action-001",
+      "completed_at_ms": 1786761600080,
+      "state_version": 9,
+      "result": { "room_id": "living_room" }
+    }
+  },
+  {
+    "protocol_version": 1,
+    "message_id": "msg-010",
+    "correlation_id": "msg-006",
+    "device_id": "p4home-demo",
+    "session_id": "session-001",
+    "seq": 10,
+    "sent_at_ms": 1786761600090,
+    "type": "action.failed",
+    "payload": {
+      "action_id": "action-002",
+      "failed_at_ms": 1786761600090,
+      "error": {
+        "code": "DEADLINE_EXCEEDED",
+        "message": "action deadline elapsed",
+        "retryable": false
+      }
+    }
+  },
+  {
+    "protocol_version": 1,
+    "message_id": "msg-011",
+    "correlation_id": "msg-006",
+    "device_id": "p4home-demo",
+    "session_id": "session-001",
+    "seq": 11,
+    "sent_at_ms": 1786761600100,
+    "type": "action.cancel",
+    "payload": {
+      "action_id": "action-001",
+      "reason": "superseded by user request"
+    }
+  },
+  {
+    "protocol_version": 1,
+    "message_id": "msg-012",
+    "correlation_id": null,
+    "device_id": "p4home-demo",
+    "session_id": "session-001",
+    "seq": 12,
+    "sent_at_ms": 1786761600110,
+    "type": "heartbeat",
+    "payload": {
+      "uptime_ms": 120000,
+      "last_rx_seq": 11,
+      "state_version": 9
+    }
+  },
+  {
+    "protocol_version": 1,
+    "message_id": "msg-013",
+    "correlation_id": "msg-bad",
+    "device_id": "p4home-demo",
+    "session_id": "session-001",
+    "seq": 13,
+    "sent_at_ms": 1786761600120,
+    "type": "error",
+    "payload": {
+      "code": "INVALID_MESSAGE",
+      "message": "payload is missing a required field",
+      "retryable": false,
+      "details": { "field": "payload.action_id" }
+    }
+  }
+]

@@ -2,111 +2,74 @@
 
 ## 项目总览
 
-`p4home` 是一个基于 `ESP32-P4` 的原生 `Home Assistant Smart Panel` 项目，当前主线是：
+`p4home` 是 ESP32-P4 原生 Home Assistant Smart Panel，并正在进入本地 LLM Agent 化阶段。
 
-- 面板路线：`ESP32-P4` 原生面板
-- 固件基座：`ESP-IDF` **v5.5.4**
-- 图形栈：`LVGL` **v9**
-- 本地语音前端：`ESP-SR`
-- 后续集成：`Home Assistant`、米家生态、本地语音/LLM 节点
+当前固定基线：
 
-本文件仅描述目录结构与功能模块，不承载开发流程约定。
+- ESP-IDF v5.5.4；
+- LVGL v9；
+- ESP32-C6 ESP-Hosted；
+- Home Assistant WebSocket；
+- ESP-SR 音频/唤醒骨架；
+- 局域网 Agent Runtime + Ollama + STT/TTS。
 
-## 顶层目录说明
+通用 LLM 不运行在 P4。P4 是 UI、音频前端和 World Action 执行端；Agent 节点负责推理、会话、工具、Memory 和编排。
 
-### `/`
+## 接手顺序
 
-仓库根目录，保存项目入口说明、工程规范和后续顶层模块。
+1. 读取本文件；
+2. 读取 `docs/p4-local-agent-architecture.md`；
+3. 读取 `docs/plans/README.md`；
+4. 只执行当前 `in_progress` Phase plan；
+5. 需要历史证据时再查 `docs/archive/`。
 
-### `/docs`
+## 目录
 
-项目文档目录：总体技术方案、本地验证计划、功能计划、模板与流程说明。
+| 路径 | 职责 |
+|---|---|
+| `firmware/` | ESP-IDF 固件主工程 |
+| `sim/` | LVGL host simulator、fake HA/time/scenario |
+| `assets/` | Pixel art 源资产 |
+| `contracts/` | Device Protocol v1、Tool Schema v1 与黄金场景 |
+| `agent/` | Phase 1 建立的 Agent Runtime；Phase 0 前不得创建生产实现 |
+| `docs/p4-local-agent-architecture.md` | 当前唯一架构基线 |
+| `docs/plans/` | 当前 Phase 计划与状态索引 |
+| `docs/records/` | 完成后的稳定实现与验证记录 |
+| `docs/archive/` | 历史架构、计划和记录；默认不维护当前状态 |
+| `docs/templates/` | plan 与技术记录模板 |
+| `scripts/` | 构建、计划、提交、推送和资源生成辅助脚本 |
+| `.codex/` | 项目本地 Codex 扩展 |
 
-### `/docs/plans`
+## 固件组件
 
-功能计划目录（先写 plan，实现与测试方案，沉淀后可删原 plan）。
+| 组件 | 当前职责 |
+|---|---|
+| `board_support` | 初始化与 service 编排 |
+| `diagnostics_service` | 芯片、分区、内存、心跳与 VERIFY 标记 |
+| `display_service` | DSI/LVGL 显示、背光与 standby |
+| `ui_pages` | Pixel Home、Lights、Climate、Modes 与状态栏 |
+| `ui_pixel_art` | 生成后的像素 sprite 资源 |
+| `touch_service` | GT911 / LVGL 输入 |
+| `audio_service` | Codec、采集、播放与所有权 |
+| `sr_service` | AFE、WakeNet、MultiNet 骨架 |
+| `network_service` | ESP32-C6 Hosted Wi-Fi |
+| `ha_client` | HA WebSocket 订阅、状态、request 与 call_service |
+| `panel_data_store` | 白名单实体与本地采样状态 |
+| `gateway_service` | 注册、快照、单命令邮箱骨架 |
+| `settings_service` | NVS 配置 |
+| `weather_service` | 天气获取与面板数据写入 |
 
-### `/docs/templates`
+Agent Phase 2 计划新增：
 
-文档模板目录。
-
-### `/.codex`
-
-Codex 扩展目录；当前固化 skill：`esp-idf-v5.5.4`。
-
-### `/scripts`
-
-本地辅助脚本：IDF 激活、plan 生命周期、git/hook 等。
-
-### `/.githooks`
-
-本地 git hook 模板目录。
-
-### `/firmware`
-
-固件主工程目录（ESP-IDF）。
-
-结构要点：
-
-- `main/`：入口 `app_main.c`，启动后输出 `VERIFY:area:check:PASS|FAIL` 供 CI/串口解析
-- `components/`：业务组件（见下）
-- `host_test/`：独立 Unity 冒烟测试工程（可选构建）
-- `sdkconfig.defaults`：人工维护的默认配置基线
-- `sdkconfig`：本地生成，通常 gitignore
-- `partitions.csv`：分区表
+- `agent_transport`：P4 Device WebSocket；
+- `world_service`：角色真值、Action Queue 与状态机。
 
 ## 开发与验证
 
-仓库当前默认采用本地开发机完成固件开发、构建、烧录与串口验证，不再维护 self-hosted runner 相关 GitHub Actions workflow。
+- 固件构建必须激活 ESP-IDF v5.5.4；
+- 新 build 结果不得依赖旧 CMake cache 或旧生成 `sdkconfig`；
+- 验证包括 build、simulator、功能、回归、故障和必要的实机证据；
+- 串口验证继续使用 `VERIFY:area:check:PASS|FAIL`；
+- Phase 0 未完成前，不实现 Agent 生产代码或重构角色执行层。
 
-建议本地最小闭环：
-
-- 激活 `ESP-IDF v5.5.4`
-- 在 `firmware/` 下执行 `idf.py build`
-- 按当前开发板串口执行 `idf.py -p <serial_port> flash monitor`
-- 依据串口日志中的 `VERIFY:` 标记与功能现象做本地验收
-
-## 固件组件（`firmware/components/`）
-
-已实现并参与链接的典型组件：
-
-| 组件 | 职责 |
-|------|------|
-| `board_support` | 板级编排：初始化各 service、网关状态发布、命令处理 |
-| `diagnostics_service` | 启动信息、芯片/分区/内存、心跳 |
-| `display_service` | DSI/LVGL 显示初始化、对外 API；页面 UI 委托 `ui_pages` |
-| `ui_pages` | `Modes / Lights / Climate` 三个产品页及顶部导航 |
-| `touch_service` | GT911 / LVGL 触摸 |
-| `audio_service` | Codec、提示音、采集 |
-| `sr_service` | ESP-SR（AFE / WakeNet / MultiNet）与运行时任务 |
-| `network_service` | `esp_netif`、STA、hostname/device_id |
-| `gateway_service` | 本地网关状态与命令邮箱（脚手架） |
-| `settings_service` | NVS：HA 凭证、固定 Dashboard 启动页兼容迁移、启动计数等 |
-
-`ui_core/`：预留（导航壳/主题），当前逻辑主要在 `ui_pages`。
-
-## 功能模块说明（概念）
-
-### 板级支持模块
-
-硬件初始化与编排：`board_support` 聚合各 service。
-
-### UI 模块
-
-`display_service` + `ui_pages`：显示链路、页面与交互控件。
-
-### 语音前端模块
-
-`sr_service` + `audio_service`：采集、AFE、唤醒与固定命令。
-
-### 网关接入模块
-
-`gateway_service`：本地注册/状态/命令邮箱契约（后续可接真实网关）。
-
-### 系统基础设施模块
-
-`settings_service`、`diagnostics_service`、分区与 OTA 配置在 `sdkconfig.defaults` / `partitions.csv` 中体现。
-
-### 文档与流程模块
-
-`/docs` 与 plan 模板；开发与验证流程以本地环境为准。
+流程细则见 `docs/harness-workflow.md`。

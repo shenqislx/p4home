@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://p4home.local/contracts/device-protocol/v1/messages/payloads.schema.json",
+  "title": "P4 Device Protocol v1 Payloads",
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    "roomId": { "enum": ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"] },
+    "activity": { "enum": ["idle", "sleep"] },
+    "toolName": { "enum": ["character.get_state", "character.go_to_room", "character.set_activity", "character.say", "world.get_snapshot"] },
+    "characterState": {
+      "type": "object",
+      "required": ["room_id", "activity", "speaking", "active_action_id"],
+      "properties": {
+        "room_id": { "$ref": "#/$defs/roomId" },
+        "activity": { "$ref": "#/$defs/activity" },
+        "speaking": { "type": "boolean" },
+        "active_action_id": { "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] }
+      },
+      "additionalProperties": false
+    },
+    "actionError": {
+      "type": "object",
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": { "enum": ["INVALID_ARGUMENT", "UNSUPPORTED_TOOL", "UNKNOWN_ROOM", "QUEUE_FULL", "DEADLINE_EXCEEDED", "CANCELLED", "DEVICE_BUSY", "INTERNAL"] },
+        "message": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "retryable": { "type": "boolean" },
+        "details": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "deviceHello": {
+      "type": "object",
+      "required": ["boot_id", "firmware_version", "protocol_versions", "connection_reason"],
+      "properties": {
+        "boot_id": { "$ref": "#/$defs/id" },
+        "firmware_version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "protocol_versions": { "type": "array", "const": [1] },
+        "connection_reason": { "enum": ["boot", "reconnect", "manual", "test"] }
+      },
+      "additionalProperties": false
+    },
+    "deviceCapabilities": {
+      "type": "object",
+      "required": ["selected_protocol_version", "rooms", "actions", "limits"],
+      "properties": {
+        "selected_protocol_version": { "const": 1 },
+        "rooms": { "type": "array", "minItems": 6, "maxItems": 6, "uniqueItems": true, "items": { "$ref": "#/$defs/roomId" } },
+        "actions": { "type": "array", "minItems": 5, "maxItems": 5, "uniqueItems": true, "items": { "$ref": "#/$defs/toolName" } },
+        "limits": {
+          "type": "object",
+          "required": ["max_json_frame_bytes", "action_queue_capacity", "say_text_max_chars"],
+          "properties": {
+            "max_json_frame_bytes": { "const": 16384 },
+            "action_queue_capacity": { "const": 8 },
+            "say_text_max_chars": { "const": 256 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "worldSnapshot": {
+      "type": "object",
+      "required": ["snapshot_id", "reason", "state_version", "observed_at_ms", "character"],
+      "properties": {
+        "snapshot_id": { "$ref": "#/$defs/id" },
+        "reason": { "enum": ["connect", "reconnect", "resync", "requested"] },
+        "state_version": { "type": "integer", "minimum": 0 },
+        "observed_at_ms": { "type": "integer", "minimum": 0 },
+        "character": { "$ref": "#/$defs/characterState" }
+      },
+      "additionalProperties": false
+    },
+    "worldChanged": {
+      "type": "object",
+      "required": ["state_version", "observed_at_ms", "character"],
+      "properties": {
+        "state_version": { "type": "integer", "minimum": 1 },
+        "observed_at_ms": { "type": "integer", "minimum": 0 },
+        "character": { "$ref": "#/$defs/characterState" }
+      },
+      "additionalProperties": false
+    },
+    "userText": {
+      "type": "object",
+      "required": ["text", "locale", "source"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "locale": { "const": "zh-CN" },
+        "source": { "enum": ["touch", "voice", "simulator"] }
+      },
+      "additionalProperties": false
+    },
+    "actionRequest": {
+      "type": "object",
+      "required": ["action_id", "tool", "arguments", "deadline_at_ms", "origin"],
+      "properties": {
+        "action_id": { "$ref": "#/$defs/id" },
+        "tool": { "$ref": "#/$defs/toolName" },
+        "arguments": { "type": "object" },
+        "deadline_at_ms": { "type": "integer", "minimum": 0 },
+        "origin": { "enum": ["user", "agent", "autonomy", "test"] }
+      },
+      "additionalProperties": false
+    },
+    "actionAccepted": {
+      "type": "object",
+      "required": ["action_id", "queue_position", "accepted_at_ms"],
+      "properties": {
+        "action_id": { "$ref": "#/$defs/id" },
+        "queue_position": { "type": "integer", "minimum": 0, "maximum": 7 },
+        "accepted_at_ms": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "actionStarted": {
+      "type": "object",
+      "required": ["action_id", "started_at_ms"],
+      "properties": {
+        "action_id": { "$ref": "#/$defs/id" },
+        "started_at_ms": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "actionCompleted": {
+      "type": "object",
+      "required": ["action_id", "completed_at_ms", "state_version", "result"],
+      "properties": {
+        "action_id": { "$ref": "#/$defs/id" },
+        "completed_at_ms": { "type": "integer", "minimum": 0 },
+        "state_version": { "type": "integer", "minimum": 0 },
+        "result": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "actionFailed": {
+      "type": "object",
+      "required": ["action_id", "failed_at_ms", "error"],
+      "properties": {
+        "action_id": { "$ref": "#/$defs/id" },
+        "failed_at_ms": { "type": "integer", "minimum": 0 },
+        "error": { "$ref": "#/$defs/actionError" }
+      },
+      "additionalProperties": false
+    },
+    "actionCancel": {
+      "type": "object",
+      "required": ["action_id", "reason"],
+      "properties": {
+        "action_id": { "$ref": "#/$defs/id" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "additionalProperties": false
+    },
+    "heartbeat": {
+      "type": "object",
+      "required": ["uptime_ms", "last_rx_seq", "state_version"],
+      "properties": {
+        "uptime_ms": { "type": "integer", "minimum": 0 },
+        "last_rx_seq": { "type": "integer", "minimum": 0 },
+        "state_version": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "error": {
+      "type": "object",
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": { "enum": ["INVALID_MESSAGE", "UNSUPPORTED_VERSION", "UNSUPPORTED_MESSAGE_TYPE", "FRAME_TOO_LARGE", "SEQ_OUT_OF_ORDER", "DUPLICATE_MESSAGE", "ACTION_NOT_FOUND", "INTERNAL"] },
+        "message": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "retryable": { "type": "boolean" },
+        "details": { "type": "object" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

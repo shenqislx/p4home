@@ -37,6 +37,7 @@ typedef struct {
     uint64_t last_connected_at_ms;
     uint64_t last_ready_at_ms;
     uint64_t last_event_at_ms;
+    uint32_t worker_stack_high_water_bytes;
     const char *last_error_text;
 } ha_client_metrics_t;
 

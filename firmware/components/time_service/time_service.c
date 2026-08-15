@@ -47,6 +47,8 @@ static void time_service_sync_notification_cb(struct timeval *tv)
     if (s_state.event_group != NULL) {
         xEventGroupSetBits(s_state.event_group, TIME_SYNC_ACQUIRED_BIT);
     }
+
+    ESP_LOGW(TAG, "VERIFY:time:sync_acquired:PASS epoch_ms=%" PRIu64, epoch_ms);
 }
 
 static void time_service_task(void *arg)

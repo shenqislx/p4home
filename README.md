@@ -1,63 +1,64 @@
 # p4home
 
-基于 `ESP32-P4` 的原生 `Home Assistant Smart Panel` 项目。
+基于 ESP32-P4 的原生 Home Assistant Smart Panel，并逐步扩展为由局域网本地 LLM Agent Runtime 驱动的家庭智能终端。
 
-当前技术路线已定版为：
+## 当前技术基线
 
-- 面板方案：`ESP32-P4 原生面板`
-- 固件基座：`ESP-IDF`
-- 图形栈：`LVGL`
-- 本地语音前端：`ESP-SR`
-- 家居中台：`Home Assistant`
-- 本地 AI 节点：后续接入 `Whisper / Piper / Ollama`
+- 面板：ESP32-P4 Function EV Board；
+- 固件：ESP-IDF v5.5.4；
+- 图形：LVGL v9；
+- 联网：ESP32-C6 ESP-Hosted；
+- 本地语音前端：ESP-SR；
+- 家居中台：Home Assistant；
+- 本地 AI 节点：Ollama、STT、TTS、Agent Runtime。
 
-当前 `ESP-IDF` 版本基线：
+通用 LLM 不运行在 ESP32-P4 上。P4 负责 UI、交互、音频前端和世界动作执行；Mac mini/PC/Home Server 负责模型推理、Agent、Memory 与工具编排。
 
-- 固定版本：`ESP-IDF v5.5.4`
-- 当前阶段不使用：`master`、漂移分支、`v6.x`
-- 所有 `firmware/` 相关构建与验证，默认都应先切换到 `v5.5.4`
+## 当前工作重点
 
-未来何时考虑升级 `ESP-IDF`：
+当前进入 M7 Agent 化主线，唯一架构基线为：
 
-- 当当前 `M6` 控制回写主线稳定后，再评估是否需要升级
-- 当现有版本在 `ESP32-P4` 支持、驱动、组件兼容性上出现明确阻塞
-- 当新版本带来项目明确需要的能力，而不是仅仅“版本更新”
-- 升级前应先做一次独立验证，确认不会破坏现有 `firmware/` 构建和已完成功能
+- [P4 Home 本地 LLM Agent 化架构](./docs/p4-local-agent-architecture.md)
 
-当前优先级：
+执行入口：
 
-1. 推进 `M6`：`Home Assistant call_service` 控制回写
-2. 补齐 dashboard 控制卡片：开关与 action / scene
-3. 用真实 HA 可控设备完成“面板 -> HA -> 设备”闭环
-4. 米家设备先通过 HA 暴露后再纳入面板控制
+- [当前工作计划与 Phase 状态](./docs/plans/README.md)
+- [当前里程碑](./docs/project-milestones.md)
+- [Harness Workflow](./docs/harness-workflow.md)
 
-当前工程状态：
+当前仅推进 Phase 0：恢复可重复构建、固化 ESP32-C6 Hosted 配置、关闭 M6 遗留状态、采集运行期基线、冻结 Device Protocol v1/Tool Schema v1，并建立 Mock 合约测试。
 
-- `M0` 到 `M2` 已完成
-- `M3` 音频与本地语音前端骨架已完成，主线暂停
-- `M4` / `M5` 已完成 HA 读侧与图形化传感器 dashboard MVP
-- 当前工作区正在实现 `M6` 控制回写与控制卡片，尚未提交
+## 工作规则
 
-现有文档：
+开始任务前依次读取：
 
-- [总体方案](./docs/esp32-p4-smart-panel-plan.md)
-- [本地验证计划](./docs/p4-local-validation-plan.md)
-- [UTM 桥接网络与 P4/HA 通讯操作手册](./docs/utm-bridged-network-p4-home-assistant-guide.md)
-- [Harness 工作流](./docs/harness-workflow.md)
+1. [AGENT.md](./AGENT.md)；
+2. [当前架构](./docs/p4-local-agent-architecture.md)；
+3. [当前计划索引](./docs/plans/README.md)；
+4. 当前 `in_progress` Phase plan。
 
-建议开发顺序：
+`docs/plans/` 只保存当前计划；过去的架构、计划和实施记录统一位于 [docs/archive](./docs/archive/README.md)。
 
-1. 完成并提交 `M6` 的 `ha_client call_service` 写回 API
-2. 完成并提交 dashboard 控制卡片
-3. 接入真实 HA 可控实体做实机验证
-4. 再推进米家经 HA 暴露后的联动闭环
-5. `M6` 稳定后再重启 `M7` 本地语音对话
+## ESP-IDF 版本策略
 
-本地维护辅助：
+- 固定使用 ESP-IDF v5.5.4；
+- 当前阶段不升级 `master` 或 v6.x；
+- 固件构建前先使用 `scripts/activate-idf-v5.5.4.sh`；
+- 当前本机缺少 v5.5.4 manifest 要求的 RISC-V 工具链，需在 Phase 0 修复后再把构建标记为通过。
 
-- `AGENT.md`：目录与模块总览
-- `docs/plans/`：功能 plan 持久化目录
-- `docs/templates/`：文档模板
-- `scripts/`：plan、commit、push、hook 安装辅助脚本
-- `.githooks/`：本地 hook 模板
-- `firmware/`：固件主工程
+## 主要目录
+
+- `firmware/`：ESP32-P4 固件；
+- `sim/`：Pixel Home host simulator 与 fake backend；
+- `agent/`：Phase 1 才创建的本地 Agent Runtime；
+- `contracts/`：Phase 0 创建的跨端协议与 Tool Schema；
+- `docs/plans/`：当前 Agent 工作计划；
+- `docs/records/`：完成后的稳定实现/验证记录；
+- `docs/archive/`：历史架构、计划和记录；
+- `scripts/`：构建、计划、提交和验证辅助脚本。
+
+## 现有运行手册
+
+- [ESP-IDF v5.5.4 安装](./docs/esp-idf-v5.5.4-install.md)
+- [ESP-IDF 激活说明](./docs/esp-idf-v5.5.4-activation-skill.md)
+- [UTM / Home Assistant 网络指南](./docs/utm-bridged-network-p4-home-assistant-guide.md)

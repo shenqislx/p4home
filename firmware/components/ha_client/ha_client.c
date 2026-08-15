@@ -118,6 +118,7 @@ typedef struct {
     uint64_t last_ready_at_ms;
     uint64_t last_event_at_ms;
     uint64_t connected_duration_ms;
+    uint32_t worker_stack_high_water_bytes;
 } ha_client_state_ctx_t;
 
 static ha_client_state_ctx_t s_ctx = {
@@ -1029,6 +1030,11 @@ static void ha_client_worker(void *arg)
     bool first_dial = true;
 
     while (true) {
+        uint32_t stack_high_water = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+        taskENTER_CRITICAL(&s_ctx.lock);
+        s_ctx.worker_stack_high_water_bytes = stack_high_water;
+        taskEXIT_CRITICAL(&s_ctx.lock);
+
         if (s_ctx.stop_requested) {
             break;
         }
@@ -1104,7 +1110,9 @@ static void ha_client_worker(void *arg)
                     }
 
                     while (!s_ctx.stop_requested) {
+                        stack_high_water = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
                         taskENTER_CRITICAL(&s_ctx.lock);
+                        s_ctx.worker_stack_high_water_bytes = stack_high_water;
                         bool connected = s_ctx.ws_connected && s_ctx.authenticated &&
                                          s_ctx.state == HA_CLIENT_STATE_READY;
                         taskEXIT_CRITICAL(&s_ctx.lock);
@@ -1369,6 +1377,7 @@ esp_err_t ha_client_get_metrics(ha_client_metrics_t *metrics)
     metrics->last_connected_at_ms = s_ctx.last_connected_at_ms;
     metrics->last_ready_at_ms = s_ctx.last_ready_at_ms;
     metrics->last_event_at_ms = s_ctx.last_event_at_ms;
+    metrics->worker_stack_high_water_bytes = s_ctx.worker_stack_high_water_bytes;
     metrics->last_error_text = s_ctx.last_error;
     taskEXIT_CRITICAL(&s_ctx.lock);
 
@@ -1444,6 +1453,8 @@ esp_err_t ha_client_call_service(const ha_client_call_service_request_t *request
     }
 
     if (xSemaphoreTake(s_ctx.call_mutex, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        ESP_LOGW(TAG, "VERIFY:ha:call_service:FAIL domain=%s service=%s error=busy_timeout",
+                 request->domain, request->service);
         return ESP_ERR_TIMEOUT;
     }
 
@@ -1451,6 +1462,8 @@ esp_err_t ha_client_call_service(const ha_client_call_service_request_t *request
     char *call_json = NULL;
     esp_err_t err = ha_client_build_call_json(request, id, &call_json);
     if (err != ESP_OK) {
+        ESP_LOGW(TAG, "VERIFY:ha:call_service:FAIL domain=%s service=%s error=build_%s",
+                 request->domain, request->service, esp_err_to_name(err));
         xSemaphoreGive(s_ctx.call_mutex);
         return err;
     }
@@ -1465,6 +1478,9 @@ esp_err_t ha_client_call_service(const ha_client_call_service_request_t *request
     cJSON_free(call_json);
     if (sent < 0) {
         (void)ha_client_take_pending(id);
+        ESP_LOGW(TAG, "VERIFY:ha:call_service:FAIL id=%" PRIu32
+                      " domain=%s service=%s error=send",
+                 id, request->domain, request->service);
         xSemaphoreGive(s_ctx.call_mutex);
         return ESP_FAIL;
     }
@@ -1476,6 +1492,9 @@ esp_err_t ha_client_call_service(const ha_client_call_service_request_t *request
         taskENTER_CRITICAL(&s_ctx.lock);
         ha_client_set_call_result_locked(id, false, "call_service_timeout");
         taskEXIT_CRITICAL(&s_ctx.lock);
+        ESP_LOGW(TAG, "VERIFY:ha:call_service:FAIL id=%" PRIu32
+                      " domain=%s service=%s error=response_timeout",
+                 id, request->domain, request->service);
         xSemaphoreGive(s_ctx.call_mutex);
         return ESP_ERR_TIMEOUT;
     }
@@ -1489,12 +1508,14 @@ esp_err_t ha_client_call_service(const ha_client_call_service_request_t *request
 
     xSemaphoreGive(s_ctx.call_mutex);
     if (!success) {
-        ESP_LOGW(TAG, "HA call_service failed domain=%s service=%s error=%s",
-                 request->domain, request->service, reason);
+        ESP_LOGW(TAG, "VERIFY:ha:call_service:FAIL id=%" PRIu32
+                      " domain=%s service=%s error=%s",
+                 id, request->domain, request->service, reason);
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "HA call_service ok domain=%s service=%s", request->domain, request->service);
+    ESP_LOGW(TAG, "VERIFY:ha:call_service:PASS id=%" PRIu32 " domain=%s service=%s",
+             id, request->domain, request->service);
     return ESP_OK;
 }
 

@@ -1,26 +1,33 @@
 # <Feature Name>
 
+> Architecture: `docs/p4-local-agent-architecture.md`
+> Source Plan: `<archived-plan-path>`
+> Completed: `<date>`
+
 ## 1. 背景
 
 简述该功能的目标与落地背景。
 
 ## 2. 最终实现
 
-- 
+-
 
 ## 3. 目录与模块影响
 
-- 
+-
 
 ## 4. 关键设计决策
 
-- 
+-
 
 ## 5. 测试与验证结果
 
-- 
+-
 
-## 6. 后续维护注意事项
+## 6. 证据索引
 
-- 
+-
 
+## 7. 后续维护注意事项
+
+-

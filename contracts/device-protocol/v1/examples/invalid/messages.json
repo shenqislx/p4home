@@ -1,0 +1,111 @@
+[
+  {
+    "name": "unsupported protocol version",
+    "expected_error": "UNSUPPORTED_VERSION",
+    "message": {
+      "protocol_version": 2,
+      "message_id": "invalid-001",
+      "correlation_id": null,
+      "device_id": "p4home-demo",
+      "session_id": "session-invalid",
+      "seq": 1,
+      "sent_at_ms": 1786761600000,
+      "type": "heartbeat",
+      "payload": { "uptime_ms": 1, "last_rx_seq": 0, "state_version": 0 }
+    }
+  },
+  {
+    "name": "missing message id",
+    "expected_error": "INVALID_MESSAGE",
+    "message": {
+      "protocol_version": 1,
+      "correlation_id": null,
+      "device_id": "p4home-demo",
+      "session_id": "session-invalid",
+      "seq": 2,
+      "sent_at_ms": 1786761600000,
+      "type": "heartbeat",
+      "payload": { "uptime_ms": 1, "last_rx_seq": 0, "state_version": 0 }
+    }
+  },
+  {
+    "name": "unknown top level property",
+    "expected_error": "INVALID_MESSAGE",
+    "message": {
+      "protocol_version": 1,
+      "message_id": "invalid-003",
+      "correlation_id": null,
+      "device_id": "p4home-demo",
+      "session_id": "session-invalid",
+      "seq": 3,
+      "sent_at_ms": 1786761600000,
+      "type": "heartbeat",
+      "payload": { "uptime_ms": 1, "last_rx_seq": 0, "state_version": 0 },
+      "unexpected": true
+    }
+  },
+  {
+    "name": "unknown room",
+    "expected_error": "UNKNOWN_ROOM",
+    "message": {
+      "protocol_version": 1,
+      "message_id": "invalid-004",
+      "correlation_id": null,
+      "device_id": "p4home-demo",
+      "session_id": "session-invalid",
+      "seq": 4,
+      "sent_at_ms": 1786761600000,
+      "type": "action.request",
+      "payload": {
+        "action_id": "action-invalid-room",
+        "tool": "character.go_to_room",
+        "arguments": { "room_id": "balcony" },
+        "deadline_at_ms": 1786761610000,
+        "origin": "test"
+      }
+    }
+  },
+  {
+    "name": "unsupported object action",
+    "expected_error": "UNSUPPORTED_TOOL",
+    "message": {
+      "protocol_version": 1,
+      "message_id": "invalid-005",
+      "correlation_id": null,
+      "device_id": "p4home-demo",
+      "session_id": "session-invalid",
+      "seq": 5,
+      "sent_at_ms": 1786761600000,
+      "type": "action.request",
+      "payload": {
+        "action_id": "action-unsupported",
+        "tool": "character.sit",
+        "arguments": { "target_id": "living_room.sofa" },
+        "deadline_at_ms": 1786761610000,
+        "origin": "test"
+      }
+    }
+  },
+  {
+    "name": "say text too long",
+    "expected_error": "INVALID_ARGUMENT",
+    "message": {
+      "protocol_version": 1,
+      "message_id": "invalid-006",
+      "correlation_id": null,
+      "device_id": "p4home-demo",
+      "session_id": "session-invalid",
+      "seq": 6,
+      "sent_at_ms": 1786761600000,
+      "type": "action.request",
+      "payload": {
+        "action_id": "action-long-text",
+        "tool": "character.say",
+        "arguments": { "text": "此字段在测试中会由校验器重复扩展到超过二百五十六个字符" },
+        "deadline_at_ms": 1786761610000,
+        "origin": "test"
+      }
+    },
+    "fixture_mutation": "repeat payload.arguments.text 20 times before validation"
+  }
+]
