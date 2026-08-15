@@ -1,7 +1,7 @@
 # Agent Phase 0 — Build Baseline & Contract Plan
 
-> Status: `in_progress`
-> Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
+> Status: `completed`
+> Architecture: [P4 Local Agent Architecture](../../../p4-local-agent-architecture.md)
 > Phase: 0 / Baseline & Contract
 > Depends on: none
 
@@ -44,7 +44,7 @@
 实际结果（2026-08-15）：加入运行期诊断采样后的全量干净构建通过，`.bin` 为
 `1,448,448 bytes`（当前 Phase 0 候选），静态 DIRAM 为 `297,196 / 576,464 bytes`（51.55%）。
 本机未安装 Ninja，CMake 实际使用
-Unix Makefiles。详见 [build baseline](../../evidence/agent-phase-0/build-baseline.md)。
+Unix Makefiles。详见 [build baseline](../../../../evidence/agent-phase-0/build-baseline.md)。
 
 runner 回归进一步确认忽略 `firmware/dependencies.lock` 会令全新 checkout 在线解析到不兼容的
 `esp_hosted 3.0.6`，与本地已验证的 `2.12.3` 漂移。Phase 0 改为提交 lock 文件，并在 workflow
@@ -64,7 +64,7 @@ runner 回归进一步确认忽略 `firmware/dependencies.lock` 会令全新 che
 实际结果（2026-08-15）：独立生成配置确认 ESP32-C6、Function Board、SDIO slot 1
 四线 40 MHz；配置日志没有 unknown Kconfig/attempt-to-assign。随后实机确认 Hosted transport、
 Wi-Fi DHCP、HA READY 和 C6 modem sleep 正常，15 分钟窗口重连计数为 0。详见
-[hardware regression](../../evidence/agent-phase-0/hardware-regression-2026-08-15.md)。
+[hardware regression](../../../../evidence/agent-phase-0/hardware-regression-2026-08-15.md)。
 
 ### P0.3 裁决 M6 遗留项
 
@@ -87,7 +87,7 @@ heartbeat 中 `events` 增加 27、`ignored_untracked` 增加 26、`stale` 不�
 `2042c8b1717ffe8664bdcee7f7b9b871d3be0ef818b1aaecb1095c8e460a5189`；它不含 workflow
 manifest，仅作为本次交互式实机验收的补充证据。此前受其他灯具手动操作污染的窗口不纳入
 判定。更广泛的米家设备覆盖仍按既有裁决延期。详见
-[M6 readiness](../../evidence/agent-phase-0/m6-readiness.md)。
+[M6 readiness](../../../../evidence/agent-phase-0/m6-readiness.md)。
 
 ### P0.4 采集运行期基线
 
@@ -105,7 +105,7 @@ manifest，仅作为本次交互式实机验收的补充证据。此前受其他
 108,479 B，PSRAM 约 32.25 MB；HA worker 栈余量 4,088 B。首轮 main task 栈余量只有
 660 B，随后将默认栈由 3,584 B 扩到 5,120 B，实机复测稳定为 2,196 B，Wi-Fi、HA、UI 与
 heap 无回归；异步 SNTP 也新增明确 PASS 标记。详见
-[hardware regression](../../evidence/agent-phase-0/hardware-regression-2026-08-15.md)。
+[hardware regression](../../../../evidence/agent-phase-0/hardware-regression-2026-08-15.md)。
 
 指标语义修正（2026-08-15）：`rejected` 只统计已跟踪实体的无效/拒绝更新；HA 全屋广播中未被面板
 跟踪的实体改记为 `ignored_untracked`，避免把正常过滤误报成数据质量故障。该改动已通过构建，等待
@@ -152,11 +152,12 @@ contracts/device-protocol/v1/
 ```
 
 实际结果（2026-08-15）：schema、消息 fixture 与协议说明已落到
-`contracts/device-protocol/v1/`，实现标记为 v1 候选。用户审阅发现的冻结阻塞项已经修订：新增
+`contracts/device-protocol/v1/`。用户审阅发现的冻结阻塞项已经修订：新增
 TLS + Bearer 设备认证与物理确认配对策略；用接收端单调时钟的 `timeout_ms` 取代有时钟偏差风险的
 绝对 deadline；幂等缓存跨 WebSocket session 保留至少 600,000 ms，并拒绝不同参数复用同一
 `action_id`；新增 `world.resync.request` 和 gap 后忽略增量直至关联 full snapshot 的规则；同时修复
-有效 fixture 中 action 生命周期与 correlation 的矛盾。等待用户复审后正式冻结。
+有效 fixture 中 action 生命周期与 correlation 的矛盾。最终一致性审计和 30 项合约测试通过后，
+Device Protocol v1 已于 2026-08-15 冻结；破坏性变更必须进入 protocol version 2。
 
 ### P0.6 冻结 Tool Schema v1
 
@@ -172,7 +173,8 @@ TLS + Bearer 设备认证与物理确认配对策略；用接收端单调时钟�
 实际结果（2026-08-15）：tool catalog、按工具分派的精确 result schema、错误码和 32 条中文黄金
 场景已落到 `contracts/tools/v1/`；场景覆盖全部房间和工具、七组以上有序多工具调用，以及否定、
 歧义、未知房间和越界能力的 no-tool 判定。catalog、protocol completed payload 与 tool result 的
-分派定义由测试交叉核对；等待用户复审后与 Device Protocol v1 一并冻结。
+分派定义由测试交叉核对。Tool Schema v1 已于 2026-08-15 与 Device Protocol v1 一并冻结；
+破坏性变更必须进入 Tool Schema v2。
 
 ### P0.7 建立合约测试
 
@@ -185,7 +187,7 @@ TLS + Bearer 设备认证与物理确认配对策略；用接收端单调时钟�
 实际结果（2026-08-15）：`./scripts/validate-agent-contracts.sh` 的 30 项标准库测试通过；新增覆盖认证
 失败、TLS 边界、相对 timeout 上下限、跨 session 幂等与过期、action ID 冲突、显式 resync、seq gap、
 五类精确结果、fixture 生命周期一致性，以及多工具等待前项终态和失败即停止；
-详见 [contract test evidence](../../evidence/agent-phase-0/contract-tests.md)。
+详见 [contract test evidence](../../../../evidence/agent-phase-0/contract-tests.md)。
 
 ### P0.8 固化硬件证据 harness
 
@@ -246,6 +248,6 @@ manifest 同时记录 app image 为 `1,448,448 bytes`，固件 SHA-256 为
 - [x] C6 Hosted 配置无 unknown warning；
 - [x] M6 遗留状态已明确；
 - [x] 运行期资源基线有实机证据；
-- [ ] Device Protocol v1 与 Tool Schema v1 review 通过；
+- [x] Device Protocol v1 与 Tool Schema v1 review 通过；
 - [x] fake contract tests 覆盖正常和关键故障路径；
-- [ ] 用户 review 通过后，将本计划归档并启动 Phase 1。
+- [x] 用户 review 后完成阻塞项修订，冻结 v1，将本计划归档并启动 Phase 1。

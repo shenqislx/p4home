@@ -76,7 +76,7 @@
 本次检查到的开发机为：
 
 - Mac mini，Apple M4 Pro，14 核，64 GB 统一内存；
-- Node.js `v22.16.0`；
+- Node.js `v24.14.0`（当前唯一已安装的 Node 主版本）；
 - Python `3.14.3`；
 - Ollama CLI `0.32.6` 已安装，但服务未运行，未确认本地已有模型。
 
@@ -160,9 +160,9 @@ agent/
     └── scenarios/
 ```
 
-推荐主 Runtime 使用 TypeScript + Node.js 22：
+推荐主 Runtime 使用 TypeScript + Node.js 24：
 
-- 当前环境已具备 Node.js 22；
+- 当前环境已具备 Node.js 24.14.0；workspace 固定 Node 24 主版本，避免文档目标与实际运行时漂移；
 - Ollama 提供官方 JavaScript/TypeScript 调用方式；
 - WebSocket、JSON Schema、Zod 类型校验和前后端调试链较直接；
 - 可避免把 Runtime 绑定到当前系统 Python 3.14 的生态兼容状态。
@@ -581,7 +581,7 @@ Autonomy 只能使用比用户交互更低的优先级；任何网络重连、�
 
 ### Phase 0 — Baseline & Contract
 
-执行计划：[Phase 0 — Build Baseline & Contract](./plans/2026-08-15-agent-phase-0-baseline-contract-plan.md)
+归档计划：[Phase 0 — Build Baseline & Contract](./archive/plans/agent/2026-08-15-agent-phase-0-baseline-contract-plan.md)
 
 交付：
 
@@ -591,7 +591,8 @@ Autonomy 只能使用比用户交互更低的优先级；任何网络重连、�
 - 冻结 Device Protocol v1 与 Tool Schema v1；
 - 建立 P4 simulator/fake transport 合约测试。
 
-退出条件：新机器或干净 build 目录可按文档一次构建成功；协议 Mock 测试通过。
+退出条件已于 2026-08-15 满足：新机器或干净 build 目录可按文档一次构建成功；协议 Mock 测试通过，
+Device Protocol v1 与 Tool Schema v1 已冻结。
 
 ### Phase 1 — Text Agent Runtime
 

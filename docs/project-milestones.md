@@ -20,8 +20,8 @@
 
 | Milestone | 状态 | 退出结果 |
 |---|---|---|
-| M7.0 Baseline & Contract | `in_progress` | 可重复构建、实机资源基线、协议 v1、Mock 合约测试 |
-| M7.1 Text Agent Runtime | `pending` | Ollama + 有限 Tool Loop + SQLite + eval |
+| M7.0 Baseline & Contract | `completed` | 可重复构建、实机资源基线、冻结协议 v1、Mock 合约测试 |
+| M7.1 Text Agent Runtime | `in_progress` | Ollama + 有限 Tool Loop + SQLite + eval |
 | M7.2 P4 Room-level World | `pending` | 房间级角色动作完整反馈闭环 |
 | M7.3 Object-level World | `pending` | sofa/window/desk 等对象级动作 |
 | M7.4 Home Assistant Tool | `pending` | Agent 直连 HA 的受限读写工具 |
@@ -45,14 +45,9 @@ Agent WebSocket。
 
 ## 4. 当前唯一允许推进的工作
 
-执行 [Phase 0 plan](./plans/2026-08-15-agent-phase-0-baseline-contract-plan.md)：
-
-1. 恢复与 ESP-IDF v5.5.4 匹配的构建工具链；
-2. 验证干净构建可恢复 ESP32-C6 Hosted 配置；
-3. 处理或登记 M6 真实设备遗留项；
-4. 采集运行期 heap/stack/网络/UI 基线；
-5. 冻结 Device Protocol v1 与 Tool Schema v1；
-6. 建立不依赖 Ollama 和实机的合约测试。
+执行 [Phase 1 plan](./plans/2026-08-15-agent-phase-1-text-runtime-plan.md)：建立不依赖真实 P4 的
+TypeScript Text Agent Runtime、有限顺序 Tool Loop、Ollama provider、SQLite 审计与中文 eval。
+Phase 2 的真实 P4 WebSocket 执行链保持未启动。
 
 ## 5. 状态更新规则
 

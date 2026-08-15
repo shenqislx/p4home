@@ -19,8 +19,8 @@
 
 | 顺序 | Phase | 状态 | 主要结果 | 计划 |
 |---|---|---|---|---|
-| 0 | Baseline & Contract | `in_progress` | 可重复构建、运行期基线、协议 v1、Mock | [Phase 0](./2026-08-15-agent-phase-0-baseline-contract-plan.md) |
-| 1 | Text Agent Runtime | `pending` | TypeScript Runtime、Ollama、有限 Tool Loop | [Phase 1](./2026-08-15-agent-phase-1-text-runtime-plan.md) |
+| 0 | Baseline & Contract | `completed` | 可重复构建、运行期基线、协议 v1、Mock | [Phase 0 归档](../archive/plans/agent/2026-08-15-agent-phase-0-baseline-contract-plan.md) |
+| 1 | Text Agent Runtime | `in_progress` | TypeScript Runtime、Ollama、有限 Tool Loop | [Phase 1](./2026-08-15-agent-phase-1-text-runtime-plan.md) |
 | 2 | P4 Room-level World | `pending` | 房间级 Character Action 闭环 | [Phase 2](./2026-08-15-agent-phase-2-p4-room-world-plan.md) |
 | 3 | Object-level World | `pending` | sofa 等对象锚点与交互动作 | [Phase 3](./2026-08-15-agent-phase-3-object-world-plan.md) |
 | 4 | Home Assistant Tool | `pending` | Agent 直连 HA 的受限读写工具 | [Phase 4](./2026-08-15-agent-phase-4-ha-tool-plan.md) |
@@ -30,19 +30,15 @@
 
 ## 下一步
 
-只执行 Phase 0：
+只执行 Phase 1：
 
-1. ~~恢复 ESP-IDF v5.5.4 对应工具链~~（2026-08-15 完成）；
-2. ~~从干净 build 目录验证 ESP32-C6 Hosted 配置可重建~~（2026-08-15 完成）；
-3. ~~关闭 M6 剩余的真实灯具 `call_service → 物理动作 → state_changed` 验收~~（2026-08-15 完成；书房吸顶灯隔离回归通过）；
-4. ~~采集固件短时 heap、stack、HA 与 UI 基线，并修复 main task 栈余量~~（2026-08-15 完成）；
-5. ~~连续运行现有 HA + Pixel Home 至少 2 小时，保存长跑日志~~（2026-08-15 完成；精确提交 `b0aa443` 的 [run 31875576865](https://github.com/shenqislx/p4home/actions/runs/31875576865) 功能判定通过）；
-6. ~~恢复自托管硬件 workflow/artifact contract，并固化 transport-only 判定边界~~（2026-08-15 完成；正式 run workflow 成功、artifact 完整性通过）；
-7. ~~澄清 `panel_data_store.rejected` 指标语义，拆分非白名单事件与真实拒绝~~（2026-08-15 完成并通过实机回归）；
-8. ~~完成 Device Protocol v1 与 Tool Schema v1 内部一致性 review~~；用户审阅发现的 v1 阻塞项已修订并补测，等待复审后冻结；
-9. ~~用 simulator/fake backend 建立协议合约测试~~（2026-08-15 完成）。
+1. 建立 Node.js 24 workspace 与 Runtime 分层目录；
+2. 导入并验证已冻结的 Device Protocol v1 与 Tool Schema v1；
+3. 实现不依赖真实 P4 的有限顺序 Tool Loop 和 Mock Character Tools；
+4. 接入 Ollama capability probe，并保持 provider 可替换；
+5. 建立 SQLite 审计、结构化日志、中文 eval 与最小调试入口。
 
-Phase 0 未通过前，不创建 `agent/` 生产实现，也不修改 P4 角色执行逻辑。
+Phase 1 不修改 P4 固件角色执行链，也不提前引入 Phase 2 的真实 WebSocket 控制。
 
 ## 历史入口
 

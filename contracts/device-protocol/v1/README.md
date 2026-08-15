@@ -1,6 +1,8 @@
 # P4 Device Protocol v1
 
-> Status: v1 review candidate; freeze after user review
+> Status: frozen
+> Frozen: 2026-08-15
+> Change policy: breaking changes require protocol version 2
 > Protocol version: `1`
 > Transport: WebSocket JSON text frames; binary audio is reserved for a later version
 

@@ -1,6 +1,6 @@
 # Agent Phase 1 — Text Agent Runtime Plan
 
-> Status: `pending`
+> Status: `in_progress`
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 0 complete
 
@@ -10,10 +10,10 @@
 
 ## 2. 实施步骤
 
-1. 建立 Node.js 22 workspace 与 `apps/runtime`、`packages/core`、`contracts`、`provider-ollama`、`domain-p4home`、`storage-sqlite`；
+1. 建立 Node.js 24 workspace 与 `apps/runtime`、`packages/core`、`contracts`、`provider-ollama`、`domain-p4home`、`storage-sqlite`；
 2. 导入并验证 Phase 0 的 JSON Schema；
 3. 实现 `AgentProfile / Session / Run / ToolCall / Action / Event` 类型；
-4. 实现带 `AbortSignal`、deadline、最大 4 轮 ToolCall 的 Run Loop；
+4. 实现带 `AbortSignal`、相对 timeout、每轮最多 4 个顺序 ToolCall 的 Run Loop；
 5. 实现 Ollama capability probe、generate、stream/cancel 能力边界；
 6. 接入原生 tool calling 与 structured output 校验；
 7. 实现 mock character tools 与安全 allowlist；

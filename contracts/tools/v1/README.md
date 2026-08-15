@@ -1,6 +1,8 @@
 # P4 Tool Schema v1
 
-> Status: v1 review candidate; freeze after user review
+> Status: frozen
+> Frozen: 2026-08-15
+> Change policy: breaking changes require Tool Schema v2
 > Tool schema version: `1`
 
 ## 1. Scope
