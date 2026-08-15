@@ -39,7 +39,7 @@
 5. ~~连续运行现有 HA + Pixel Home 至少 2 小时，保存长跑日志~~（2026-08-15 完成；精确提交 `b0aa443` 的 [run 31875576865](https://github.com/shenqislx/p4home/actions/runs/31875576865) 功能判定通过）；
 6. ~~恢复自托管硬件 workflow/artifact contract，并固化 transport-only 判定边界~~（2026-08-15 完成；正式 run workflow 成功、artifact 完整性通过）；
 7. ~~澄清 `panel_data_store.rejected` 指标语义，拆分非白名单事件与真实拒绝~~（2026-08-15 完成并通过实机回归）；
-8. ~~完成 Device Protocol v1 与 Tool Schema v1 内部一致性 review~~；用户审阅已完成，需先关闭审阅发现的 v1 阻塞项再冻结；
+8. ~~完成 Device Protocol v1 与 Tool Schema v1 内部一致性 review~~；用户审阅发现的 v1 阻塞项已修订并补测，等待复审后冻结；
 9. ~~用 simulator/fake backend 建立协议合约测试~~（2026-08-15 完成）。
 
 Phase 0 未通过前，不创建 `agent/` 生产实现，也不修改 P4 角色执行逻辑。

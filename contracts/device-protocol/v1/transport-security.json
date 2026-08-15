@@ -1,0 +1,27 @@
+{
+  "policy_version": 1,
+  "websocket_path": "/v1/device",
+  "tls": {
+    "required": true,
+    "insecure_exceptions": ["loopback_test", "simulator_test"],
+    "server_identity": "paired_spki_pin",
+    "certificate_rotation_requires_physical_confirmation": true
+  },
+  "authentication": {
+    "scheme": "Bearer",
+    "authorization_header": "Authorization",
+    "device_id_header": "X-P4-Device-ID",
+    "credential_scope": "single_device",
+    "minimum_token_entropy_bits": 256,
+    "reject_before_websocket_upgrade": true
+  },
+  "pairing": {
+    "requires_local_physical_confirmation": true,
+    "credential_delivery": "single_use_pairing_channel",
+    "supports_rotation": true,
+    "supports_revocation": true,
+    "pins_runtime_public_key": true,
+    "secret_allowed_in_json_messages": false,
+    "secret_allowed_in_logs": false
+  }
+}

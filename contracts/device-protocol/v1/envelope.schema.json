@@ -33,6 +33,7 @@
         "device.capabilities",
         "world.snapshot",
         "world.changed",
+        "world.resync.request",
         "user.text",
         "action.request",
         "action.accepted",

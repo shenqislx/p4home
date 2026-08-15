@@ -60,7 +60,7 @@
         "action_id": "action-invalid-room",
         "tool": "character.go_to_room",
         "arguments": { "room_id": "balcony" },
-        "deadline_at_ms": 1786761610000,
+        "timeout_ms": 10000,
         "origin": "test"
       }
     }
@@ -81,7 +81,7 @@
         "action_id": "action-unsupported",
         "tool": "character.sit",
         "arguments": { "target_id": "living_room.sofa" },
-        "deadline_at_ms": 1786761610000,
+        "timeout_ms": 10000,
         "origin": "test"
       }
     }
@@ -102,7 +102,7 @@
         "action_id": "action-long-text",
         "tool": "character.say",
         "arguments": { "text": "此字段在测试中会由校验器重复扩展到超过二百五十六个字符" },
-        "deadline_at_ms": 1786761610000,
+        "timeout_ms": 10000,
         "origin": "test"
       }
     },

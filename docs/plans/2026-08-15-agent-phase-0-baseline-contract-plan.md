@@ -134,7 +134,8 @@ watchdog、brownout、stack overflow、assert 或 `VERIFY:*:FAIL`。因此本轮
 - [x] 定义 envelope：version、message_id、correlation_id、device_id、seq、timestamp、type、payload；
 - [x] 定义 hello/capabilities/snapshot/heartbeat/error；
 - [x] 定义 action request/accepted/started/completed/failed/cancel；
-- [x] 定义错误码、deadline、幂等和重连对账规则；
+- [x] 定义错误码、相对 timeout、跨 session 幂等和显式 resync 对账规则；
+- [x] 定义 WebSocket TLS、设备 Bearer 认证、物理配对、轮换与撤销边界；
 - [x] 定义最大 JSON frame 与二进制音频边界；
 - [x] 生成 JSON Schema 示例和正反例 fixture；
 - [x] 完成协议、fixture、fake peer 与消息类型的一致性内部审查；
@@ -151,8 +152,11 @@ contracts/device-protocol/v1/
 ```
 
 实际结果（2026-08-15）：schema、消息 fixture 与协议说明已落到
-`contracts/device-protocol/v1/`，实现标记为 v1 候选。内部审查补齐了 action tool 与精确参数 schema
-的分派约束，并验证 envelope、消息分派、fixture 和 fake peer 类型集合一致；等待用户 review 后正式冻结。
+`contracts/device-protocol/v1/`，实现标记为 v1 候选。用户审阅发现的冻结阻塞项已经修订：新增
+TLS + Bearer 设备认证与物理确认配对策略；用接收端单调时钟的 `timeout_ms` 取代有时钟偏差风险的
+绝对 deadline；幂等缓存跨 WebSocket session 保留至少 600,000 ms，并拒绝不同参数复用同一
+`action_id`；新增 `world.resync.request` 和 gap 后忽略增量直至关联 full snapshot 的规则；同时修复
+有效 fixture 中 action 生命周期与 correlation 的矛盾。等待用户复审后正式冻结。
 
 ### P0.6 冻结 Tool Schema v1
 
@@ -160,12 +164,15 @@ contracts/device-protocol/v1/
 - [x] 仅暴露当前可实现的 `character.get_state/character.go_to_room/character.set_activity/character.say/world.get_snapshot`；
 - [x] 定义工具参数、结果与稳定错误码；
 - [x] 明确 `sit/look_at/interact` 不属于 v1；
-- [x] 建立 20 个中文意图到 ToolCall 的黄金场景。
+- [x] 建立至少 32 个中文意图到 ToolCall 的黄金场景；
+- [x] 为五个工具定义互不混用的精确成功结果 schema；
+- [x] 定义多工具顺序执行、前项成功后继续、失败即停止和每轮最多四项；
 - [x] 完成 tool catalog、protocol payload、result schema 与 golden intent 的一致性内部审查；
 
-实际结果（2026-08-15）：tool catalog、result schema、错误码和 20 条中文黄金场景已落到
-`contracts/tools/v1/`；其中对象级动作、未知房间和 Phase 4 HA 意图必须保持 no-tool。内部审查确认
-工具名、房间 ID、参数 schema 与错误码跨各来源一致；等待用户 review 后与 Device Protocol v1 一并冻结。
+实际结果（2026-08-15）：tool catalog、按工具分派的精确 result schema、错误码和 32 条中文黄金
+场景已落到 `contracts/tools/v1/`；场景覆盖全部房间和工具、七组以上有序多工具调用，以及否定、
+歧义、未知房间和越界能力的 no-tool 判定。catalog、protocol completed payload 与 tool result 的
+分派定义由测试交叉核对；等待用户复审后与 Device Protocol v1 一并冻结。
 
 ### P0.7 建立合约测试
 
@@ -175,7 +182,9 @@ contracts/device-protocol/v1/
 - [x] 验证队列满时 reject；
 - [x] 测试不依赖 Ollama 和真实 P4。
 
-实际结果（2026-08-15）：`./scripts/validate-agent-contracts.sh` 的 16 项标准库测试通过；
+实际结果（2026-08-15）：`./scripts/validate-agent-contracts.sh` 的 30 项标准库测试通过；新增覆盖认证
+失败、TLS 边界、相对 timeout 上下限、跨 session 幂等与过期、action ID 冲突、显式 resync、seq gap、
+五类精确结果、fixture 生命周期一致性，以及多工具等待前项终态和失败即停止；
 详见 [contract test evidence](../../evidence/agent-phase-0/contract-tests.md)。
 
 ### P0.8 固化硬件证据 harness

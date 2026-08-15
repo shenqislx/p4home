@@ -47,11 +47,39 @@
       },
       "additionalProperties": false
     },
+    "goToRoomResult": {
+      "type": "object",
+      "required": ["room_id"],
+      "properties": { "room_id": { "$ref": "#/$defs/roomId" } },
+      "additionalProperties": false
+    },
+    "setActivityResult": {
+      "type": "object",
+      "required": ["activity"],
+      "properties": { "activity": { "$ref": "#/$defs/activity" } },
+      "additionalProperties": false
+    },
+    "sayResult": {
+      "type": "object",
+      "required": ["text"],
+      "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 256 } },
+      "additionalProperties": false
+    },
+    "worldSnapshotResult": {
+      "type": "object",
+      "required": ["state_version", "observed_at_ms", "character"],
+      "properties": {
+        "state_version": { "type": "integer", "minimum": 0 },
+        "observed_at_ms": { "type": "integer", "minimum": 0 },
+        "character": { "$ref": "#/$defs/characterState" }
+      },
+      "additionalProperties": false
+    },
     "actionError": {
       "type": "object",
       "required": ["code", "message", "retryable"],
       "properties": {
-        "code": { "enum": ["INVALID_ARGUMENT", "UNSUPPORTED_TOOL", "UNKNOWN_ROOM", "QUEUE_FULL", "DEADLINE_EXCEEDED", "CANCELLED", "DEVICE_BUSY", "INTERNAL"] },
+        "code": { "enum": ["INVALID_ARGUMENT", "UNSUPPORTED_TOOL", "UNKNOWN_ROOM", "QUEUE_FULL", "DEADLINE_EXCEEDED", "CANCELLED", "DEVICE_BUSY", "ACTION_ID_CONFLICT", "INTERNAL"] },
         "message": { "type": "string", "minLength": 1, "maxLength": 256 },
         "retryable": { "type": "boolean" },
         "details": { "type": "object" }
@@ -78,11 +106,14 @@
         "actions": { "type": "array", "minItems": 5, "maxItems": 5, "uniqueItems": true, "items": { "$ref": "#/$defs/toolName" } },
         "limits": {
           "type": "object",
-          "required": ["max_json_frame_bytes", "action_queue_capacity", "say_text_max_chars"],
+          "required": ["max_json_frame_bytes", "action_queue_capacity", "say_text_max_chars", "action_timeout_min_ms", "action_timeout_max_ms", "idempotency_retention_ms"],
           "properties": {
             "max_json_frame_bytes": { "const": 16384 },
             "action_queue_capacity": { "const": 8 },
-            "say_text_max_chars": { "const": 256 }
+            "say_text_max_chars": { "const": 256 },
+            "action_timeout_min_ms": { "const": 100 },
+            "action_timeout_max_ms": { "const": 120000 },
+            "idempotency_retention_ms": { "const": 600000 }
           },
           "additionalProperties": false
         }
@@ -111,6 +142,15 @@
       },
       "additionalProperties": false
     },
+    "worldResyncRequest": {
+      "type": "object",
+      "required": ["reason", "last_applied_state_version"],
+      "properties": {
+        "reason": { "enum": ["seq_gap", "state_version_gap", "apply_failed", "requested"] },
+        "last_applied_state_version": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
     "userText": {
       "type": "object",
       "required": ["text", "locale", "source"],
@@ -123,12 +163,12 @@
     },
     "actionRequest": {
       "type": "object",
-      "required": ["action_id", "tool", "arguments", "deadline_at_ms", "origin"],
+      "required": ["action_id", "tool", "arguments", "timeout_ms", "origin"],
       "properties": {
         "action_id": { "$ref": "#/$defs/id" },
         "tool": { "$ref": "#/$defs/toolName" },
         "arguments": { "type": "object" },
-        "deadline_at_ms": { "type": "integer", "minimum": 0 },
+        "timeout_ms": { "type": "integer", "minimum": 100, "maximum": 120000 },
         "origin": { "enum": ["user", "agent", "autonomy", "test"] }
       },
       "allOf": [
@@ -190,13 +230,50 @@
     },
     "actionCompleted": {
       "type": "object",
-      "required": ["action_id", "completed_at_ms", "state_version", "result"],
+      "required": ["action_id", "tool", "completed_at_ms", "state_version", "result"],
       "properties": {
         "action_id": { "$ref": "#/$defs/id" },
+        "tool": { "$ref": "#/$defs/toolName" },
         "completed_at_ms": { "type": "integer", "minimum": 0 },
         "state_version": { "type": "integer", "minimum": 0 },
         "result": { "type": "object" }
       },
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "tool": { "const": "character.get_state" },
+                "result": { "$ref": "#/$defs/characterState" }
+              }
+            },
+            {
+              "properties": {
+                "tool": { "const": "character.go_to_room" },
+                "result": { "$ref": "#/$defs/goToRoomResult" }
+              }
+            },
+            {
+              "properties": {
+                "tool": { "const": "character.set_activity" },
+                "result": { "$ref": "#/$defs/setActivityResult" }
+              }
+            },
+            {
+              "properties": {
+                "tool": { "const": "character.say" },
+                "result": { "$ref": "#/$defs/sayResult" }
+              }
+            },
+            {
+              "properties": {
+                "tool": { "const": "world.get_snapshot" },
+                "result": { "$ref": "#/$defs/worldSnapshotResult" }
+              }
+            }
+          ]
+        }
+      ],
       "additionalProperties": false
     },
     "actionFailed": {
@@ -232,7 +309,7 @@
       "type": "object",
       "required": ["code", "message", "retryable"],
       "properties": {
-        "code": { "enum": ["INVALID_MESSAGE", "UNSUPPORTED_VERSION", "UNSUPPORTED_MESSAGE_TYPE", "FRAME_TOO_LARGE", "SEQ_OUT_OF_ORDER", "DUPLICATE_MESSAGE", "ACTION_NOT_FOUND", "INTERNAL"] },
+        "code": { "enum": ["INVALID_MESSAGE", "UNSUPPORTED_VERSION", "UNSUPPORTED_MESSAGE_TYPE", "FRAME_TOO_LARGE", "DEVICE_ID_MISMATCH", "SESSION_MISMATCH", "SEQ_OUT_OF_ORDER", "SEQ_GAP", "DUPLICATE_MESSAGE", "ACTION_NOT_FOUND", "INTERNAL"] },
         "message": { "type": "string", "minLength": 1, "maxLength": 256 },
         "retryable": { "type": "boolean" },
         "details": { "type": "object" }

@@ -10,6 +10,7 @@
         { "properties": { "type": { "const": "device.capabilities" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/deviceCapabilities" } } },
         { "properties": { "type": { "const": "world.snapshot" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/worldSnapshot" } } },
         { "properties": { "type": { "const": "world.changed" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/worldChanged" } } },
+        { "properties": { "type": { "const": "world.resync.request" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/worldResyncRequest" } } },
         { "properties": { "type": { "const": "user.text" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/userText" } } },
         { "properties": { "type": { "const": "action.request" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/actionRequest" } } },
         { "properties": { "type": { "const": "action.accepted" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/actionAccepted" } } },

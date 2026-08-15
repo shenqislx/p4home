@@ -1,5 +1,11 @@
 {
   "schema_version": 1,
+  "execution_policy": {
+    "mode": "sequential",
+    "start_next_after": "previous_terminal_success",
+    "on_error": "stop",
+    "max_calls_per_turn": 4
+  },
   "rooms": [
     { "id": "primary_bedroom", "display_name_zh": "主卧" },
     { "id": "study", "display_name_zh": "书房" },
@@ -13,6 +19,7 @@
       "name": "character.get_state",
       "description": "读取角色当前房间、活动、说话和动作状态。",
       "side_effect": false,
+      "result_schema_ref": "tool-result.schema.json#/$defs/characterState",
       "parameters": {
         "type": "object",
         "properties": {},
@@ -23,6 +30,7 @@
       "name": "character.go_to_room",
       "description": "让角色移动到一个已注册房间的站立点。",
       "side_effect": true,
+      "result_schema_ref": "tool-result.schema.json#/$defs/goToRoomResult",
       "parameters": {
         "type": "object",
         "required": ["room_id"],
@@ -38,6 +46,7 @@
       "name": "character.set_activity",
       "description": "设置角色可执行的房间级活动。",
       "side_effect": true,
+      "result_schema_ref": "tool-result.schema.json#/$defs/setActivityResult",
       "parameters": {
         "type": "object",
         "required": ["activity"],
@@ -51,6 +60,7 @@
       "name": "character.say",
       "description": "在面板角色气泡中显示一段简短文本。",
       "side_effect": true,
+      "result_schema_ref": "tool-result.schema.json#/$defs/sayResult",
       "parameters": {
         "type": "object",
         "required": ["text"],
@@ -64,6 +74,7 @@
       "name": "world.get_snapshot",
       "description": "读取面板当前完整房间级世界快照。",
       "side_effect": false,
+      "result_schema_ref": "tool-result.schema.json#/$defs/worldSnapshotResult",
       "parameters": {
         "type": "object",
         "properties": {},
