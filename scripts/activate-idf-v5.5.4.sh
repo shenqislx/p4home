@@ -24,7 +24,9 @@ is_sourced || {
     exit 1
 }
 
-. "$USER_ACTIVATE_SCRIPT"
+# The user-level helper probes $1 for its executable mode. Pass an explicit
+# empty argument so sourcing also works when callers enable `set -u`.
+. "$USER_ACTIVATE_SCRIPT" ""
 
 IDF_VERSION_OUTPUT=$(idf.py --version 2>/dev/null || true)
 
