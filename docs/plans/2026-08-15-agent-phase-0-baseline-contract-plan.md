@@ -69,16 +69,24 @@ Wi-Fi DHCP、HA READY 和 C6 modem sleep 正常，15 分钟窗口重连计数为
 ### P0.3 裁决 M6 遗留项
 
 - [x] 恢复 HA 可达性；
-- [ ] 实机点击至少一个真实灯具；
-- [ ] 确认 `call_service` 成功、设备动作与 `state_changed` 回刷；
+- [x] 实机点击至少一个真实灯具；
+- [x] 确认 `call_service` 成功、设备动作与 `state_changed` 回刷；
 - [x] 记录米家闭环是完成、延期还是移出当前范围；
 - [x] 将结论写入新的 `docs/project-milestones.md`。
 
 说明：若外部 HA/米家条件暂不可用，可以明确登记为已知债务，但 Phase 2 不得同时修改未经验证的 HA 主链。
 
 实际结果（2026-08-15）：Mac 到 HA `192.168.71.4:8123` 的 TCP 与 HTTP 检查通过；随后
-P4 实机也恢复 Wi-Fi/HA READY，并持续接收 `state_changed`。真实灯具、`call_service`、
-物理动作与对应回刷仍未执行，必须在 Phase 2 修改 P4 实时链路前关闭。详见
+P4 实机也恢复 Wi-Fi/HA READY，并持续接收 `state_changed`。隔离回归仅操作书房吸顶灯
+`switch.xiaomi_cn_2102810987_w2_on_p_3_1`：用户先确认灯具为“灭”，串口记录唯一一次
+`VERIFY:ha:call_service:PASS id=58 domain=switch service=turn_on`，用户随后确认“已亮”。相邻
+heartbeat 中 `events` 增加 27、`ignored_untracked` 增加 26、`stale` 不变，差值恰好为 1 条
+受跟踪实体事件；同时 HA 保持 READY，`reconnect/offline/rejected` 均为 0。因此该代表性真实
+灯具的 `call_service → 物理动作 → state_changed` 闭环判定通过。原始本地串口捕获
+`/tmp/p4home-study-ceiling-isolated.log` 的 SHA-256 为
+`2042c8b1717ffe8664bdcee7f7b9b871d3be0ef818b1aaecb1095c8e460a5189`；它不含 workflow
+manifest，仅作为本次交互式实机验收的补充证据。此前受其他灯具手动操作污染的窗口不纳入
+判定。更广泛的米家设备覆盖仍按既有裁决延期。详见
 [M6 readiness](../../evidence/agent-phase-0/m6-readiness.md)。
 
 ### P0.4 采集运行期基线

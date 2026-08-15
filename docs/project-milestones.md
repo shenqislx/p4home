@@ -10,8 +10,8 @@
 
 - M0–M5 已形成固件、显示、触摸、音频/ESP-SR 骨架、HA 读侧和 UI 基线；
 - M6 已实现 HA `call_service` 与主要控制 UI；2026-08-15 已恢复 P4 串口、Wi-Fi、HA READY 与
-  `state_changed` 接收，但真实设备点击、物理动作和对应状态回刷尚未执行，必须在 Phase 2 修改
-  P4 实时链路前补验；
+  `state_changed` 接收，并完成书房吸顶灯的隔离实机闭环；更广泛的米家设备覆盖仍作为
+  Phase 2 前需明确边界的延期项；
 - M7.0 候选提交 `b0aa443` 已通过 7,200 秒 HA + Pixel Home 实机稳定性回归，workflow、artifact
   完整性与功能判定均通过；
 - 旧里程碑全文已归档到 [project-milestones-through-m6.md](./archive/records/project/project-milestones-through-m6.md)。
@@ -36,11 +36,12 @@
 | HAOS 服务 | `reachable` | `192.168.71.4:8123` TCP 成功、HTTP 200 |
 | P4 串口 | `available` | `/dev/cu.usbserial-210`，已完成多轮烧录与原始串口采集 |
 | P4 网络与 HA | `ready` | DHCP 地址 `192.168.110.87`，HA 首次同步完成且持续接收事件 |
-| 真实灯具点击与状态回刷 | `deferred` | 板卡可用后在 Phase 0 硬件窗口补验 |
-| 米家闭环 | `deferred` | 不移出范围；Phase 2 前形成完成证据或独立债务裁决 |
+| 真实灯具点击与状态回刷 | `passed` | 书房吸顶灯隔离回归完成：初始灭、单次 `turn_on`、用户确认已亮，计数差对应 1 条受跟踪实体回刷 |
+| 米家闭环 | `deferred` | 代表性小米灯具已通过；更广泛设备覆盖不移出范围，Phase 2 前维持独立债务裁决 |
 
-本裁决允许继续完成纯合约和 Mock 工作，但不等于 M6 实机闭环通过，也不允许
-Phase 2 在未隔离风险时同时改动 HA 主链和新的 Agent WebSocket。
+代表性真实灯具的 M6 控制闭环已经通过；这不等于所有米家设备均已验收。Phase 2 若涉及
+更广泛设备覆盖，仍须维持独立验证边界，不得在未隔离风险时同时改动 HA 主链和新的
+Agent WebSocket。
 
 ## 4. 当前唯一允许推进的工作
 
