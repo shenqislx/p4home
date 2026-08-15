@@ -35,7 +35,6 @@ jobs:
       SERIAL_PORT: ${{ inputs.serial_port }}
       MONITOR_SECONDS: ${{ inputs.monitor_seconds }}
       IDF_SKIP_CHECK_SUBMODULES: "1"
-      BUILD_DIR: ${{ runner.temp }}/p4home-hardware-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Checkout repository
@@ -54,6 +53,7 @@ jobs:
           PY
           test -f scripts/activate-idf-v5.5.4.sh
           test -f "$HOME/.espressif/tools/activate_idf_v5.5.4.sh"
+          echo "BUILD_DIR=$RUNNER_TEMP/p4home-hardware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
 
       - name: Prepare private hardware sdkconfig
         env:
