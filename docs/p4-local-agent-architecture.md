@@ -94,9 +94,13 @@ Phase 0 已补齐 ESP-IDF v5.5.4 manifest 要求的
 - `ESP_HOSTED_SDIO_HOST_INTERFACE=y`；
 - 配置日志没有 unknown Kconfig 或 attempt-to-assign 警告。
 
-构建环境阻塞已经解除。剩余门禁是实机 Wi-Fi/HA/modem sleep 回归、运行期
-heap/stack 与长跑证据；在这些证据完成前，不把静态构建结论扩大为实机稳定性结论。
-本阶段不更新 ESP-IDF 或 managed component 版本。
+构建环境阻塞已经解除。精确提交 `b0aa443374360324a4a27dcc5a38c0a1849b0b45` 已在自托管
+ESP32-P4 runner 完成构建、烧录与 7,200 秒串口采集；HA 全程 READY 且零重连、Pixel Home
+heartbeat 稳定，heap/stack 无趋势性恶化，也未出现重启、panic、watchdog 或断言失败。workflow、
+artifact 完整性与功能判定均已分别通过，因此可以把本候选的静态构建结论扩大为两小时实机稳定性
+基线。正式证据见 Phase 0 计划中的
+[run 31875576865](https://github.com/shenqislx/p4home/actions/runs/31875576865)。本阶段不更新
+ESP-IDF 或 managed component 版本。
 
 ## 3. 优化后的系统边界
 

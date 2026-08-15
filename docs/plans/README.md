@@ -36,8 +36,8 @@
 2. ~~从干净 build 目录验证 ESP32-C6 Hosted 配置可重建~~（2026-08-15 完成）；
 3. 关闭 M6 剩余的真实灯具 `call_service → 物理动作 → state_changed` 验收；
 4. ~~采集固件短时 heap、stack、HA 与 UI 基线，并修复 main task 栈余量~~（2026-08-15 完成）；
-5. 连续运行现有 HA + Pixel Home 至少 2 小时，保存长跑日志（首轮发现私密 sdkconfig 配置漂移后停止；合并修复构建已通过，待精确提交烧录后重新计时）；
-6. ~~恢复自托管硬件 workflow/artifact contract，并固化 transport-only 判定边界~~（2026-08-15 完成；首次远端 run 为 `infra-fail`，严格 shell 修复待推送后重跑）；
+5. ~~连续运行现有 HA + Pixel Home 至少 2 小时，保存长跑日志~~（2026-08-15 完成；精确提交 `b0aa443` 的 [run 31875576865](https://github.com/shenqislx/p4home/actions/runs/31875576865) 功能判定通过）；
+6. ~~恢复自托管硬件 workflow/artifact contract，并固化 transport-only 判定边界~~（2026-08-15 完成；正式 run workflow 成功、artifact 完整性通过）；
 7. ~~澄清 `panel_data_store.rejected` 指标语义，拆分非白名单事件与真实拒绝~~（2026-08-15 完成并通过实机回归）；
 8. ~~完成 Device Protocol v1 与 Tool Schema v1 内部一致性 review~~，等待用户 review 后正式冻结；
 9. ~~用 simulator/fake backend 建立协议合约测试~~（2026-08-15 完成）。

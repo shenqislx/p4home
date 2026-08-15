@@ -12,6 +12,8 @@
 - M6 已实现 HA `call_service` 与主要控制 UI；2026-08-15 已恢复 P4 串口、Wi-Fi、HA READY 与
   `state_changed` 接收，但真实设备点击、物理动作和对应状态回刷尚未执行，必须在 Phase 2 修改
   P4 实时链路前补验；
+- M7.0 候选提交 `b0aa443` 已通过 7,200 秒 HA + Pixel Home 实机稳定性回归，workflow、artifact
+  完整性与功能判定均通过；
 - 旧里程碑全文已归档到 [project-milestones-through-m6.md](./archive/records/project/project-milestones-through-m6.md)。
 
 ## 2. M7 分阶段里程碑

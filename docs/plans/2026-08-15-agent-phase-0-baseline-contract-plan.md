@@ -87,7 +87,7 @@ P4 实机也恢复 Wi-Fi/HA READY，并持续接收 `state_changed`。真实灯�
 - [x] 记录启动后 internal/PSRAM free heap；
 - [x] 记录 minimum free heap 与 largest internal block；
 - [x] 记录主要任务 stack high-water mark；
-- [ ] 连续运行现有 HA + Pixel Home 至少 2 小时；
+- [x] 连续运行现有 HA + Pixel Home 至少 2 小时；
 - [x] 记录 UI 8 FPS heartbeat、HA event rate、重连次数；
 - [x] 保存串口日志与基线摘要到 `evidence/agent-phase-0/`。
 - [x] 将非白名单 HA 事件与真实数据拒绝拆分为独立指标。
@@ -96,7 +96,7 @@ P4 实机也恢复 Wi-Fi/HA READY，并持续接收 `state_changed`。真实灯�
 72→204，UI FX 到 tick 6912 且 `denied=0`。steady internal free 约 145 KB、minimum
 108,479 B，PSRAM 约 32.25 MB；HA worker 栈余量 4,088 B。首轮 main task 栈余量只有
 660 B，随后将默认栈由 3,584 B 扩到 5,120 B，实机复测稳定为 2,196 B，Wi-Fi、HA、UI 与
-heap 无回归；异步 SNTP 也新增明确 PASS 标记。2 小时长跑仍未完成。详见
+heap 无回归；异步 SNTP 也新增明确 PASS 标记。详见
 [hardware regression](../../evidence/agent-phase-0/hardware-regression-2026-08-15.md)。
 
 指标语义修正（2026-08-15）：`rejected` 只统计已跟踪实体的无效/拒绝更新；HA 全屋广播中未被面板
@@ -109,7 +109,17 @@ heap 无回归；异步 SNTP 也新增明确 PASS 标记。2 小时长跑仍未�
 写后哈希校验。首轮长跑约 4 分钟时确认 HA READY、`reconnect=0`、`offline=0`、`rejected=0`，
 但同时发现 runner 私密全量 sdkconfig 把仓库的 main task 5,120 B 栈配置回退为 3,584 B，故主动停止，
 不计为最终长跑证据。新增的配置合并器已通过单测和全新隔离构建，ESP-IDF 生成配置中的新旧栈符号
-均为 5,120；等待提交精确候选、重新烧录并从零开始 7,200 秒采集。
+均为 5,120。
+
+最终候选提交 `b0aa443374360324a4a27dcc5a38c0a1849b0b45` 的正式 run
+[`31875576865`](https://github.com/shenqislx/p4home/actions/runs/31875576865) 已完成从零构建、烧录和
+7,200 秒串口采集。239 个 heartbeat 覆盖 `7,196,578 ms`，间隔为 `30,039–30,050 ms`；HA 239 个
+采样全部为 `READY`，`reconnect=0`、`offline=0`、`rejected=0`，事件计数最终为 247。
+internal free heap 最低 `142,283 B`、最后 `145,899 B`，minimum free heap 最低 `107,807 B`，
+PSRAM free 最低及最后均为 `32,255,108 B`；main task stack high-water mark 全程为 `2,196 B`，
+HA worker 最低为 `4,088 B`。UI 共 844 个采样，最终 tick 54,016，`denied=0`；无重启、panic、
+watchdog、brownout、stack overflow、assert 或 `VERIFY:*:FAIL`。因此本轮对现有 HA + Pixel Home
+稳定性的功能判定为通过。
 
 ### P0.5 冻结 Device Protocol v1
 
@@ -166,7 +176,7 @@ contracts/device-protocol/v1/
 - [x] 固定 artifact 名称与 `monitor.log`、`hardware-validation-manifest.json` 契约；
 - [x] workflow 只负责传输证据，不用日志 grep 代替功能判定；
 - [x] 将私密硬件配置限制在 GitHub Secret 或 runner 本机配置，不写入仓库；
-- [ ] 在 `feature/agent-harness` 的精确提交上完成一次 7,200 秒 workflow 回归并验证 artifact 完整性。
+- [x] 在 `feature/agent-harness` 的精确提交上完成一次 7,200 秒 workflow 回归并验证 artifact 完整性。
 
 实际结果（2026-08-15）：workflow 与操作说明已恢复并按当前 artifact contract 更新，YAML 解析通过；
 本地与 runner 已统一使用无交互 TTY 的原始串口采集脚本。远端 run
@@ -180,7 +190,21 @@ contracts/device-protocol/v1/
 精确 SHA `c51fa4a` 的 run
 [`31875154927`](https://github.com/shenqislx/p4home/actions/runs/31875154927) 已通过 checkout、harness 单测和
 私密配置合并，但因仓库忽略 dependency lock 而解析到 `esp_hosted 3.0.6`，SDIO Kconfig 不兼容，仍判为
-`infra-fail`；flash/capture 未执行。依赖锁修复提交后需再次触发同一分支的 7,200 秒 run。
+`infra-fail`；flash/capture 未执行。
+
+依赖锁修复后的精确 SHA `b0aa443374360324a4a27dcc5a38c0a1849b0b45` 已由 run
+[`31875576865`](https://github.com/shenqislx/p4home/actions/runs/31875576865) 完成正式回归，三层结论如下：
+
+- workflow 状态：`completed/success`，build、flash、7,200 秒 capture、manifest 检查和 artifact 上传全部成功；
+- artifact 完整性：通过；manifest SHA-256 为
+  `cc2f5b25db3e2a68339efcf53925a604e328aa356e325e7e96f94e7b6ca72e30`，`monitor.log` SHA-256 为
+  `507287844bcbe88932d53b3aeec0bd861b2a6499ce9963a5d0a6f05708d19b4a`；manifest 的 run id、job、
+  精确 git SHA、7,200 秒时长、5,120 B main stack 与仓库 dependency lock 哈希均匹配；
+- 功能判定：通过；两小时窗口内 HA、Pixel Home、资源和故障指标均满足 P0.4 基线。
+
+manifest 同时记录 app image 为 `1,448,448 bytes`，固件 SHA-256 为
+`e36373e9b09ef73cd48422cd0da844a61bf85bd18ae31c184f45c8454c5ba507`，dependency lock SHA-256 为
+`f5f93d246735422a250bbb10dabb05338481f1c21556deebb2881e72e2275860`。
 
 ## 4. 验证矩阵
 
