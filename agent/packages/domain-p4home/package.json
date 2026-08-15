@@ -1,0 +1,10 @@
+{
+  "name": "@p4home/domain-p4home",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@p4home/core": "workspace:*"
+  }
+}

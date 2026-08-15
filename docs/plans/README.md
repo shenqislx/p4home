@@ -1,7 +1,7 @@
 # P4 Home 当前工作计划
 
 > Current Focus: [P4 Home 本地 LLM Agent 化架构](../p4-local-agent-architecture.md)
-> Updated: 2026-08-15
+> Updated: 2026-08-16
 > Working Branch: `feature/agent-harness`
 
 ## 工作规则
@@ -32,7 +32,7 @@
 
 只执行 Phase 1：
 
-1. 建立 Node.js 24 workspace 与 Runtime 分层目录；
+1. 建立 Node.js 24.19 LTS workspace 与 Runtime 分层目录；
 2. 导入并验证已冻结的 Device Protocol v1 与 Tool Schema v1；
 3. 实现不依赖真实 P4 的有限顺序 Tool Loop 和 Mock Character Tools；
 4. 接入 Ollama capability probe，并保持 provider 可替换；

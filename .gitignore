@@ -15,6 +15,9 @@ venv/
 .idea/
 *.code-workspace
 
+# Node.js / pnpm local cache
+.pnpm-store/
+
 # -----------------------------------------------------------------------------
 # ESP-IDF — main firmware (`firmware/`)
 # Commit sdkconfig.defaults and dependencies.lock; do not commit generated sdkconfig.

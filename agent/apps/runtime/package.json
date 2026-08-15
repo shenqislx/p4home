@@ -1,0 +1,13 @@
+{
+  "name": "@p4home/runtime",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "@p4home/contracts": "workspace:*",
+    "@p4home/core": "workspace:*",
+    "@p4home/domain-p4home": "workspace:*",
+    "@p4home/provider-ollama": "workspace:*",
+    "@p4home/storage-sqlite": "workspace:*"
+  }
+}

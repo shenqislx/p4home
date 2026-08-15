@@ -76,7 +76,7 @@
 本次检查到的开发机为：
 
 - Mac mini，Apple M4 Pro，14 核，64 GB 统一内存；
-- Node.js `v24.14.0`（当前唯一已安装的 Node 主版本）；
+- 仓库根目录与 Agent workspace 均以 `.nvmrc` 固定 Node.js `v24.19.0`；Node 22 仅保留为本机回退环境，不参与本 workspace；
 - Python `3.14.3`；
 - Ollama CLI `0.32.6` 已安装，但服务未运行，未确认本地已有模型。
 
@@ -160,9 +160,9 @@ agent/
     └── scenarios/
 ```
 
-推荐主 Runtime 使用 TypeScript + Node.js 24：
+推荐主 Runtime 使用 TypeScript + Node.js 24 LTS：
 
-- 当前环境已具备 Node.js 24.14.0；workspace 固定 Node 24 主版本，避免文档目标与实际运行时漂移；
+- workspace 固定 Node.js 24.19+ 且限制在 Node 24 主版本，pnpm、测试与实际 Runtime 使用同一版本，避免双版本漂移；
 - Ollama 提供官方 JavaScript/TypeScript 调用方式；
 - WebSocket、JSON Schema、Zod 类型校验和前后端调试链较直接；
 - 可避免把 Runtime 绑定到当前系统 Python 3.14 的生态兼容状态。
