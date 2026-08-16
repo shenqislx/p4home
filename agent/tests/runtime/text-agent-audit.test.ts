@@ -6,7 +6,11 @@ import {
   createJsonLineLogger,
   runTextAgent,
 } from "@p4home/runtime";
-import type { OllamaChatResult, OllamaProvider } from "@p4home/provider-ollama";
+import {
+  OllamaProviderError,
+  type OllamaChatResult,
+  type OllamaProvider,
+} from "@p4home/provider-ollama";
 import { SqliteAuditStore } from "@p4home/storage-sqlite";
 
 async function seedSession(store: SqliteAuditStore): Promise<void> {
@@ -90,6 +94,10 @@ test("text agent persists messages, tool calls, results and events as one run tr
   );
   assert.equal(trace.tool_calls[0]?.status, "success");
   assert.deepEqual(trace.tool_calls[0]?.arguments, { room_id: "study" });
+  assert.equal(
+    trace.events.find((event) => event.type === "tool.completed")?.payload.tool_call_id,
+    "run-audit:tool:1",
+  );
   assert.deepEqual(
     trace.events.map((event) => event.type),
     [
@@ -218,4 +226,94 @@ test("an optional structured-log sink failure does not change the persisted run 
   assert.equal(result.status, "completed");
   assert.equal(trace?.run.status, "completed");
   assert.equal(trace?.events.at(-1)?.type, "run.completed");
+});
+
+test("an audited run exposes only tools allowed by its session profile", async () => {
+  using store = new SqliteAuditStore(":memory:");
+  await seedSession(store);
+  let exposedTools: readonly string[] = [];
+  const provider: Pick<OllamaProvider, "chat"> = {
+    async chat(request): Promise<OllamaChatResult> {
+      exposedTools = (request.tools ?? []).map((tool) => tool.function.name);
+      return response("完成。");
+    },
+  };
+
+  const result = await runTextAgent({
+    run_id: "run-profile-allowlist",
+    user_text: "完成测试",
+    provider,
+    tools: createMockP4HomeDomain().tools,
+    audit: { store, session_id: "session-audit" },
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(exposedTools, ["character.go_to_room"]);
+});
+
+test("a backward wall clock is clamped without losing a completed tool outcome", async () => {
+  using store = new SqliteAuditStore(":memory:");
+  await seedSession(store);
+  const domain = createMockP4HomeDomain();
+  const responses = [
+    response("", [{
+      type: "function",
+      function: {
+        index: 0,
+        name: "character.go_to_room",
+        arguments: { room_id: "study" },
+      },
+    }]),
+    response("已完成。"),
+  ];
+  const provider: Pick<OllamaProvider, "chat"> = {
+    async chat(): Promise<OllamaChatResult> {
+      const next = responses.shift();
+      assert.ok(next !== undefined);
+      return next;
+    },
+  };
+  let now = 2_000;
+
+  const result = await runTextAgent({
+    run_id: "run-clock-rollback",
+    user_text: "去书房",
+    provider,
+    tools: domain.tools,
+    audit: {
+      store,
+      session_id: "session-audit",
+      clock: () => now--,
+    },
+  });
+  const trace = await store.getRunTrace("run-clock-rollback");
+
+  assert.equal(result.status, "completed");
+  assert.equal(domain.getState().room_id, "study");
+  assert.equal(trace?.run.status, "completed");
+  assert.equal(trace?.tool_calls[0]?.status, "success");
+  assert.equal(trace?.events.at(-1)?.type, "run.completed");
+});
+
+test("a returned provider timeout uses a distinct terminal audit event", async () => {
+  using store = new SqliteAuditStore(":memory:");
+  await seedSession(store);
+  const provider: Pick<OllamaProvider, "chat"> = {
+    async chat(): Promise<OllamaChatResult> {
+      throw new OllamaProviderError("TIMEOUT", "model timeout", { retryable: true });
+    },
+  };
+
+  const result = await runTextAgent({
+    run_id: "run-audit-timeout",
+    user_text: "等待",
+    provider,
+    tools: createMockP4HomeDomain().tools,
+    audit: { store, session_id: "session-audit" },
+  });
+  const trace = await store.getRunTrace("run-audit-timeout");
+
+  assert.equal(result.status, "timed_out");
+  assert.equal(trace?.run.status, "timed_out");
+  assert.equal(trace?.events.at(-1)?.type, "run.timed_out");
 });

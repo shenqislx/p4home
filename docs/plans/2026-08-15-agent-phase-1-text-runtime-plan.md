@@ -89,6 +89,21 @@ harness 测试继续通过。本机 Ollama `0.32.6` + `qwen3:8b` 的 4 项显式
 其中有限文本 Agent Loop 已同时断言真实模型 ToolCall 的 SQLite 终态 trace；测试后已停止临时
 Ollama 服务。
 
+SQLite 风险边界修订（2026-08-16）：优先关闭会影响当前 Demo 的问题。Runtime 现在从审计
+Session 读取 AgentProfile，并以 `allowed_tools` 和进程工具表的交集构造模型可见及可执行工具；
+Run 启动、模型完成、Tool 请求/结果和 Run 终态分别通过 batch transaction 原子写入。Tool 事件
+在 SQLite payload 中保存 `tool_call_id`；Run 终止前检查不存在 pending ToolCall 或未终止 Action；
+审计时间对 wall clock 回拨执行单调钳制；`getRunTrace()` 改为直接按 `run_id` 在同一读快照查询。
+`failed / cancelled / timed_out` 使用独立终态事件，不再伪装为 `run.completed`。
+
+新增 6 项风险回归后确定性测试为 56 项，覆盖 Profile 越权、回拨时钟、provider timeout 终态、
+pending ToolCall 拒绝、batch rollback 和并发终态写入前的 trace 快照。同步 SQLite Worker、数据库
+身份与 migration、文件权限/加密、Profile revision、断电耐久、配额/分页和启动 reconciliation
+等生产化事项延后，并记录在
+[Agent SQLite Production TODO](./2026-08-16-agent-sqlite-production-todo.md)。修复后再次执行本机
+`qwen3:8b` 的 4 项显式 live 回归，真实 ToolCall + Mock Tool + SQLite trace 闭环全部通过，临时
+Ollama 服务已停止。
+
 下一项工作为第 10–11 步：建立中文黄金场景 eval、固定上下文的性能基线，并提供最小调试入口，
 继续保持不接真实 P4。
 

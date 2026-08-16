@@ -96,6 +96,25 @@ function modelTools(tools: ReadonlyMap<string, ToolDefinition>): readonly Ollama
     .map((tool) => ({ type: "function", function: tool }));
 }
 
+async function authorizedTools(
+  options: TextAgentRunOptions,
+): Promise<ReadonlyMap<string, ToolDefinition>> {
+  if (options.audit === undefined) {
+    return options.tools;
+  }
+  const profile = await options.audit.store.getSessionAgentProfile(options.audit.session_id);
+  if (profile === null) {
+    throw new TextAgentError(
+      "INVALID_CONFIGURATION",
+      `audit session ${options.audit.session_id} has no agent profile`,
+    );
+  }
+  const allowed = new Set(profile.allowed_tools);
+  return new Map(
+    [...options.tools].filter(([name]) => allowed.has(name)),
+  );
+}
+
 function isAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
 }
@@ -292,17 +311,26 @@ async function runTextAgentLoop(
 export async function runTextAgent(options: TextAgentRunOptions): Promise<TextAgentRunResult> {
   const maxToolRounds = validateOptions(options);
   const systemPrompt = options.system_prompt ?? DEFAULT_SYSTEM_PROMPT;
+  const tools = await authorizedTools(options);
+  const effectiveOptions = tools === options.tools ? options : { ...options, tools };
   const audit =
     options.audit === undefined
       ? undefined
       : new TextAgentAuditTrail(options.run_id, options.audit);
   await audit?.start(systemPrompt, options.user_text);
   try {
-    const result = await runTextAgentLoop(options, maxToolRounds, systemPrompt, audit);
+    const result = await runTextAgentLoop(effectiveOptions, maxToolRounds, systemPrompt, audit);
     await audit?.finish(result);
     return result;
   } catch (error) {
-    await audit?.fail(error);
+    try {
+      await audit?.fail(error);
+    } catch (auditError) {
+      throw new AggregateError(
+        [error, auditError],
+        "text agent failed and its audit trail could not be finalized",
+      );
+    }
     throw error;
   }
 }

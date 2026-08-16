@@ -26,6 +26,27 @@ export interface RunAuditTrace {
   readonly events: readonly Event[];
 }
 
+export interface AuditToolCallWrite {
+  readonly run_id: string;
+  readonly call: ToolCall;
+  readonly created_at_ms: number;
+}
+
+export interface AuditToolResultWrite {
+  readonly run_id: string;
+  readonly result: ToolResult;
+  readonly completed_at_ms: number;
+}
+
+export interface AuditWriteBatch {
+  readonly run?: Run;
+  readonly messages?: readonly Message[];
+  readonly tool_calls?: readonly AuditToolCallWrite[];
+  readonly tool_results?: readonly AuditToolResultWrite[];
+  readonly actions?: readonly Action[];
+  readonly events?: readonly Event[];
+}
+
 export interface AuditStore {
   saveAgentProfile(profile: AgentProfile): Promise<void>;
   saveSession(session: Session): Promise<void>;
@@ -35,6 +56,8 @@ export interface AuditStore {
   saveAction(action: Action): Promise<void>;
   saveToolResult(runId: string, result: ToolResult, completedAtMs: number): Promise<void>;
   appendEvent(event: Event): Promise<void>;
+  writeBatch(batch: AuditWriteBatch): Promise<void>;
+  getSessionAgentProfile(sessionId: string): Promise<AgentProfile | null>;
   getRunTrace(runId: string): Promise<RunAuditTrace | null>;
   listSessionMessages(sessionId: string): Promise<readonly Message[]>;
 }

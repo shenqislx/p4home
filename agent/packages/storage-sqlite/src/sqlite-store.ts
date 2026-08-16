@@ -12,7 +12,12 @@ import type {
   ToolResult,
 } from "@p4home/core";
 
-import type { AuditStore, RunAuditTrace, StoredToolCall } from "./types.ts";
+import type {
+  AuditStore,
+  AuditWriteBatch,
+  RunAuditTrace,
+  StoredToolCall,
+} from "./types.ts";
 
 const SCHEMA_VERSION = 1;
 
@@ -66,6 +71,17 @@ function numberValue(value: unknown, label: string): number {
 
 function nullableNumber(value: unknown, label: string): number | null {
   return value === null ? null : numberValue(value, label);
+}
+
+function allowedTools(value: unknown, label: string): readonly string[] {
+  if (
+    !Array.isArray(value)
+    || value.some((item) => typeof item !== "string" || item.length === 0)
+    || new Set(value).size !== value.length
+  ) {
+    throw new AuditStorageError(`${label} must be an array of unique non-empty strings`);
+  }
+  return value;
 }
 
 function messageFromRow(row: Record<string, unknown>): Message {
@@ -156,6 +172,7 @@ export class SqliteAuditStore implements AuditStore, Disposable {
 
   public async saveAgentProfile(profile: AgentProfile): Promise<void> {
     this.#assertOpen();
+    const profileAllowedTools = allowedTools(profile.allowed_tools, "allowed_tools");
     this.#database.prepare(`
       INSERT INTO agent_profiles (agent_profile_id, name, locale, allowed_tools_json)
       VALUES (?, ?, ?, ?)
@@ -167,7 +184,7 @@ export class SqliteAuditStore implements AuditStore, Disposable {
       profile.agent_profile_id,
       profile.name,
       profile.locale,
-      json(profile.allowed_tools, "allowed_tools"),
+      json(profileAllowedTools, "allowed_tools"),
     );
   }
 
@@ -195,6 +212,143 @@ export class SqliteAuditStore implements AuditStore, Disposable {
 
   public async saveRun(run: Run): Promise<void> {
     this.#assertOpen();
+    this.#transaction(() => this.#writeRun(run));
+  }
+
+  public async saveMessage(message: Message): Promise<void> {
+    this.#assertOpen();
+    this.#transaction(() => this.#writeMessage(message));
+  }
+
+  public async saveToolCall(runId: string, call: ToolCall, createdAtMs: number): Promise<void> {
+    this.#assertOpen();
+    this.#transaction(() => this.#writeToolCall(runId, call, createdAtMs));
+  }
+
+  public async saveAction(action: Action): Promise<void> {
+    this.#assertOpen();
+    this.#transaction(() => this.#writeAction(action));
+  }
+
+  public async saveToolResult(
+    runId: string,
+    result: ToolResult,
+    completedAtMs: number,
+  ): Promise<void> {
+    this.#assertOpen();
+    this.#transaction(() => this.#writeToolResult(runId, result, completedAtMs));
+  }
+
+  public async appendEvent(event: Event): Promise<void> {
+    this.#assertOpen();
+    this.#transaction(() => this.#writeEvent(event));
+  }
+
+  public async writeBatch(batch: AuditWriteBatch): Promise<void> {
+    this.#assertOpen();
+    this.#transaction(() => {
+      const terminalRun = batch.run !== undefined
+        && !["pending", "running"].includes(batch.run.status);
+      if (batch.run !== undefined && !terminalRun) {
+        this.#writeRun(batch.run);
+      }
+      for (const message of batch.messages ?? []) {
+        this.#writeMessage(message);
+      }
+      for (const write of batch.tool_calls ?? []) {
+        this.#writeToolCall(write.run_id, write.call, write.created_at_ms);
+      }
+      for (const write of batch.tool_results ?? []) {
+        this.#writeToolResult(write.run_id, write.result, write.completed_at_ms);
+      }
+      for (const action of batch.actions ?? []) {
+        this.#writeAction(action);
+      }
+      for (const event of batch.events ?? []) {
+        this.#writeEvent(event);
+      }
+      if (batch.run !== undefined && terminalRun) {
+        this.#writeRun(batch.run);
+      }
+    });
+  }
+
+  public async getSessionAgentProfile(sessionId: string): Promise<AgentProfile | null> {
+    this.#assertOpen();
+    const row = this.#database.prepare(`
+      SELECT p.agent_profile_id, p.name, p.locale, p.allowed_tools_json
+      FROM sessions AS s
+      JOIN agent_profiles AS p ON p.agent_profile_id = s.agent_profile_id
+      WHERE s.session_id = ?
+    `).get(sessionId);
+    if (row === undefined) {
+      return null;
+    }
+    return {
+      agent_profile_id: stringValue(row.agent_profile_id, "agent_profiles.agent_profile_id"),
+      name: stringValue(row.name, "agent_profiles.name"),
+      locale: stringValue(row.locale, "agent_profiles.locale") as AgentProfile["locale"],
+      allowed_tools: allowedTools(
+        parseJson<unknown>(row.allowed_tools_json, "agent_profiles.allowed_tools_json"),
+        "agent_profiles.allowed_tools_json",
+      ),
+    };
+  }
+
+  public async getRunTrace(runId: string): Promise<RunAuditTrace | null> {
+    this.#assertOpen();
+    return this.#readTransaction(() => {
+      const runRow = this.#database.prepare(`
+        SELECT run_id, session_id, status, started_at_ms, completed_at_ms
+        FROM runs WHERE run_id = ?
+      `).get(runId);
+      if (runRow === undefined) {
+        return null;
+      }
+      const run: Run = {
+        run_id: stringValue(runRow.run_id, "runs.run_id"),
+        session_id: stringValue(runRow.session_id, "runs.session_id"),
+        status: stringValue(runRow.status, "runs.status") as Run["status"],
+        started_at_ms: numberValue(runRow.started_at_ms, "runs.started_at_ms"),
+        completed_at_ms: nullableNumber(runRow.completed_at_ms, "runs.completed_at_ms"),
+      };
+      return {
+        run,
+        messages: this.#database.prepare(`
+          SELECT * FROM messages WHERE run_id = ? ORDER BY created_at_ms, message_id
+        `).all(runId).map(messageFromRow),
+        tool_calls: this.#database.prepare(`
+          SELECT * FROM tool_calls WHERE run_id = ? ORDER BY created_at_ms, tool_call_id
+        `).all(runId).map(toolCallFromRow),
+        actions: this.#database.prepare(`
+          SELECT * FROM actions WHERE run_id = ? ORDER BY created_at_ms, action_id
+        `).all(runId).map(actionFromRow),
+        events: this.#database.prepare(`
+          SELECT * FROM events WHERE run_id = ? ORDER BY occurred_at_ms, event_id
+        `).all(runId).map(eventFromRow),
+      };
+    });
+  }
+
+  public async listSessionMessages(sessionId: string): Promise<readonly Message[]> {
+    this.#assertOpen();
+    return this.#database.prepare(`
+      SELECT * FROM messages WHERE session_id = ? ORDER BY created_at_ms, message_id
+    `).all(sessionId).map(messageFromRow);
+  }
+
+  public close(): void {
+    if (!this.#closed) {
+      this.#database.close();
+      this.#closed = true;
+    }
+  }
+
+  public [Symbol.dispose](): void {
+    this.close();
+  }
+
+  #writeRun(run: Run): void {
     const write = this.#database.prepare(`
       INSERT INTO runs (
         run_id, session_id, status, started_at_ms, completed_at_ms
@@ -223,10 +377,29 @@ export class SqliteAuditStore implements AuditStore, Disposable {
     if (Number(write.changes) !== 1) {
       throw new AuditStorageError(`run ${run.run_id} conflicts with stored identity or lifecycle`);
     }
+    if (!["pending", "running"].includes(run.status)) {
+      const unfinished = this.#database.prepare(`
+        SELECT
+          EXISTS(
+            SELECT 1 FROM tool_calls
+            WHERE run_id = ? AND status = 'pending'
+          ) AS pending_tool_calls,
+          EXISTS(
+            SELECT 1 FROM actions
+            WHERE run_id = ? AND status NOT IN ('completed', 'failed')
+          ) AS pending_actions
+      `).get(run.run_id, run.run_id);
+      if (
+        numberValue(unfinished?.pending_tool_calls, "pending_tool_calls") !== 0
+        || numberValue(unfinished?.pending_actions, "pending_actions") !== 0
+      ) {
+        throw new AuditStorageError(`run ${run.run_id} cannot terminate with unfinished work`);
+      }
+    }
   }
 
-  public async saveMessage(message: Message): Promise<void> {
-    this.#assertOpen();
+  #writeMessage(message: Message): void {
+    this.#assertRunWritable(message.run_id);
     this.#database.prepare(`
       INSERT INTO messages (
         message_id, session_id, run_id, role, content, tool_name, created_at_ms, metadata_json
@@ -243,8 +416,8 @@ export class SqliteAuditStore implements AuditStore, Disposable {
     );
   }
 
-  public async saveToolCall(runId: string, call: ToolCall, createdAtMs: number): Promise<void> {
-    this.#assertOpen();
+  #writeToolCall(runId: string, call: ToolCall, createdAtMs: number): void {
+    this.#assertRunWritable(runId);
     this.#database.prepare(`
       INSERT INTO tool_calls (
         tool_call_id, run_id, name, arguments_json, status, created_at_ms
@@ -258,8 +431,8 @@ export class SqliteAuditStore implements AuditStore, Disposable {
     );
   }
 
-  public async saveAction(action: Action): Promise<void> {
-    this.#assertOpen();
+  #writeAction(action: Action): void {
+    this.#assertRunWritable(action.run_id);
     const write = this.#database.prepare(`
       INSERT INTO actions (action_id, run_id, tool_call_id, status, created_at_ms)
       VALUES (?, ?, ?, ?, ?)
@@ -287,39 +460,32 @@ export class SqliteAuditStore implements AuditStore, Disposable {
     }
   }
 
-  public async saveToolResult(
-    runId: string,
-    result: ToolResult,
-    completedAtMs: number,
-  ): Promise<void> {
-    this.#assertOpen();
-    this.#transaction(() => {
-      const update = this.#database.prepare(`
-        UPDATE tool_calls SET
-          status = ?,
-          completed_at_ms = ?,
-          result_json = ?,
-          error_json = ?
-        WHERE tool_call_id = ? AND run_id = ? AND name = ? AND status = 'pending'
-      `).run(
-        result.status,
-        completedAtMs,
-        result.result === null ? null : json(result.result, "tool_result.result"),
-        result.error === null ? null : json(result.error, "tool_result.error"),
-        result.tool_call_id,
-        runId,
-        result.name,
+  #writeToolResult(runId: string, result: ToolResult, completedAtMs: number): void {
+    const update = this.#database.prepare(`
+      UPDATE tool_calls SET
+        status = ?,
+        completed_at_ms = ?,
+        result_json = ?,
+        error_json = ?
+      WHERE tool_call_id = ? AND run_id = ? AND name = ? AND status = 'pending'
+    `).run(
+      result.status,
+      completedAtMs,
+      result.result === null ? null : json(result.result, "tool_result.result"),
+      result.error === null ? null : json(result.error, "tool_result.error"),
+      result.tool_call_id,
+      runId,
+      result.name,
+    );
+    if (Number(update.changes) !== 1) {
+      throw new AuditStorageError(
+        `pending tool call not found for result ${result.tool_call_id}`,
       );
-      if (Number(update.changes) !== 1) {
-        throw new AuditStorageError(
-          `pending tool call not found for result ${result.tool_call_id}`,
-        );
-      }
-    });
+    }
   }
 
-  public async appendEvent(event: Event): Promise<void> {
-    this.#assertOpen();
+  #writeEvent(event: Event): void {
+    this.#assertRunWritable(event.run_id);
     this.#database.prepare(`
       INSERT INTO events (event_id, run_id, type, occurred_at_ms, payload_json)
       VALUES (?, ?, ?, ?, ?)
@@ -332,54 +498,14 @@ export class SqliteAuditStore implements AuditStore, Disposable {
     );
   }
 
-  public async getRunTrace(runId: string): Promise<RunAuditTrace | null> {
-    this.#assertOpen();
-    const runRow = this.#database.prepare(`
-      SELECT run_id, session_id, status, started_at_ms, completed_at_ms
-      FROM runs WHERE run_id = ?
+  #assertRunWritable(runId: string): void {
+    const row = this.#database.prepare(`
+      SELECT status FROM runs WHERE run_id = ?
     `).get(runId);
-    if (runRow === undefined) {
-      return null;
+    const status = row === undefined ? null : stringValue(row.status, "runs.status");
+    if (status !== "pending" && status !== "running") {
+      throw new AuditStorageError(`run ${runId} is not writable`);
     }
-    const run: Run = {
-      run_id: stringValue(runRow.run_id, "runs.run_id"),
-      session_id: stringValue(runRow.session_id, "runs.session_id"),
-      status: stringValue(runRow.status, "runs.status") as Run["status"],
-      started_at_ms: numberValue(runRow.started_at_ms, "runs.started_at_ms"),
-      completed_at_ms: nullableNumber(runRow.completed_at_ms, "runs.completed_at_ms"),
-    };
-    const messages = await this.listSessionMessages(run.session_id);
-    return {
-      run,
-      messages: messages.filter((message) => message.run_id === runId),
-      tool_calls: this.#database.prepare(`
-        SELECT * FROM tool_calls WHERE run_id = ? ORDER BY created_at_ms, tool_call_id
-      `).all(runId).map(toolCallFromRow),
-      actions: this.#database.prepare(`
-        SELECT * FROM actions WHERE run_id = ? ORDER BY created_at_ms, action_id
-      `).all(runId).map(actionFromRow),
-      events: this.#database.prepare(`
-        SELECT * FROM events WHERE run_id = ? ORDER BY occurred_at_ms, event_id
-      `).all(runId).map(eventFromRow),
-    };
-  }
-
-  public async listSessionMessages(sessionId: string): Promise<readonly Message[]> {
-    this.#assertOpen();
-    return this.#database.prepare(`
-      SELECT * FROM messages WHERE session_id = ? ORDER BY created_at_ms, message_id
-    `).all(sessionId).map(messageFromRow);
-  }
-
-  public close(): void {
-    if (!this.#closed) {
-      this.#database.close();
-      this.#closed = true;
-    }
-  }
-
-  public [Symbol.dispose](): void {
-    this.close();
   }
 
   #assertOpen(): void {
@@ -393,6 +519,18 @@ export class SqliteAuditStore implements AuditStore, Disposable {
     try {
       operation();
       this.#database.exec("COMMIT");
+    } catch (error) {
+      this.#database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  #readTransaction<T>(operation: () => T): T {
+    this.#database.exec("BEGIN");
+    try {
+      const result = operation();
+      this.#database.exec("COMMIT");
+      return result;
     } catch (error) {
       this.#database.exec("ROLLBACK");
       throw error;

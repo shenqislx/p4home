@@ -40,6 +40,10 @@
 
 Phase 1 不修改 P4 固件角色执行链，也不提前引入 Phase 2 的真实 WebSocket 控制。
 
+SQLite 的生产化延后项集中记录在
+[Agent SQLite Production TODO](./2026-08-16-agent-sqlite-production-todo.md)，不与当前 Demo
+正确性修复混在一起；进入 Phase 2 真实 Action 前必须重新 review 对应门禁。
+
 ## 历史入口
 
 - [归档说明](../archive/README.md)

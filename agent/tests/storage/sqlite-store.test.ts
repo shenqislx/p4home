@@ -189,12 +189,20 @@ test("stored identities and terminal lifecycles cannot be rewritten", async () =
     status: "completed",
     created_at_ms: 113,
   });
+  await store.saveToolResult("run-1", {
+    schema_version: 1,
+    tool_call_id: "tool-call-1",
+    name: "character.go_to_room",
+    status: "success",
+    result: { room_id: "study" },
+    error: null,
+  }, 114);
   await store.saveRun({
     run_id: "run-1",
     session_id: "session-1",
     status: "completed",
     started_at_ms: 110,
-    completed_at_ms: 114,
+    completed_at_ms: 115,
   });
 
   await assert.rejects(
@@ -206,6 +214,14 @@ test("stored identities and terminal lifecycles cannot be rewritten", async () =
       completed_at_ms: null,
     }),
     AuditStorageError,
+  );
+  await assert.rejects(
+    store.saveToolCall("run-1", {
+      tool_call_id: "late-tool-call",
+      name: "character.go_to_room",
+      arguments: { room_id: "study" },
+    }, 116),
+    /run run-1 is not writable/,
   );
   await assert.rejects(
     store.saveAction({
@@ -251,4 +267,99 @@ test("a file-backed audit trace survives explicit close and reopen", async () =>
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("a run cannot terminate while a tool call is still pending", async () => {
+  using store = new SqliteAuditStore(":memory:");
+  await seed(store);
+  await store.saveToolCall("run-1", {
+    tool_call_id: "tool-call-pending",
+    name: "character.go_to_room",
+    arguments: { room_id: "study" },
+  }, 112);
+
+  await assert.rejects(
+    store.saveRun({
+      run_id: "run-1",
+      session_id: "session-1",
+      status: "completed",
+      started_at_ms: 110,
+      completed_at_ms: 113,
+    }),
+    /cannot terminate with unfinished work/,
+  );
+  const trace = await store.getRunTrace("run-1");
+  assert.equal(trace?.run.status, "running");
+  assert.equal(trace?.tool_calls[0]?.status, "pending");
+});
+
+test("an audit batch rolls back every write when one event conflicts", async () => {
+  using store = new SqliteAuditStore(":memory:");
+  await seed(store);
+  await store.saveToolCall("run-1", {
+    tool_call_id: "tool-call-1",
+    name: "character.go_to_room",
+    arguments: { room_id: "study" },
+  }, 112);
+  const event = {
+    event_id: "event-conflict",
+    run_id: "run-1",
+    type: "tool.completed",
+    occurred_at_ms: 114,
+    payload: { tool_call_id: "tool-call-1" },
+  };
+  await store.appendEvent(event);
+
+  await assert.rejects(
+    store.writeBatch({
+      tool_results: [{
+        run_id: "run-1",
+        completed_at_ms: 113,
+        result: {
+          schema_version: 1,
+          tool_call_id: "tool-call-1",
+          name: "character.go_to_room",
+          status: "success",
+          result: { room_id: "study" },
+          error: null,
+        },
+      }],
+      events: [event],
+    }),
+    /UNIQUE constraint failed/,
+  );
+  const trace = await store.getRunTrace("run-1");
+  assert.equal(trace?.tool_calls[0]?.status, "pending");
+  assert.equal(trace?.tool_calls[0]?.result, null);
+});
+
+test("run trace reads one snapshot while a terminal write follows", async () => {
+  using store = new SqliteAuditStore(":memory:");
+  await seed(store);
+
+  const snapshotPromise = store.getRunTrace("run-1");
+  const finishPromise = store.writeBatch({
+    run: {
+      run_id: "run-1",
+      session_id: "session-1",
+      status: "completed",
+      started_at_ms: 110,
+      completed_at_ms: 120,
+    },
+    events: [{
+      event_id: "event-completed",
+      run_id: "run-1",
+      type: "run.completed",
+      occurred_at_ms: 120,
+      payload: { status: "completed" },
+    }],
+  });
+  const snapshot = await snapshotPromise;
+  await finishPromise;
+  const current = await store.getRunTrace("run-1");
+
+  assert.equal(snapshot?.run.status, "running");
+  assert.deepEqual(snapshot?.events, []);
+  assert.equal(current?.run.status, "completed");
+  assert.equal(current?.events[0]?.type, "run.completed");
 });
