@@ -23,16 +23,49 @@ Node 主版本时产生假通过。
 
 ## 当前分层
 
-- `apps/runtime`：进程入口与健康状态；
+- `apps/runtime`：有限文本 Agent Loop、SQLite 审计接入与 JSON Lines 结构化日志；
 - `packages/contracts`：AJV 加载并验证仓库根目录冻结的两份 v1 契约；
 - `packages/core`：核心实体类型、取消、相对 timeout、最多四项的顺序 Tool Loop；
 - `packages/domain-p4home`：无需真实设备的五工具 Mock 与 allowlist；
 - `packages/provider-ollama`：原生 HTTP capability probe、generate、chat/tool calling、NDJSON
   stream、`AbortSignal` 取消和相对 timeout；
-- `apps/runtime`：将冻结工具目录、Ollama chat、Mock 执行器和最终回复串成有限文本 Agent Loop；
-- `packages/storage-sqlite`：审计存储接口，SQLite 实现待补充。
+- `packages/storage-sqlite`：基于 Node 24 内置 `node:sqlite` 的审计存储、schema migration 与关联查询。
 
 Phase 1 不得导入真实 P4 WebSocket 执行链，也不得把 token 暴露给模型或日志。
+
+## SQLite 审计与结构化日志
+
+`SqliteAuditStore` 使用 schema version 1、WAL、STRICT table、外键和 JSON 有效性约束，保存
+AgentProfile、Session、Run、Message、ToolCall、Action 与 Event。Run、Session、Action 的身份字段
+不可重写，终态 Run/Action 不可回退；一个 ToolCall 只能从 `pending` 写入一次终态结果。查询
+`getRunTrace(runId)` 可获得同一 Run 下的完整关联记录。
+
+调用 `runTextAgent()` 前必须先保存 AgentProfile 和 Session，再通过可选 `audit` 参数接入存储。
+审计启用后，system/user/assistant/tool 消息、模型轮次、ToolCall/ToolResult 和 Run 终态都会持久化：
+
+```ts
+using store = new SqliteAuditStore("./data/p4home-agent.sqlite");
+await store.saveAgentProfile(profile);
+await store.saveSession(session);
+
+const result = await runTextAgent({
+  run_id: "run-001",
+  user_text: "去书房",
+  provider,
+  tools,
+  audit: {
+    store,
+    session_id: session.session_id,
+    logger: createJsonLineLogger(),
+  },
+});
+```
+
+JSON Lines 日志固定携带 `run_id / session_id`，并在对应阶段携带 `tool_call_id / action_id`；
+常见凭证字段会递归脱敏，token 计数等非凭证指标保留。Phase 1 Mock 工具不产生设备 Action，
+因此实际 Mock trace 终止于 `tool_call_id`；Phase 2 设备适配器写入 `Action` 后可继续关联
+`action_id`，无需修改 schema。SQLite 是审计事实源；可选日志 sink 故障不会改变已持久化的
+Run 结果。
 
 ## Ollama Provider
 

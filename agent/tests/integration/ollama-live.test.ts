@@ -8,6 +8,7 @@ import {
 import { createMockP4HomeDomain } from "@p4home/domain-p4home";
 import { OllamaHttpProvider } from "@p4home/provider-ollama";
 import { runTextAgent } from "@p4home/runtime";
+import { SqliteAuditStore } from "@p4home/storage-sqlite";
 
 const liveTest = process.env.P4HOME_OLLAMA_LIVE === "1" ? test : test.skip;
 
@@ -92,6 +93,20 @@ liveTest("local Ollama completes a bounded text-agent loop with mock tools", asy
   const model = process.env.OLLAMA_MODEL ?? "qwen3:8b";
   const provider = new OllamaHttpProvider({ model, requestTimeoutMs: 300_000 });
   const domain = createMockP4HomeDomain();
+  using store = new SqliteAuditStore(":memory:");
+  const createdAtMs = Date.now();
+  await store.saveAgentProfile({
+    agent_profile_id: "live-profile",
+    name: "P4 Home",
+    locale: "zh-CN",
+    allowed_tools: ["character.go_to_room"],
+  });
+  await store.saveSession({
+    session_id: "live-session",
+    agent_profile_id: "live-profile",
+    created_at_ms: createdAtMs,
+    updated_at_ms: createdAtMs,
+  });
 
   const result = await runTextAgent({
     run_id: "live-text-agent-001",
@@ -100,10 +115,15 @@ liveTest("local Ollama completes a bounded text-agent loop with mock tools", asy
     tools: domain.tools,
     max_tool_rounds: 2,
     model_timeout_ms: 300_000,
+    audit: { store, session_id: "live-session" },
   });
+  const trace = await store.getRunTrace("live-text-agent-001");
 
   assert.equal(result.status, "completed");
   assert.equal(domain.getState().room_id, "study");
   assert.ok(result.tool_results.some((item) => item.name === "character.go_to_room"));
   assert.ok(result.final_text.trim().length > 0);
+  assert.equal(trace?.run.status, "completed");
+  assert.equal(trace?.tool_calls[0]?.status, "success");
+  assert.equal(trace?.events.at(-1)?.type, "run.completed");
 });

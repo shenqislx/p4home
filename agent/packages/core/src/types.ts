@@ -23,6 +23,19 @@ export interface Run {
   readonly completed_at_ms: number | null;
 }
 
+export type MessageRole = "system" | "user" | "assistant" | "tool";
+
+export interface Message {
+  readonly message_id: string;
+  readonly session_id: string;
+  readonly run_id: string;
+  readonly role: MessageRole;
+  readonly content: string;
+  readonly tool_name: string | null;
+  readonly created_at_ms: number;
+  readonly metadata: Record<string, unknown>;
+}
+
 export interface ToolCall {
   readonly tool_call_id: string;
   readonly name: string;

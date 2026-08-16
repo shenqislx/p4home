@@ -16,6 +16,11 @@ import {
   type OllamaToolDefinition,
 } from "@p4home/provider-ollama";
 
+import {
+  TextAgentAuditTrail,
+  type TextAgentAuditOptions,
+} from "./text-agent-audit.ts";
+
 export const TEXT_AGENT_TOOL_CALLS_MAX = 4;
 export const TEXT_AGENT_TOOL_ROUNDS_MAX = 4;
 
@@ -47,6 +52,7 @@ export interface TextAgentRunOptions {
   readonly model_timeout_ms?: number;
   readonly tool_timeout_ms?: number;
   readonly signal?: AbortSignal;
+  readonly audit?: TextAgentAuditOptions;
 }
 
 export interface TextAgentRunResult {
@@ -165,10 +171,14 @@ function toolFailure(
   };
 }
 
-export async function runTextAgent(options: TextAgentRunOptions): Promise<TextAgentRunResult> {
-  const maxToolRounds = validateOptions(options);
+async function runTextAgentLoop(
+  options: TextAgentRunOptions,
+  maxToolRounds: number,
+  systemPrompt: string,
+  audit: TextAgentAuditTrail | undefined,
+): Promise<TextAgentRunResult> {
   const messages: OllamaChatMessage[] = [
-    { role: "system", content: options.system_prompt ?? DEFAULT_SYSTEM_PROMPT },
+    { role: "system", content: systemPrompt },
     { role: "user", content: options.user_text },
   ];
   const toolResults: ToolResult[] = [];
@@ -187,6 +197,7 @@ export async function runTextAgent(options: TextAgentRunOptions): Promise<TextAg
         ? {}
         : { timeout_ms: options.model_timeout_ms }),
     } as const;
+    await audit?.modelRequested(modelTurn);
     let response: OllamaChatResult;
     try {
       response = await options.provider.chat(chatRequest, options.signal);
@@ -196,6 +207,7 @@ export async function runTextAgent(options: TextAgentRunOptions): Promise<TextAg
       }
       throw error;
     }
+    await audit?.modelCompleted(response.message, modelTurn);
     if (isAborted(options.signal)) {
       return cancelledFailure(modelTurn, toolResults);
     }
@@ -251,6 +263,7 @@ export async function runTextAgent(options: TextAgentRunOptions): Promise<TextAg
         arguments: call.arguments,
       };
     });
+    await audit?.toolCalls(calls, modelTurn);
     const execution = await runSequentialToolCalls({
       run_id: options.run_id,
       calls,
@@ -261,6 +274,7 @@ export async function runTextAgent(options: TextAgentRunOptions): Promise<TextAg
     for (const result of execution.results) {
       const validatedResult = validateFrozenToolResult(result);
       toolResults.push(validatedResult);
+      await audit?.toolResult(validatedResult, modelTurn);
       messages.push({
         role: "tool",
         tool_name: validatedResult.name,
@@ -273,4 +287,22 @@ export async function runTextAgent(options: TextAgentRunOptions): Promise<TextAg
   }
 
   throw new TextAgentError("MODEL_TURN_BUDGET_EXCEEDED", "model turn budget exhausted");
+}
+
+export async function runTextAgent(options: TextAgentRunOptions): Promise<TextAgentRunResult> {
+  const maxToolRounds = validateOptions(options);
+  const systemPrompt = options.system_prompt ?? DEFAULT_SYSTEM_PROMPT;
+  const audit =
+    options.audit === undefined
+      ? undefined
+      : new TextAgentAuditTrail(options.run_id, options.audit);
+  await audit?.start(systemPrompt, options.user_text);
+  try {
+    const result = await runTextAgentLoop(options, maxToolRounds, systemPrompt, audit);
+    await audit?.finish(result);
+    return result;
+  } catch (error) {
+    await audit?.fail(error);
+    throw error;
+  }
 }

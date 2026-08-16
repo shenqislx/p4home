@@ -32,7 +32,7 @@
 - [x] 实现不连接真实 P4 的五工具 Mock、房间 allowlist 与精确错误码；
 - [x] 实现 Ollama capability probe、generate、stream 与 cancel；
 - [x] 接入 Ollama 原生 chat/tool calling、本地 structured output 校验与有限文本 Agent Loop；
-- [ ] 实现 SQLite 审计存储与结构化日志；
+- [x] 实现 SQLite 审计存储与结构化日志；
 - [ ] 建立模型 eval、性能基线与最小调试入口。
 
 实际结果（2026-08-16）：Node runtime 已由 22.16 统一升级到 24.19 LTS，preflight 精确通过 `24.19.0`；AJV 报告 14 种消息、
@@ -72,7 +72,25 @@ output、完整 Mock 闭环及跨轮预算。本机 Ollama `0.32.6` + `qwen3:8b`
 11 项回归后，确定性测试为 41 项；本机 `qwen3:8b` 的 4 项真实回归仍全部通过，测试后已停止
 临时 Ollama 服务。
 
-下一项工作为 SQLite 审计存储与结构化日志，保持不接真实 P4。
+SQLite 审计里程碑（2026-08-16）：基于 Node 24 内置 `node:sqlite` 完成 schema version 1，使用
+WAL、STRICT table、外键、JSON 校验和关联索引保存 AgentProfile、Session、Run、Message、
+ToolCall、Action 与 Event；`getRunTrace()` 可按 Run 还原完整消息、工具、Action 和事件链。写入层
+禁止修改 Session/Run/Action 身份、禁止终态生命周期回退，并确保每个 ToolCall 只能从 pending
+进入一次 success/error。构造或 migration 失败会关闭数据库句柄，正常路径支持显式资源释放。
+
+Runtime 的可选 audit 接口已记录 system/user/assistant/tool 消息、模型请求与响应、ToolCall、
+ToolResult 和 Run 终态；抛出的 schema/contract 异常也会留下 `run.failed`。JSON Lines 日志固定关联
+`run_id / session_id`，按阶段携带 `tool_call_id / action_id`，递归脱敏 token、password、secret
+等凭证字段但保留 token 计数。Phase 1 Mock 不产生设备 Action，实际闭环止于 tool_call_id；
+Action 表和日志字段已验证 `run_id → tool_call_id → action_id` 外键关系，Phase 2 可直接接入。
+
+新增 9 项后确定性测试为 50 项，Node 24.19.0 严格类型检查通过；既有 30 项协议测试和 2 项
+harness 测试继续通过。本机 Ollama `0.32.6` + `qwen3:8b` 的 4 项显式 live 回归全部通过，
+其中有限文本 Agent Loop 已同时断言真实模型 ToolCall 的 SQLite 终态 trace；测试后已停止临时
+Ollama 服务。
+
+下一项工作为第 10–11 步：建立中文黄金场景 eval、固定上下文的性能基线，并提供最小调试入口，
+继续保持不接真实 P4。
 
 ## 4. 验证
 
