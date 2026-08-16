@@ -78,12 +78,20 @@ AgentProfile、Session、Run、Message、ToolCall、Action 与 Event。Run、Ses
 `getRunTrace(runId)` 可获得同一读快照下的完整关联记录。Run 不能在 ToolCall 或 Action 未终止时
 结束；前序工具失败导致后续调用未执行时，审计会以合成失败结果终止这些调用，再和 Run 终态原子
 提交。同一审计阶段的 Run、Message、ToolCall、ToolResult 和 Event 使用 batch transaction 写入。
+所有 `DatabaseSync` 操作在专用 Worker 中串行执行，SQLite 锁等待不会阻塞主线程的取消、健康检查
+和心跳 timer。
+
+默认打开数据库时会原子恢复上次进程遗留的 `pending/running` Run：审计生命周期关闭为失败，
+ToolCall/Action 不再保持可执行态，同时 `run.recovered` 及 Tool error details 明确保存
+`previous_outcome/outcome=unknown` 和 `replay_allowed=false`。这表示 Runtime 不得把它们盲目重放；
+Phase 2 接入真实设备后，物理动作结果仍须通过 `action_id` 和 snapshot 对账。只有并发诊断读取器
+才能显式设置 `reconcile_on_open: false`。
 
 调用 `runTextAgent()` 前必须先保存 AgentProfile 和 Session，再通过可选 `audit` 参数接入存储。
 审计启用后，system/user/assistant/tool 消息、模型轮次、ToolCall/ToolResult 和 Run 终态都会持久化：
 
 ```ts
-using store = new SqliteAuditStore("./data/p4home-agent.sqlite");
+await using store = new SqliteAuditStore("./data/p4home-agent.sqlite");
 await store.saveAgentProfile(profile);
 await store.saveSession(session);
 
@@ -110,7 +118,7 @@ JSON Lines 日志固定携带 `run_id / session_id`，并在对应阶段携带 `
 `action_id`，无需修改 schema。SQLite 是审计事实源；可选日志 sink 故障不会改变已持久化的
 Run 结果。
 
-不影响当前单用户 Demo 的生产化工作记录在
+其余不影响当前单用户 Demo 的生产化工作记录在
 [Agent SQLite Production TODO](../docs/plans/2026-08-16-agent-sqlite-production-todo.md)。
 
 ## Ollama Provider

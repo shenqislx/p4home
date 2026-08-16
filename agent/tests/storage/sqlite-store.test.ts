@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import {
@@ -362,4 +363,111 @@ test("run trace reads one snapshot while a terminal write follows", async () => 
   assert.deepEqual(snapshot?.events, []);
   assert.equal(current?.run.status, "completed");
   assert.equal(current?.events[0]?.type, "run.completed");
+});
+
+test("SQLite lock waits in the worker without blocking main-loop timers", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "p4home-worker-lock-"));
+  const databasePath = join(directory, "audit.sqlite");
+  const store = new SqliteAuditStore(databasePath, {
+    timeout_ms: 2_000,
+    reconcile_on_open: false,
+  });
+  const locker = new DatabaseSync(databasePath);
+  try {
+    await seed(store);
+    locker.exec("BEGIN IMMEDIATE");
+    let writeSettled = false;
+    const write = store.appendEvent({
+      event_id: "event-after-lock",
+      run_id: "run-1",
+      type: "worker.lock.released",
+      occurred_at_ms: 120,
+      payload: {},
+    }).finally(() => {
+      writeSettled = true;
+    });
+    const timerResult = await Promise.race([
+      write.then(() => "write" as const),
+      new Promise<"timer">((resolve) => setTimeout(() => resolve("timer"), 25)),
+    ]);
+    assert.equal(timerResult, "timer");
+    assert.equal(writeSettled, false);
+    locker.exec("ROLLBACK");
+    await write;
+    assert.equal((await store.getRunTrace("run-1"))?.events[0]?.event_id, "event-after-lock");
+  } finally {
+    try {
+      locker.exec("ROLLBACK");
+    } catch {
+      // The successful path already released the lock.
+    }
+    locker.close();
+    await store.closeAsync();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("startup recovery records unknown outcomes and forbids blind replay", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "p4home-recovery-"));
+  const databasePath = join(directory, "audit.sqlite");
+  try {
+    const initial = new SqliteAuditStore(databasePath, { reconcile_on_open: false });
+    await seed(initial);
+    await initial.saveToolCall("run-1", {
+      tool_call_id: "tool-call-interrupted",
+      name: "character.go_to_room",
+      arguments: { room_id: "study" },
+    }, 112);
+    await initial.saveAction({
+      action_id: "action-interrupted",
+      run_id: "run-1",
+      tool_call_id: "tool-call-interrupted",
+      status: "started",
+      created_at_ms: 113,
+    });
+    await initial.closeAsync();
+
+    const recovered = new SqliteAuditStore(databasePath);
+    const trace = await recovered.getRunTrace("run-1");
+    assert.equal(trace?.run.status, "failed");
+    assert.equal(trace?.tool_calls[0]?.status, "error");
+    assert.deepEqual(trace?.tool_calls[0]?.error?.details, {
+      outcome: "unknown",
+      recovery: "process_restart",
+      replay_allowed: false,
+    });
+    assert.equal(trace?.actions[0]?.status, "failed");
+    assert.deepEqual(trace?.events.at(-1)?.payload, {
+      status: "failed",
+      previous_outcome: "unknown",
+      reason: "process_restart",
+      replay_allowed: false,
+      recovered_tool_calls: 1,
+      recovered_actions: 1,
+    });
+    assert.deepEqual(await recovered.reconcileInterruptedRuns(), {
+      run_ids: [],
+      recovered_tool_calls: 0,
+      recovered_actions: 0,
+    });
+    await recovered.closeAsync();
+
+    const reopened = new SqliteAuditStore(databasePath);
+    const stableTrace = await reopened.getRunTrace("run-1");
+    assert.equal(stableTrace?.events.filter((event) => event.type === "run.recovered").length, 1);
+    await reopened.closeAsync();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("worker initialization failures reject callers and still close cleanly", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "p4home-init-error-"));
+  const store = new SqliteAuditStore(directory);
+  try {
+    await assert.rejects(store.getRunTrace("run-1"), AuditStorageError);
+  } finally {
+    await store.closeAsync();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

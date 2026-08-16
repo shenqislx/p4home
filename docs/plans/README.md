@@ -32,13 +32,14 @@
 
 只执行 Phase 1：
 
-1. 建立 Node.js 24.19 LTS workspace 与 Runtime 分层目录；
-2. 导入并验证已冻结的 Device Protocol v1 与 Tool Schema v1；
-3. 实现不依赖真实 P4 的有限顺序 Tool Loop 和 Mock Character Tools；
-4. 接入 Ollama capability probe，并保持 provider 可替换；
-5. 建立 SQLite 审计、结构化日志、中文 eval 与最小调试入口。
+1. 使用同一冻结 32 场景 eval 验证新的离线候选模型；
+2. 记录与当前 8B、30B Coder、35B 基线的准确率、无工具拒绝、延迟和资源对比；
+3. 完成用户 review，再启动 Phase 2。
 
 Phase 1 不修改 P4 固件角色执行链，也不提前引入 Phase 2 的真实 WebSocket 控制。
+
+Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
+deadline、action_id 幂等和 snapshot reconciliation 属于 Phase 2，必须在真实 Action 前完成。
 
 SQLite 的生产化延后项集中记录在
 [Agent SQLite Production TODO](./2026-08-16-agent-sqlite-production-todo.md)，不与当前 Demo

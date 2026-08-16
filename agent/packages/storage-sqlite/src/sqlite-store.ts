@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 import type {
@@ -23,6 +24,17 @@ const SCHEMA_VERSION = 1;
 
 export interface SqliteAuditStoreOptions {
   readonly timeout_ms?: number;
+  /**
+   * Recover non-terminal records left by a previous Runtime process before
+   * accepting new work. Disable only for a concurrent diagnostic reader.
+   */
+  readonly reconcile_on_open?: boolean;
+}
+
+export interface AuditRecoveryReport {
+  readonly run_ids: readonly string[];
+  readonly recovered_tool_calls: number;
+  readonly recovered_actions: number;
 }
 
 export class AuditStorageError extends Error {
@@ -144,7 +156,7 @@ function toolCallFromRow(row: Record<string, unknown>): StoredToolCall {
   };
 }
 
-export class SqliteAuditStore implements AuditStore, Disposable {
+export class SynchronousSqliteAuditStore implements AuditStore, Disposable {
   readonly #database: DatabaseSync;
   #closed = false;
 
@@ -163,6 +175,9 @@ export class SqliteAuditStore implements AuditStore, Disposable {
     try {
       this.#database.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;");
       this.#migrate();
+      if (options.reconcile_on_open !== false) {
+        this.reconcileInterruptedRuns(Date.now());
+      }
     } catch (error) {
       this.#database.close();
       this.#closed = true;
@@ -335,6 +350,92 @@ export class SqliteAuditStore implements AuditStore, Disposable {
     return this.#database.prepare(`
       SELECT * FROM messages WHERE session_id = ? ORDER BY created_at_ms, message_id
     `).all(sessionId).map(messageFromRow);
+  }
+
+  public reconcileInterruptedRuns(recoveredAtMs: number): AuditRecoveryReport {
+    this.#assertOpen();
+    if (!Number.isSafeInteger(recoveredAtMs) || recoveredAtMs < 0) {
+      throw new RangeError("recoveredAtMs must be a non-negative safe integer");
+    }
+    return this.#transactionWithResult(() => {
+      const rows = this.#database.prepare(`
+        SELECT run_id, started_at_ms
+        FROM runs
+        WHERE status IN ('pending', 'running')
+        ORDER BY started_at_ms, run_id
+      `).all();
+      const runIds: string[] = [];
+      let recoveredToolCalls = 0;
+      let recoveredActions = 0;
+
+      for (const row of rows) {
+        const runId = stringValue(row.run_id, "runs.run_id");
+        const startedAtMs = numberValue(row.started_at_ms, "runs.started_at_ms");
+        const maxTimeRow = this.#database.prepare(`
+          SELECT MAX(value) AS max_time FROM (
+            SELECT ? AS value
+            UNION ALL SELECT created_at_ms FROM tool_calls WHERE run_id = ?
+            UNION ALL SELECT created_at_ms FROM actions WHERE run_id = ?
+            UNION ALL SELECT occurred_at_ms FROM events WHERE run_id = ?
+          )
+        `).get(startedAtMs, runId, runId, runId);
+        const completedAtMs = Math.max(
+          recoveredAtMs,
+          numberValue(maxTimeRow?.max_time, "recovery.max_time"),
+        );
+        const toolError = json({
+          code: "INTERNAL",
+          message: "tool outcome is unknown after Runtime restart",
+          retryable: false,
+          details: {
+            outcome: "unknown",
+            recovery: "process_restart",
+            replay_allowed: false,
+          },
+        }, "recovery.tool_error");
+        const toolWrite = this.#database.prepare(`
+          UPDATE tool_calls SET
+            status = 'error',
+            completed_at_ms = MAX(created_at_ms, ?),
+            result_json = NULL,
+            error_json = ?
+          WHERE run_id = ? AND status = 'pending'
+        `).run(completedAtMs, toolError, runId);
+        const actionWrite = this.#database.prepare(`
+          UPDATE actions SET status = 'failed'
+          WHERE run_id = ? AND status NOT IN ('completed', 'failed')
+        `).run(runId);
+        this.#database.prepare(`
+          INSERT INTO events (event_id, run_id, type, occurred_at_ms, payload_json)
+          VALUES (?, ?, 'run.recovered', ?, ?)
+        `).run(
+          `recovery:${randomUUID()}`,
+          runId,
+          completedAtMs,
+          json({
+            status: "failed",
+            previous_outcome: "unknown",
+            reason: "process_restart",
+            replay_allowed: false,
+            recovered_tool_calls: Number(toolWrite.changes),
+            recovered_actions: Number(actionWrite.changes),
+          }, "recovery.event"),
+        );
+        this.#database.prepare(`
+          UPDATE runs SET status = 'failed', completed_at_ms = ?
+          WHERE run_id = ? AND status IN ('pending', 'running')
+        `).run(completedAtMs, runId);
+        runIds.push(runId);
+        recoveredToolCalls += Number(toolWrite.changes);
+        recoveredActions += Number(actionWrite.changes);
+      }
+
+      return {
+        run_ids: runIds,
+        recovered_tool_calls: recoveredToolCalls,
+        recovered_actions: recoveredActions,
+      };
+    });
   }
 
   public close(): void {
@@ -519,6 +620,18 @@ export class SqliteAuditStore implements AuditStore, Disposable {
     try {
       operation();
       this.#database.exec("COMMIT");
+    } catch (error) {
+      this.#database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  #transactionWithResult<T>(operation: () => T): T {
+    this.#database.exec("BEGIN IMMEDIATE");
+    try {
+      const result = operation();
+      this.#database.exec("COMMIT");
+      return result;
     } catch (error) {
       this.#database.exec("ROLLBACK");
       throw error;

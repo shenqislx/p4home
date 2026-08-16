@@ -1,0 +1,99 @@
+import { parentPort, workerData } from "node:worker_threads";
+
+import { SynchronousSqliteAuditStore } from "./sqlite-store.ts";
+import type {
+  SerializedWorkerError,
+  WorkerInit,
+  WorkerRequest,
+  WorkerResponse,
+} from "./worker-protocol.ts";
+
+if (parentPort === null) {
+  throw new Error("sqlite-worker must run inside a Worker");
+}
+const port = parentPort;
+
+function serializedError(error: unknown): SerializedWorkerError {
+  if (error instanceof Error) {
+    const code = "code" in error && typeof error.code === "string" ? error.code : undefined;
+    return {
+      name: error.name,
+      message: error.message,
+      ...(error.stack === undefined ? {} : { stack: error.stack }),
+      ...(code === undefined ? {} : { code }),
+    };
+  }
+  return { name: "Error", message: String(error) };
+}
+
+const send = (response: WorkerResponse): void => port.postMessage(response);
+const init = workerData as WorkerInit;
+
+let store: SynchronousSqliteAuditStore | undefined;
+try {
+  store = new SynchronousSqliteAuditStore(init.path, init.options);
+  send({ type: "ready" });
+} catch (error) {
+  send({ type: "init_error", error: serializedError(error) });
+  port.close();
+}
+
+if (store !== undefined) {
+  const auditStore = store;
+  port.on("message", async (request: WorkerRequest) => {
+    try {
+      let value: unknown;
+      switch (request.operation) {
+        case "saveAgentProfile":
+          value = await auditStore.saveAgentProfile(...request.args);
+          break;
+        case "saveSession":
+          value = await auditStore.saveSession(...request.args);
+          break;
+        case "saveRun":
+          value = await auditStore.saveRun(...request.args);
+          break;
+        case "saveMessage":
+          value = await auditStore.saveMessage(...request.args);
+          break;
+        case "saveToolCall":
+          value = await auditStore.saveToolCall(...request.args);
+          break;
+        case "saveAction":
+          value = await auditStore.saveAction(...request.args);
+          break;
+        case "saveToolResult":
+          value = await auditStore.saveToolResult(...request.args);
+          break;
+        case "appendEvent":
+          value = await auditStore.appendEvent(...request.args);
+          break;
+        case "writeBatch":
+          value = await auditStore.writeBatch(...request.args);
+          break;
+        case "getSessionAgentProfile":
+          value = await auditStore.getSessionAgentProfile(...request.args);
+          break;
+        case "getRunTrace":
+          value = await auditStore.getRunTrace(...request.args);
+          break;
+        case "listSessionMessages":
+          value = await auditStore.listSessionMessages(...request.args);
+          break;
+        case "reconcileInterruptedRuns":
+          value = auditStore.reconcileInterruptedRuns(...request.args);
+          break;
+        case "close":
+          auditStore.close();
+          value = undefined;
+          break;
+      }
+      send({ type: "result", id: request.id, value });
+      if (request.operation === "close") {
+        port.close();
+      }
+    } catch (error) {
+      send({ type: "error", id: request.id, error: serializedError(error) });
+    }
+  });
+}

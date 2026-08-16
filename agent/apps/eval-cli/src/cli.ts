@@ -219,7 +219,7 @@ async function debugCommand(argumentsValue: ParsedArguments): Promise<void> {
   if (databasePath !== ":memory:") {
     mkdirSync(dirname(resolve(databasePath)), { recursive: true });
   }
-  using store = new SqliteAuditStore(databasePath);
+  await using store = new SqliteAuditStore(databasePath);
   const provider = new OllamaHttpProvider({ model, requestTimeoutMs: timeoutMs });
   const domain = createMockP4HomeDomain();
   const createdAtMs = Date.now();

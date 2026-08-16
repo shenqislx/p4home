@@ -159,6 +159,33 @@ test("relative timeout stops waiting for a tool that ignores cancellation", asyn
   assert.equal(result.results[0]?.error?.code, "DEADLINE_EXCEEDED");
 });
 
+test("a cooperative tool rechecks cancellation after await and skips a late side effect", async () => {
+  let sideEffectApplied = false;
+  const tools = new Map<string, ToolDefinition>([
+    [
+      "cooperative-slow",
+      {
+        name: "cooperative-slow",
+        async execute(_argumentsValue, context) {
+          await new Promise((resolve) => setTimeout(resolve, 125));
+          context.signal.throwIfAborted();
+          sideEffectApplied = true;
+          return {};
+        },
+      },
+    ],
+  ]);
+  const result = await runSequentialToolCalls({
+    run_id: "run-cooperative-timeout",
+    tools,
+    timeout_ms: 100,
+    calls: [{ tool_call_id: "cooperative-slow-1", name: "cooperative-slow", arguments: {} }],
+  });
+  assert.equal(result.status, "timed_out");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(sideEffectApplied, false);
+});
+
 test("relative timeout rejects non-finite and fractional values", async () => {
   for (const timeout_ms of [Number.NaN, Number.POSITIVE_INFINITY, 100.5]) {
     await assert.rejects(

@@ -97,9 +97,9 @@ Run 启动、模型完成、Tool 请求/结果和 Run 终态分别通过 batch t
 `failed / cancelled / timed_out` 使用独立终态事件，不再伪装为 `run.completed`。
 
 新增 6 项风险回归后确定性测试为 56 项，覆盖 Profile 越权、回拨时钟、provider timeout 终态、
-pending ToolCall 拒绝、batch rollback 和并发终态写入前的 trace 快照。同步 SQLite Worker、数据库
-身份与 migration、文件权限/加密、Profile revision、断电耐久、配额/分页和启动 reconciliation
-等生产化事项延后，并记录在
+pending ToolCall 拒绝、batch rollback 和并发终态写入前的 trace 快照。当时把 SQLite Worker、
+数据库身份与 migration、文件权限/加密、Profile revision、断电耐久、配额/分页和启动
+reconciliation 等事项记录到
 [Agent SQLite Production TODO](./2026-08-16-agent-sqlite-production-todo.md)。修复后再次执行本机
 `qwen3:8b` 的 4 项显式 live 回归，真实 ToolCall + Mock Tool + SQLite trace 闭环全部通过，临时
 Ollama 服务已停止。
@@ -141,6 +141,18 @@ structured output 执行 JSON/AJV 校验并拒绝终态后的额外数据；meta
 只能停止 Runtime 等待，不能强制终止忽略 AbortSignal 的任意 Promise；内置 Mock 已在副作用前检查
 signal，真实设备必须在 Phase 2 通过 deadline、action_id 幂等和 reconciliation 关闭该物理边界。
 
+Phase 1 遗留修订（2026-08-16）：`DatabaseSync` 已移入专用 Worker，Store 请求按消息顺序串行执行；
+SQLite 写锁等待期间主线程 timer 可继续准时运行。文件数据库默认在 Worker ready 前原子恢复上次
+进程留下的 `pending/running` Run，ToolCall/Action 退出可执行态，并以 `run.recovered` 和 error
+details 明确记录物理 outcome unknown、`replay_allowed=false`；重复启动不会重复恢复或生成事件。
+新增回归还证明协作型 Tool 在 await 后重新检查 AbortSignal 时不会产生晚到副作用。至此，Phase 1
+负责的 SQLite 隔离、启动恢复、相对 timeout 与协作取消边界已关闭；设备侧 deadline、action_id
+幂等和 snapshot reconciliation 仍属于 Phase 2。Node 24.19.0 严格类型检查、69 项 Agent
+确定性测试、30 项协议测试和 2 项 harness 测试全部通过。
+
+用户另有一个新的离线候选模型等待验证。在该模型完成同一冻结 eval 前，不更新现有模型基线，
+也不把候选模型的潜在表现计入真实 Action 安全门禁；无工具误调用仍由 Phase 2 确定性策略层兜底。
+
 ## 4. 验证
 
 - 单元测试：schema、budget、cancel、duplicate call、policy；
@@ -155,4 +167,5 @@ signal，真实设备必须在 Phase 2 通过 deadline、action_id 幂等和 rec
 - [x] ToolCall schema 成功率达到 Mock Demo 约定门槛；
 - [x] timeout/cancel/budget 可重复验证；
 - [x] Runtime 无需真实 P4 即可完成全套测试；
+- [ ] 新离线候选模型完成同一冻结 eval，并记录与当前基线的可复现对比；
 - [ ] 用户 review 通过后启动 Phase 2。
