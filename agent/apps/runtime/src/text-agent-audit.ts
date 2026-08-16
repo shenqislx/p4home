@@ -2,6 +2,7 @@ import type {
   Event,
   Message,
   ToolCall,
+  ToolFailureResult,
   ToolResult,
 } from "@p4home/core";
 import type { OllamaChatMessage } from "@p4home/provider-ollama";
@@ -124,6 +125,10 @@ export class TextAgentAuditTrail {
   }
 
   public async finish(result: TextAgentRunResult): Promise<void> {
+    const pending = await this.#pendingToolFailures(result.status);
+    if (result.status === "completed" && pending.results.length > 0) {
+      throw new Error("completed run still has pending tool calls");
+    }
     const completedAtMs = this.#now();
     const eventType = result.status === "completed" ? "run.completed" : `run.${result.status}`;
     const event = this.#newEvent(eventType, {
@@ -140,17 +145,25 @@ export class TextAgentAuditTrail {
         started_at_ms: this.#startedAtMs,
         completed_at_ms: completedAtMs,
       },
-      events: [event],
+      messages: pending.messages,
+      tool_results: pending.results.map((toolResult) => ({
+        run_id: this.#runId,
+        result: toolResult,
+        completed_at_ms: completedAtMs,
+      })),
+      events: [...pending.events, event],
     });
+    this.#logPendingEvents(pending.events);
     this.#logEvent(event, { status: result.status });
   }
 
   public async fail(error: unknown): Promise<void> {
-    const completedAtMs = this.#now();
     const code =
       typeof error === "object" && error !== null && "code" in error
         ? String(error.code)
         : "INTERNAL";
+    const pending = await this.#pendingToolFailures("failed");
+    const completedAtMs = this.#now();
     const event = this.#newEvent("run.failed", { status: "failed", error_code: code });
     await this.#store.writeBatch({
       run: {
@@ -160,9 +173,73 @@ export class TextAgentAuditTrail {
         started_at_ms: this.#startedAtMs,
         completed_at_ms: completedAtMs,
       },
-      events: [event],
+      messages: pending.messages,
+      tool_results: pending.results.map((toolResult) => ({
+        run_id: this.#runId,
+        result: toolResult,
+        completed_at_ms: completedAtMs,
+      })),
+      events: [...pending.events, event],
     });
+    this.#logPendingEvents(pending.events);
     this.#logEvent(event, { status: "failed" });
+  }
+
+  async #pendingToolFailures(
+    status: TextAgentRunResult["status"],
+  ): Promise<{
+    readonly results: readonly ToolFailureResult[];
+    readonly messages: readonly Message[];
+    readonly events: readonly Event[];
+  }> {
+    const trace = await this.#store.getRunTrace(this.#runId);
+    const pendingCalls = trace?.tool_calls.filter((call) => call.status === "pending") ?? [];
+    const code = status === "cancelled"
+      ? "CANCELLED"
+      : status === "timed_out"
+        ? "DEADLINE_EXCEEDED"
+        : "INTERNAL";
+    const message = status === "cancelled"
+      ? "tool call was not executed because the run was cancelled"
+      : status === "timed_out"
+        ? "tool call was not executed because the run timed out"
+        : "tool call was not executed because the run failed";
+    const results = pendingCalls.map((call): ToolFailureResult => ({
+      schema_version: 1,
+      tool_call_id: call.tool_call_id,
+      name: call.name,
+      status: "error",
+      result: null,
+      error: { code, message, retryable: false },
+    }));
+    const messages = results.map((result) => this.#newMessage(
+      "tool",
+      JSON.stringify(result),
+      result.name,
+      {
+        tool_call_id: result.tool_call_id,
+        status: result.status,
+        synthesized: true,
+      },
+    ));
+    const events = results.map((result) => this.#newEvent("tool.failed", {
+      tool_call_id: result.tool_call_id,
+      name: result.name,
+      status: result.status,
+      error_code: result.error.code,
+      synthesized: true,
+    }));
+    return { results, messages, events };
+  }
+
+  #logPendingEvents(events: readonly Event[]): void {
+    for (const event of events) {
+      const toolCallId = event.payload.tool_call_id;
+      this.#logEvent(event, {
+        ...(typeof toolCallId === "string" ? { tool_call_id: toolCallId } : {}),
+        status: "error",
+      });
+    }
   }
 
   #newMessage(

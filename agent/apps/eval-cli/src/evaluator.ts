@@ -23,6 +23,7 @@ export type EvalCaseOutcome =
   | "pass"
   | "mismatch"
   | "contract_error"
+  | "invalid_response"
   | "provider_error";
 
 export interface ToolCallingEvalConfig {
@@ -45,6 +46,7 @@ export interface ToolCallingEvalCaseResult {
   readonly expected: readonly FrozenToolCallInput[];
   readonly expected_no_tool_code: string | null;
   readonly actual: readonly FrozenToolCallInput[];
+  readonly actual_text: string;
   readonly outcome: EvalCaseOutcome;
   readonly exact_match: boolean;
   readonly tool_name_sequence_match: boolean;
@@ -63,6 +65,7 @@ export interface ToolCallingEvalSummary {
   readonly no_tool_cases: number;
   readonly no_tool_accuracy: number;
   readonly contract_errors: number;
+  readonly invalid_responses: number;
   readonly provider_errors: number;
   readonly latency_p50_ms: number;
   readonly latency_p95_ms: number;
@@ -74,7 +77,7 @@ export interface ToolCallingEvalSummary {
 }
 
 export interface ToolCallingEvalReport {
-  readonly schema_version: 1;
+  readonly schema_version: 2;
   readonly model: string;
   readonly config: {
     readonly system_prompt: string;
@@ -151,6 +154,7 @@ function summarize(cases: readonly ToolCallingEvalCaseResult[]): ToolCallingEval
       noToolCases.length,
     ),
     contract_errors: cases.filter((item) => item.outcome === "contract_error").length,
+    invalid_responses: cases.filter((item) => item.outcome === "invalid_response").length,
     provider_errors: cases.filter((item) => item.outcome === "provider_error").length,
     latency_p50_ms: percentile(cases.map((item) => item.latency_ms), 0.5),
     latency_p95_ms: percentile(cases.map((item) => item.latency_ms), 0.95),
@@ -208,7 +212,8 @@ export async function evaluateToolCalling(
       try {
         const actual = validateFrozenToolCalls(rawActual);
         const expected = scenario.expected;
-        const exactMatch = isDeepStrictEqual(actual, expected);
+        const emptyResponse = actual.length === 0 && response.message.content.trim().length === 0;
+        const exactMatch = !emptyResponse && isDeepStrictEqual(actual, expected);
         const toolNameSequenceMatch = isDeepStrictEqual(
           actual.map((call) => call.name),
           expected.map((call) => call.name),
@@ -219,7 +224,8 @@ export async function evaluateToolCalling(
           expected,
           expected_no_tool_code: scenario.no_tool?.code ?? null,
           actual,
-          outcome: exactMatch ? "pass" : "mismatch",
+          actual_text: response.message.content,
+          outcome: emptyResponse ? "invalid_response" : exactMatch ? "pass" : "mismatch",
           exact_match: exactMatch,
           tool_name_sequence_match: toolNameSequenceMatch,
           latency_ms: elapsed,
@@ -233,6 +239,7 @@ export async function evaluateToolCalling(
           expected: scenario.expected,
           expected_no_tool_code: scenario.no_tool?.code ?? null,
           actual: rawActual,
+          actual_text: response.message.content,
           outcome: "contract_error",
           exact_match: false,
           tool_name_sequence_match: false,
@@ -248,6 +255,7 @@ export async function evaluateToolCalling(
         expected: scenario.expected,
         expected_no_tool_code: scenario.no_tool?.code ?? null,
         actual: [],
+        actual_text: "",
         outcome: "provider_error",
         exact_match: false,
         tool_name_sequence_match: false,
@@ -261,7 +269,7 @@ export async function evaluateToolCalling(
   }
 
   return {
-    schema_version: 1,
+    schema_version: 2,
     model: options.model,
     config: {
       system_prompt: systemPrompt,

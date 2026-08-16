@@ -128,6 +128,19 @@ output 本地 AJV 复验）全部通过。详细数据、候选比较和失败�
 [Phase 1 model eval](../../evidence/agent-phase-1/model-eval.md)。下一项为第 12 步文档收尾与 Phase 1
 整体 review；仍不启动真实 P4 WebSocket。
 
+整体 review 修订（2026-08-16）：修复多调用首项失败或非法 Tool Result 时审计残留 `pending`、
+Run 无法终止的问题；未执行调用现在以合成失败结果和 Run 终态原子提交。Provider stream 对完整
+structured output 执行 JSON/AJV 校验并拒绝终态后的额外数据；metadata-only capability probe 不再
+把 completion 声明误报成已验证 structured output；cancel/timeout 同时发生时按首个 abort 来源
+分类。协议门禁新增 invalid fixture 预期 AJV 路径、fixture/golden ID 唯一性、tool/no_tool 互斥与
+调用上限检查。评测报告升级为 schema v2，保存最终文本并拒绝空无工具响应。
+
+修复后 Node 24.19.0 严格类型检查和 65 项确定性测试通过。8B 与 30B Coder 在同一当前提示词、
+同一 32 场景、各两轮下重新评测；35B 默认模型也完成 v2 两轮回归，仍为 exact 73.44%、工具场景
+75%、工具名顺序 82.81%、无工具安全拒绝 70%，contract/invalid/provider error 均为 0。工具 timeout
+只能停止 Runtime 等待，不能强制终止忽略 AbortSignal 的任意 Promise；内置 Mock 已在副作用前检查
+signal，真实设备必须在 Phase 2 通过 deadline、action_id 幂等和 reconciliation 关闭该物理边界。
+
 ## 4. 验证
 
 - 单元测试：schema、budget、cancel、duplicate call、policy；

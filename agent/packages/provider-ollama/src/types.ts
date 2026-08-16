@@ -4,7 +4,10 @@ export interface OllamaCapabilities {
   readonly modelAvailable: boolean;
   readonly declaredCapabilities: readonly string[];
   readonly toolCalling: boolean;
+  /** Verified capability. A metadata-only probe cannot set this to true. */
   readonly structuredOutput: boolean;
+  /** The Ollama API/model metadata declares the completion endpoint needed for format. */
+  readonly structuredOutputApi: boolean;
   readonly streaming: boolean;
   readonly cancellation: boolean;
 }

@@ -18,10 +18,11 @@ const MODEL = "fake-tools:1b";
 function response(
   calls: readonly OllamaToolCall[] = [],
   usage: Partial<OllamaChatResult> = {},
+  content = calls.length === 0 ? "不执行。" : "",
 ): OllamaChatResult {
   return {
     model: MODEL,
-    message: { role: "assistant", content: "", tool_calls: calls },
+    message: { role: "assistant", content, tool_calls: calls },
     ...usage,
   };
 }
@@ -131,6 +132,7 @@ test("evaluator continues after mismatch, contract and provider errors", async (
     no_tool_cases: 2,
     no_tool_accuracy: 0.5,
     contract_errors: 1,
+    invalid_responses: 0,
     provider_errors: 1,
     latency_p50_ms: 30,
     latency_p95_ms: 50,
@@ -153,4 +155,28 @@ test("evaluator continues after mismatch, contract and provider errors", async (
   assert.deepEqual(report.cases[3]?.actual, [
     { name: "shell.run", arguments: { command: "true" } },
   ]);
+  assert.equal(report.cases[1]?.actual_text, "不执行。");
+});
+
+test("evaluator rejects an empty response when no tool is expected", async () => {
+  const report = await evaluateToolCalling({
+    model: MODEL,
+    scenarios: [{
+      id: "empty-no-tool",
+      text: "不要执行",
+      expected: [],
+      no_tool: { code: "NO_ACTION", reason: "negative" },
+    }],
+    provider: {
+      async chat(): Promise<OllamaChatResult> {
+        return response([], {}, "");
+      },
+    },
+  });
+
+  assert.equal(report.schema_version, 2);
+  assert.equal(report.cases[0]?.outcome, "invalid_response");
+  assert.equal(report.cases[0]?.exact_match, false);
+  assert.equal(report.summary.no_tool_accuracy, 0);
+  assert.equal(report.summary.invalid_responses, 1);
 });

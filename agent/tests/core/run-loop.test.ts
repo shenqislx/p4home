@@ -139,7 +139,7 @@ test("duplicate IDs and more than four calls are rejected before execution", asy
   );
 });
 
-test("relative timeout terminates a tool that ignores cancellation", async () => {
+test("relative timeout stops waiting for a tool that ignores cancellation", async () => {
   const tools = new Map<string, ToolDefinition>([
     [
       "slow",

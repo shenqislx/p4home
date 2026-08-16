@@ -44,6 +44,12 @@ function isRoomId(value: unknown): value is RoomId {
   return typeof value === "string" && (ROOM_IDS as readonly string[]).includes(value);
 }
 
+function assertExecutionActive(context: ToolExecutionContext): void {
+  if (context.signal.aborted) {
+    throw new ToolExecutionError("CANCELLED", "tool execution was cancelled");
+  }
+}
+
 export function createMockP4HomeDomain(
   initial: Partial<Pick<MockCharacterState, "room_id" | "activity">> = {},
 ): MockP4HomeDomain {
@@ -58,14 +64,16 @@ export function createMockP4HomeDomain(
   const definitions: ToolDefinition[] = [
     {
       name: "character.get_state",
-      async execute(argumentsValue): Promise<Record<string, unknown>> {
+      async execute(argumentsValue, context): Promise<Record<string, unknown>> {
+        assertExecutionActive(context);
         exactArguments(argumentsValue, []);
         return { ...state };
       },
     },
     {
       name: "character.go_to_room",
-      async execute(argumentsValue): Promise<Record<string, unknown>> {
+      async execute(argumentsValue, context): Promise<Record<string, unknown>> {
+        assertExecutionActive(context);
         exactArguments(argumentsValue, ["room_id"]);
         if (!isRoomId(argumentsValue.room_id)) {
           throw new ToolExecutionError("UNKNOWN_ROOM", "room_id is not registered in Tool Schema v1");
@@ -77,7 +85,8 @@ export function createMockP4HomeDomain(
     },
     {
       name: "character.set_activity",
-      async execute(argumentsValue): Promise<Record<string, unknown>> {
+      async execute(argumentsValue, context): Promise<Record<string, unknown>> {
+        assertExecutionActive(context);
         exactArguments(argumentsValue, ["activity"]);
         if (argumentsValue.activity !== "idle" && argumentsValue.activity !== "sleep") {
           throw new ToolExecutionError("INVALID_ARGUMENT", "activity must be idle or sleep");
@@ -89,7 +98,8 @@ export function createMockP4HomeDomain(
     },
     {
       name: "character.say",
-      async execute(argumentsValue): Promise<Record<string, unknown>> {
+      async execute(argumentsValue, context): Promise<Record<string, unknown>> {
+        assertExecutionActive(context);
         exactArguments(argumentsValue, ["text"]);
         if (
           typeof argumentsValue.text !== "string"
@@ -106,8 +116,9 @@ export function createMockP4HomeDomain(
       name: "world.get_snapshot",
       async execute(
         argumentsValue: Record<string, unknown>,
-        _context: ToolExecutionContext,
+        context: ToolExecutionContext,
       ): Promise<Record<string, unknown>> {
+        assertExecutionActive(context);
         exactArguments(argumentsValue, []);
         return {
           state_version: stateVersion,

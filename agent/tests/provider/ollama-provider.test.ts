@@ -44,7 +44,8 @@ test("probe reports server, model and declared capabilities without loading the 
     modelAvailable: true,
     declaredCapabilities: ["completion", "tools", "thinking"],
     toolCalling: true,
-    structuredOutput: true,
+    structuredOutput: false,
+    structuredOutputApi: true,
     streaming: true,
     cancellation: true,
   });
@@ -74,6 +75,7 @@ test("probe reports a missing model without attempting show or generation", asyn
   assert.equal(capabilities.modelAvailable, false);
   assert.equal(capabilities.toolCalling, false);
   assert.equal(capabilities.structuredOutput, false);
+  assert.equal(capabilities.structuredOutputApi, false);
   assert.deepEqual(capabilities.declaredCapabilities, []);
 });
 
@@ -405,6 +407,52 @@ test("stream parses NDJSON across transport chunk boundaries", async () => {
   assert.equal(chunks[1]?.eval_count, 2);
 });
 
+test("stream locally validates complete structured output", async () => {
+  const schema = {
+    type: "object",
+    required: ["answer"],
+    properties: { answer: { type: "string" } },
+    additionalProperties: false,
+  } as const;
+  const lines = [
+    JSON.stringify({ model: MODEL, response: '{"answer":', done: false }),
+    JSON.stringify({ model: MODEL, response: "1}", done: true }),
+  ].join("\n");
+  const provider = new OllamaHttpProvider({
+    model: MODEL,
+    fetch: async () => new Response(lines),
+  });
+
+  await assert.rejects(
+    async () => {
+      for await (const _chunk of provider.stream({ prompt: "回答", format: schema })) {
+        // Consume the stream so final structured-output validation runs.
+      }
+    },
+    (error) => assertProviderError(error, "INVALID_RESPONSE"),
+  );
+});
+
+test("stream rejects data after a terminal chunk", async () => {
+  const lines = [
+    JSON.stringify({ model: MODEL, response: "done", done: true }),
+    JSON.stringify({ model: MODEL, response: "late", done: false }),
+  ].join("\n");
+  const provider = new OllamaHttpProvider({
+    model: MODEL,
+    fetch: async () => new Response(lines),
+  });
+
+  await assert.rejects(
+    async () => {
+      for await (const _chunk of provider.stream({ prompt: "回答" })) {
+        // Consume the complete response to validate terminal framing.
+      }
+    },
+    (error) => assertProviderError(error, "INVALID_RESPONSE"),
+  );
+});
+
 test("an external AbortSignal cancels an active generation", async () => {
   const fetch: OllamaFetch = async (_input, init) =>
     await new Promise<Response>((_resolve, reject) => {
@@ -434,6 +482,23 @@ test("relative timeout terminates a transport that honors AbortSignal", async ()
     provider.generate({ prompt: "等待" }),
     (error) => assertProviderError(error, "TIMEOUT"),
   );
+});
+
+test("the first abort source determines cancellation versus timeout", async () => {
+  const fetch: OllamaFetch = async (_input, init) =>
+    await new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      assert.ok(signal !== undefined && signal !== null);
+      signal.addEventListener("abort", () => {
+        setTimeout(() => reject(signal.reason), 120);
+      }, { once: true });
+    });
+  const provider = new OllamaHttpProvider({ model: MODEL, fetch, requestTimeoutMs: 100 });
+  const controller = new AbortController();
+  const pending = provider.generate({ prompt: "等待" }, controller.signal);
+  controller.abort(new Error("user cancelled first"));
+
+  await assert.rejects(pending, (error) => assertProviderError(error, "CANCELLED"));
 });
 
 test("an external AbortSignal cancels an active NDJSON stream", async () => {

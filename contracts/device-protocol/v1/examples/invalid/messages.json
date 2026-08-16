@@ -2,6 +2,7 @@
   {
     "name": "unsupported protocol version",
     "expected_error": "UNSUPPORTED_VERSION",
+    "expected_validation": { "instance_path": "/protocol_version", "keyword": "const" },
     "message": {
       "protocol_version": 2,
       "message_id": "invalid-001",
@@ -17,6 +18,7 @@
   {
     "name": "missing message id",
     "expected_error": "INVALID_MESSAGE",
+    "expected_validation": { "instance_path": "", "keyword": "required" },
     "message": {
       "protocol_version": 1,
       "correlation_id": null,
@@ -31,6 +33,7 @@
   {
     "name": "unknown top level property",
     "expected_error": "INVALID_MESSAGE",
+    "expected_validation": { "instance_path": "", "keyword": "additionalProperties" },
     "message": {
       "protocol_version": 1,
       "message_id": "invalid-003",
@@ -47,6 +50,7 @@
   {
     "name": "unknown room",
     "expected_error": "UNKNOWN_ROOM",
+    "expected_validation": { "instance_path": "/payload/arguments/room_id", "keyword": "enum" },
     "message": {
       "protocol_version": 1,
       "message_id": "invalid-004",
@@ -68,6 +72,7 @@
   {
     "name": "unsupported object action",
     "expected_error": "UNSUPPORTED_TOOL",
+    "expected_validation": { "instance_path": "/payload/tool", "keyword": "enum" },
     "message": {
       "protocol_version": 1,
       "message_id": "invalid-005",
@@ -89,6 +94,7 @@
   {
     "name": "say text too long",
     "expected_error": "INVALID_ARGUMENT",
+    "expected_validation": { "instance_path": "/payload/arguments/text", "keyword": "maxLength" },
     "message": {
       "protocol_version": 1,
       "message_id": "invalid-006",

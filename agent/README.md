@@ -46,12 +46,13 @@ fail closed；8B 在无工具拒绝集上的误调用率又过高，因此两者
 
 ```bash
 pnpm eval:ollama -- --model qwen3.6:35b-mlx --repeat 2 \
-  --output ../evidence/agent-phase-1/qwen3.6-35b-mlx-eval-final.json
+  --output ../evidence/agent-phase-1/qwen3.6-35b-mlx-eval-v2.json
 ```
 
 `--model`、`--case` 可重复；`--limit` 用于前 N 条 smoke，不能和 `--case` 同时使用。
 报告区分 exact accuracy、工具名顺序准确率、工具场景精确率、无工具拒绝准确率、契约/provider
-错误、p50/p95 延迟和输出 tokens/s。模型返回的每个调用仍会经过冻结 Tool Schema v1 本地校验。
+错误、空响应、p50/p95 延迟和输出 tokens/s。schema v2 逐例保存模型最终文本，且没有 ToolCall
+也没有非空文本的响应不会再计为通过。模型返回的每个调用仍会经过冻结 Tool Schema v1 本地校验。
 
 运行一次真实 Ollama → Mock Tool → SQLite trace 闭环：
 
@@ -64,8 +65,9 @@ pnpm debug:agent -- --model qwen3:8b --text "查询角色状态" --database ./da
 连接真实 P4 或 Home Assistant。当前模型选择、性能数据和已知失败详见
 [Phase 1 model eval](../evidence/agent-phase-1/model-eval.md)。
 
-Provider 的 capability probe 不加载模型；`structuredOutput=true` 表示本机 Ollama completion API
-接受 `format`，不保证某个模型会遵循 schema。调用端必须保留本地 JSON/AJV 校验，并在
+Provider 的 capability probe 不加载模型；`structuredOutputApi=true` 只表示模型元数据声明
+completion API，`structuredOutput` 在这种 metadata-only probe 中保持保守的 `false`，不伪装成
+模型已经实测遵循 schema。调用端必须保留本地 JSON/AJV 校验，并在
 `INVALID_RESPONSE` 时显式选择已验证模型，不能透传或修补模型原文。
 
 ## SQLite 审计与结构化日志
@@ -74,7 +76,8 @@ Provider 的 capability probe 不加载模型；`structuredOutput=true` 表示�
 AgentProfile、Session、Run、Message、ToolCall、Action 与 Event。Run、Session、Action 的身份字段
 不可重写，终态 Run/Action 不可回退；一个 ToolCall 只能从 `pending` 写入一次终态结果。查询
 `getRunTrace(runId)` 可获得同一读快照下的完整关联记录。Run 不能在 ToolCall 或 Action 未终止时
-结束；同一审计阶段的 Run、Message、ToolCall、ToolResult 和 Event 使用 batch transaction 写入。
+结束；前序工具失败导致后续调用未执行时，审计会以合成失败结果终止这些调用，再和 Run 终态原子
+提交。同一审计阶段的 Run、Message、ToolCall、ToolResult 和 Event 使用 batch transaction 写入。
 
 调用 `runTextAgent()` 前必须先保存 AgentProfile 和 Session，再通过可选 `audit` 参数接入存储。
 审计启用后，system/user/assistant/tool 消息、模型轮次、ToolCall/ToolResult 和 Run 终态都会持久化：
@@ -118,7 +121,8 @@ Run 结果。
   probe 本身不会加载模型；
 - `generate()` 使用 `/api/generate` 的 `stream: false` 响应；
 - `chat()` 使用 `/api/chat` 的原生 `tools`、`tool_calls` 与 `format` 字段；
-- `stream()` 按 NDJSON 增量解析并要求出现 `done: true` 终态；
+- `stream()` 按 NDJSON 增量解析，要求最终 `done: true` 终态且终态后不得继续输出；携带
+  `format` 时会聚合文本并在交付终态块前执行本地 JSON/AJV 校验；
 - 不可达、超时、取消、模型不存在、HTTP 错误和非法响应使用稳定错误码；Runtime 将 provider
   失败映射为可审计的 `failed / cancelled / timed_out` 终态；
 - Ollama 返回的 ToolCall 必须再次通过冻结 Tool Schema v1；`generate()` 或 `chat()` 只要携带
@@ -127,7 +131,8 @@ Run 结果。
   Tool Result v1。模型只看到冻结目录与当前执行 allowlist 的交集；空最终回复、未知工具、非法
   参数、超预算和非法结果全部 fail closed；
 - Core 严格拒绝非有限数或小数 timeout，使用组合 `AbortSignal` 消除取消竞态，并把工具错误
-  规范到 Tool Result v1 的 256 字符上限。
+  规范到 Tool Result v1 的 256 字符上限。timeout 只停止 Runtime 等待，工具实现必须在每次外部
+  副作用前及每次 await 后协作检查 `context.signal`；真实设备还必须执行 deadline、幂等与恢复对账。
 
 确定性测试不要求 Ollama 服务。真实本机 smoke 必须显式启用：
 

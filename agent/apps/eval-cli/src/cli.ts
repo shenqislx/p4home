@@ -173,7 +173,7 @@ async function evalCommand(argumentsValue: ParsedArguments): Promise<void> {
   }
 
   const artifact = {
-    schema_version: 1,
+    schema_version: 2,
     generated_at: new Date().toISOString(),
     runtime: { node: process.version, platform: process.platform, arch: process.arch },
     suite: {

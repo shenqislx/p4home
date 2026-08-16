@@ -15,9 +15,21 @@ const TOOL_SCHEMA_ROOT = `${REPOSITORY_ROOT}contracts/tools/v1`;
 interface InvalidFixture {
   readonly name: string;
   readonly expected_error: string;
+  readonly expected_validation: {
+    readonly instance_path: string;
+    readonly keyword: string;
+  };
   readonly message: Record<string, unknown>;
   readonly fixture_mutation?: string;
 }
+
+const INVALID_FIXTURE_ERROR_CODES = new Set([
+  "INVALID_ARGUMENT",
+  "INVALID_MESSAGE",
+  "UNKNOWN_ROOM",
+  "UNSUPPORTED_TOOL",
+  "UNSUPPORTED_VERSION",
+]);
 
 export interface GoldenIntent {
   readonly id: string;
@@ -173,18 +185,72 @@ export function validateFrozenContracts(): ContractValidationReport {
     assertValid(validateMessage, message, `valid message fixture ${index}`);
   }
   for (const fixture of invalidMessages) {
+    const expectedValidation = fixture.expected_validation;
+    if (
+      typeof fixture.name !== "string"
+      || fixture.name.trim().length === 0
+      || typeof fixture.expected_error !== "string"
+      || !INVALID_FIXTURE_ERROR_CODES.has(fixture.expected_error)
+      || expectedValidation === null
+      || typeof expectedValidation !== "object"
+      || typeof expectedValidation.instance_path !== "string"
+      || typeof expectedValidation.keyword !== "string"
+      || expectedValidation.keyword.trim().length === 0
+    ) {
+      throw new FrozenContractError(`invalid fixture metadata is incomplete: ${fixture.name}`);
+    }
     if (validateMessage(mutateInvalidFixture(fixture))) {
       throw new FrozenContractError(`invalid fixture unexpectedly passed: ${fixture.name}`);
+    }
+    const expectedFailure = validateMessage.errors?.some((error) =>
+      error.instancePath === expectedValidation.instance_path
+      && error.keyword === expectedValidation.keyword
+    ) === true;
+    if (!expectedFailure) {
+      throw new FrozenContractError(
+        `invalid fixture failed for the wrong reason: ${fixture.name} (${fixture.expected_error})`,
+      );
     }
   }
 
   const toolValidators = new Map<string, ValidateFunction>();
   for (const tool of toolCatalog.tools) {
+    if (toolValidators.has(tool.name)) {
+      throw new FrozenContractError(`duplicate frozen tool definition: ${tool.name}`);
+    }
     toolValidators.set(tool.name, ajv.compile(tool.parameters));
   }
+  const fixtureNames = invalidMessages.map((fixture) => fixture.name);
+  if (new Set(fixtureNames).size !== fixtureNames.length) {
+    throw new FrozenContractError("invalid message fixture names must be unique");
+  }
+  const goldenIds = new Set<string>();
   for (const scenario of goldenIntents) {
+    if (
+      typeof scenario.id !== "string"
+      || scenario.id.trim().length === 0
+      || typeof scenario.text !== "string"
+      || scenario.text.trim().length === 0
+      || goldenIds.has(scenario.id)
+      || !Array.isArray(scenario.expected)
+    ) {
+      throw new FrozenContractError(`golden intent id/text is empty or duplicated: ${scenario.id}`);
+    }
+    goldenIds.add(scenario.id);
     if (scenario.expected.length === 0 && scenario.no_tool === undefined) {
       throw new FrozenContractError(`golden intent ${scenario.id} lacks no_tool outcome`);
+    }
+    if (scenario.expected.length > 0 && scenario.no_tool !== undefined) {
+      throw new FrozenContractError(`golden intent ${scenario.id} mixes tool and no_tool outcomes`);
+    }
+    if (scenario.expected.length > toolCatalog.execution_policy.max_calls_per_turn) {
+      throw new FrozenContractError(`golden intent ${scenario.id} exceeds the per-turn call limit`);
+    }
+    if (
+      scenario.no_tool !== undefined
+      && (scenario.no_tool.code.trim().length === 0 || scenario.no_tool.reason.trim().length === 0)
+    ) {
+      throw new FrozenContractError(`golden intent ${scenario.id} has an incomplete no_tool outcome`);
     }
     for (const call of scenario.expected) {
       const validator = toolValidators.get(call.name);

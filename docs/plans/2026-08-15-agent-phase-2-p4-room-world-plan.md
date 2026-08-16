@@ -20,12 +20,16 @@
 8. 保留 Agent 离线时现有 HA UI 与本地 fallback policy；
 9. 扩展 host simulator/fake backend；
 10. 在真实 Action 前增加确定性策略/用户确认门禁，拦截无工具 eval 中的模型误调用；
-11. 完成 Agent Runtime ↔ simulator ↔ 实机闭环。
+11. 把 timeout 定义为“Agent 停止等待”而不是“动作必未发生”：设备在每个副作用前检查 deadline，
+    Agent 以 action_id 幂等重试，并对 timeout/断线后的未知结果执行 snapshot reconciliation；
+12. 完成 Agent Runtime ↔ simulator ↔ 实机闭环。
 
 ## 3. 验证
 
 - “去客厅待一会儿”返回 accepted/started/completed；
 - 相同 action_id 重发不重复移动；
+- 工具忽略本地 AbortSignal 或响应晚到时，过期动作不会在设备侧产生新副作用；若结果未知，重连后
+  通过 snapshot 对账，禁止盲目重放；
 - 断线重连后 snapshot 与真实角色一致；
 - Agent 离线 2 小时不影响 P4 ↔ HA；
 - 连续 100 次动作无崩溃、无泄漏、无静默丢失；

@@ -47,3 +47,21 @@ test("unknown room returns the frozen UNKNOWN_ROOM error", async () => {
   assert.equal(result.results[0]?.error?.code, "UNKNOWN_ROOM");
   assert.equal(domain.getState().room_id, "living_room");
 });
+
+test("mock side-effect tools reject an aborted execution before mutating state", async () => {
+  const domain = createMockP4HomeDomain();
+  const tool = domain.tools.get("character.go_to_room");
+  assert.ok(tool !== undefined);
+  const controller = new AbortController();
+  controller.abort(new Error("cancelled before execution"));
+
+  await assert.rejects(
+    tool.execute(
+      { room_id: "study" },
+      { run_id: "run-cancelled", tool_call_id: "move-cancelled", signal: controller.signal },
+    ),
+    /tool execution was cancelled/,
+  );
+  assert.equal(domain.getState().room_id, "living_room");
+  assert.equal(domain.getStateVersion(), 1);
+});

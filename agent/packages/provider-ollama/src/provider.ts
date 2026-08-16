@@ -342,14 +342,31 @@ function asTransportError(
   error: unknown,
   externalSignal: AbortSignal | undefined,
   timeoutSignal: AbortSignal,
+  requestSignal: AbortSignal,
 ): OllamaProviderError {
-  if (timeoutSignal.aborted) {
+  if (
+    externalSignal?.aborted === true
+    && requestSignal.aborted
+    && requestSignal.reason === externalSignal.reason
+  ) {
+    return new OllamaProviderError("CANCELLED", "Ollama request was cancelled");
+  }
+  if (
+    timeoutSignal.aborted
+    && requestSignal.aborted
+    && requestSignal.reason === timeoutSignal.reason
+  ) {
     return new OllamaProviderError("TIMEOUT", "Ollama request timeout elapsed", {
       retryable: true,
     });
   }
   if (externalSignal?.aborted === true) {
     return new OllamaProviderError("CANCELLED", "Ollama request was cancelled");
+  }
+  if (timeoutSignal.aborted) {
+    return new OllamaProviderError("TIMEOUT", "Ollama request timeout elapsed", {
+      retryable: true,
+    });
   }
   if (error instanceof OllamaProviderError) {
     return error;
@@ -435,7 +452,8 @@ export class OllamaHttpProvider implements OllamaProvider {
       modelAvailable,
       declaredCapabilities,
       toolCalling: declaredCapabilities.includes("tools"),
-      structuredOutput: completion,
+      structuredOutput: false,
+      structuredOutputApi: completion,
       streaming: true,
       cancellation: true,
     };
@@ -496,6 +514,10 @@ export class OllamaHttpProvider implements OllamaProvider {
     signal?: AbortSignal,
   ): AsyncIterable<OllamaGenerateChunk> {
     validateGenerateRequest(request);
+    const validateStructuredOutput = structuredOutputValidator(
+      request.format,
+      "structured stream response",
+    );
     const scope = this.#scope(signal, request.timeout_ms);
     let response: Response;
     try {
@@ -506,7 +528,7 @@ export class OllamaHttpProvider implements OllamaProvider {
         signal: scope.signal,
       });
     } catch (error) {
-      throw asTransportError(error, signal, scope.timeoutSignal);
+      throw asTransportError(error, signal, scope.timeoutSignal, scope.signal);
     }
     if (!response.ok) {
       scope.controller.abort(new Error("request failed"));
@@ -521,13 +543,14 @@ export class OllamaHttpProvider implements OllamaProvider {
     const decoder = new TextDecoder();
     let buffer = "";
     let terminal = false;
+    let responseText = "";
     try {
       while (true) {
         let readResult: ReadableStreamReadResult<Uint8Array>;
         try {
           readResult = await reader.read();
         } catch (error) {
-          throw asTransportError(error, signal, scope.timeoutSignal);
+          throw asTransportError(error, signal, scope.timeoutSignal, scope.signal);
         }
         if (readResult.done) {
           buffer += decoder.decode();
@@ -540,14 +563,34 @@ export class OllamaHttpProvider implements OllamaProvider {
           if (line.trim().length === 0) {
             continue;
           }
+          if (terminal) {
+            throw new OllamaProviderError(
+              "INVALID_RESPONSE",
+              "Ollama stream contains data after its terminal chunk",
+            );
+          }
           const chunk = this.#parseStreamLine(line);
-          terminal ||= chunk.done;
+          responseText += chunk.response;
+          if (chunk.done) {
+            terminal = true;
+            validateStructuredOutput?.(responseText);
+          }
           yield chunk;
         }
       }
       if (buffer.trim().length > 0) {
+        if (terminal) {
+          throw new OllamaProviderError(
+            "INVALID_RESPONSE",
+            "Ollama stream contains data after its terminal chunk",
+          );
+        }
         const chunk = this.#parseStreamLine(buffer);
-        terminal ||= chunk.done;
+        responseText += chunk.response;
+        if (chunk.done) {
+          terminal = true;
+          validateStructuredOutput?.(responseText);
+        }
         yield chunk;
       }
       if (!terminal) {
@@ -603,7 +646,7 @@ export class OllamaHttpProvider implements OllamaProvider {
       }
       return await parseJson(response, path);
     } catch (error) {
-      throw asTransportError(error, externalSignal, scope.timeoutSignal);
+      throw asTransportError(error, externalSignal, scope.timeoutSignal, scope.signal);
     } finally {
       scope.controller.abort(new Error("request completed"));
     }

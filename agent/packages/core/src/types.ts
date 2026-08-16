@@ -105,6 +105,12 @@ export interface ToolExecutionContext {
 
 export interface ToolDefinition {
   readonly name: string;
+  /**
+   * Implementations must cooperatively observe context.signal before every
+   * externally visible side effect and after every awaited operation. A tool
+   * timeout stops the Runtime from waiting; JavaScript cannot force-stop an
+   * arbitrary Promise that ignores cancellation.
+   */
   execute(
     argumentsValue: Record<string, unknown>,
     context: ToolExecutionContext,

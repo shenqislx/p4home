@@ -317,3 +317,83 @@ test("a returned provider timeout uses a distinct terminal audit event", async (
   assert.equal(trace?.run.status, "timed_out");
   assert.equal(trace?.events.at(-1)?.type, "run.timed_out");
 });
+
+test("a failed call terminalizes later calls before the audited run finishes", async () => {
+  using store = new SqliteAuditStore(":memory:");
+  await seedSession(store);
+  const provider: Pick<OllamaProvider, "chat"> = {
+    async chat(): Promise<OllamaChatResult> {
+      return response("", [
+        {
+          type: "function",
+          function: { name: "character.go_to_room", arguments: { room_id: "study" } },
+        },
+        {
+          type: "function",
+          function: { name: "character.go_to_room", arguments: { room_id: "kitchen" } },
+        },
+      ]);
+    },
+  };
+  let executions = 0;
+
+  const result = await runTextAgent({
+    run_id: "run-audit-sequential-failure",
+    user_text: "先去书房再去厨房",
+    provider,
+    tools: new Map([["character.go_to_room", {
+      name: "character.go_to_room",
+      async execute(): Promise<Record<string, unknown>> {
+        executions += 1;
+        throw new Error("first call failed");
+      },
+    }]]),
+    audit: { store, session_id: "session-audit", clock: () => 3_000 },
+  });
+  const trace = await store.getRunTrace("run-audit-sequential-failure");
+
+  assert.equal(result.status, "failed");
+  assert.equal(executions, 1);
+  assert.equal(trace?.run.status, "failed");
+  assert.deepEqual(trace?.tool_calls.map((call) => call.status), ["error", "error"]);
+  assert.equal(trace?.tool_calls[1]?.error?.code, "INTERNAL");
+  assert.equal(
+    trace?.events.find((event) => event.payload.synthesized === true)?.type,
+    "tool.failed",
+  );
+});
+
+test("an invalid tool result still leaves a terminal failed audit trace", async () => {
+  using store = new SqliteAuditStore(":memory:");
+  await seedSession(store);
+  const provider: Pick<OllamaProvider, "chat"> = {
+    async chat(): Promise<OllamaChatResult> {
+      return response("", [{
+        type: "function",
+        function: { name: "character.go_to_room", arguments: { room_id: "study" } },
+      }]);
+    },
+  };
+
+  await assert.rejects(
+    runTextAgent({
+      run_id: "run-audit-invalid-result",
+      user_text: "去书房",
+      provider,
+      tools: new Map([["character.go_to_room", {
+        name: "character.go_to_room",
+        async execute(): Promise<Record<string, unknown>> {
+          return { room_id: 1n };
+        },
+      }]]),
+      audit: { store, session_id: "session-audit", clock: () => 4_000 },
+    }),
+    /Tool Schema v1 result/,
+  );
+  const trace = await store.getRunTrace("run-audit-invalid-result");
+
+  assert.equal(trace?.run.status, "failed");
+  assert.equal(trace?.tool_calls[0]?.status, "error");
+  assert.equal(trace?.tool_calls[0]?.error?.code, "INTERNAL");
+  assert.equal(trace?.events.at(-1)?.type, "run.failed");
+});
