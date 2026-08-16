@@ -19,7 +19,8 @@
 7. 支持 duplicate action、deadline、cancel、queue full；
 8. 保留 Agent 离线时现有 HA UI 与本地 fallback policy；
 9. 扩展 host simulator/fake backend；
-10. 完成 Agent Runtime ↔ simulator ↔ 实机闭环。
+10. 在真实 Action 前增加确定性策略/用户确认门禁，拦截无工具 eval 中的模型误调用；
+11. 完成 Agent Runtime ↔ simulator ↔ 实机闭环。
 
 ## 3. 验证
 
@@ -28,6 +29,7 @@
 - 断线重连后 snapshot 与真实角色一致；
 - Agent 离线 2 小时不影响 P4 ↔ HA；
 - 连续 100 次动作无崩溃、无泄漏、无静默丢失；
+- 无工具安全集必须 100% 被策略层拒绝；任何模型误调用均不得到达 Device WebSocket；
 - image、DIRAM、heap、stack、8 FPS 门禁通过。
 
 ## 4. 完成定义

@@ -33,7 +33,7 @@
 - [x] 实现 Ollama capability probe、generate、stream 与 cancel；
 - [x] 接入 Ollama 原生 chat/tool calling、本地 structured output 校验与有限文本 Agent Loop；
 - [x] 实现 SQLite 审计存储与结构化日志；
-- [ ] 建立模型 eval、性能基线与最小调试入口。
+- [x] 建立模型 eval、性能基线与最小调试入口。
 
 实际结果（2026-08-16）：Node runtime 已由 22.16 统一升级到 24.19 LTS，preflight 精确通过 `24.19.0`；AJV 报告 14 种消息、
 17 条合法 fixture、6 条非法 fixture、5 个工具与 32 条 golden intents 全部符合冻结契约；
@@ -104,8 +104,29 @@ pending ToolCall 拒绝、batch rollback 和并发终态写入前的 trace 快�
 `qwen3:8b` 的 4 项显式 live 回归，真实 ToolCall + Mock Tool + SQLite trace 闭环全部通过，临时
 Ollama 服务已停止。
 
-下一项工作为第 10–11 步：建立中文黄金场景 eval、固定上下文的性能基线，并提供最小调试入口，
-继续保持不接真实 P4。
+模型 eval 与调试入口里程碑（2026-08-16）：新增 `apps/eval-cli`，从冻结契约读取 32 条中文
+golden intents 和五工具目录；评测固定 Runtime system prompt、`temperature=0`、`seed=42`、
+`num_ctx=8192`、`num_predict=256`，逐例执行本地 Tool Schema 校验，分别汇总 exact、工具名顺序、
+工具场景、无工具拒绝、provider/contract error、p50/p95 和 tokens/s。CLI 支持多模型、单场景、
+前 N 条、1–10 轮重复和 JSON 证据输出；标准 pnpm `--` 参数分隔符已回归验证。
+
+Apple M4 Pro 14 核、64 GB 本机对已安装的 `qwen3:8b`、`qwen3-coder:30b`、
+`qwen3.6:35b-mlx` 做了固定上下文对照；缺失的 14B 未临时下载。选定 35B MLX 为开发默认，8B
+只作 structured-output/低内存功能 fallback，且不得自动承接真实 Action。默认模型最终 64 次
+结果为 exact 73.44%、工具名顺序 82.81%、工具场景
+75%、无工具拒绝 70%，contract/provider error 均为 0，p50 538 ms、p95 1,420 ms、
+64.03 output tokens/s，Ollama 常驻约 25 GB。32 个场景中 30 个在两轮间返回相同 ToolCall，
+重复一致率 93.75%；固定 seed 不能保证该模型完全确定。当前 Mock Demo 门槛定为 contract/provider error=0、
+exact≥70%、工具名顺序≥80%；均已通过。无工具拒绝尚未达到真实动作安全要求，接入 Phase 2
+设备 Action 前必须增加确定性策略/确认门禁并重新评测，不得仅依赖模型判断。
+
+最小调试 CLI 已用默认模型跑通“去书房，然后说我到了”：首轮生成两个有序 ToolCall，Mock
+执行成功，第二模型轮返回最终文本，SQLite trace 包含完整消息、两个 ToolCall 和十个 Event，且
+没有真实 P4/HA Action。35B live 的 generate、ToolCall 和完整 Loop 通过，但它忽略 structured
+output JSON Schema，provider 正确返回 `INVALID_RESPONSE`；8B 的 4 项 live（含 structured
+output 本地 AJV 复验）全部通过。详细数据、候选比较和失败场景见
+[Phase 1 model eval](../../evidence/agent-phase-1/model-eval.md)。下一项为第 12 步文档收尾与 Phase 1
+整体 review；仍不启动真实 P4 WebSocket。
 
 ## 4. 验证
 
@@ -117,8 +138,8 @@ Ollama 服务已停止。
 
 ## 5. 完成定义
 
-- [ ] 选定默认开发模型与降级模型；
-- [ ] ToolCall schema 成功率达到约定门槛；
-- [ ] timeout/cancel/budget 可重复验证；
-- [ ] Runtime 无需真实 P4 即可完成全套测试；
+- [x] 选定默认开发模型与降级模型；
+- [x] ToolCall schema 成功率达到 Mock Demo 约定门槛；
+- [x] timeout/cancel/budget 可重复验证；
+- [x] Runtime 无需真实 P4 即可完成全套测试；
 - [ ] 用户 review 通过后启动 Phase 2。

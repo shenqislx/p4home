@@ -1,0 +1,14 @@
+{
+  "name": "@p4home/eval-cli",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@p4home/contracts": "workspace:*",
+    "@p4home/domain-p4home": "workspace:*",
+    "@p4home/provider-ollama": "workspace:*",
+    "@p4home/runtime": "workspace:*",
+    "@p4home/storage-sqlite": "workspace:*"
+  }
+}

@@ -19,7 +19,7 @@ interface InvalidFixture {
   readonly fixture_mutation?: string;
 }
 
-interface GoldenIntent {
+export interface GoldenIntent {
   readonly id: string;
   readonly text: string;
   readonly expected: readonly {
@@ -223,6 +223,13 @@ export function getFrozenToolDefinitions(): readonly FrozenToolDefinition[] {
     description: tool.description,
     parameters: structuredClone(tool.parameters) as Record<string, unknown>,
   }));
+}
+
+export function getFrozenGoldenIntents(): readonly GoldenIntent[] {
+  validateFrozenContracts();
+  return structuredClone(
+    readJson<GoldenIntent[]>(`${TOOL_SCHEMA_ROOT}/fixtures/golden-intents.json`),
+  );
 }
 
 export function validateFrozenToolCalls(

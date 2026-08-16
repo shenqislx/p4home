@@ -5,6 +5,8 @@ import { ContractBoundaryError } from "@p4home/contracts";
 import { createMockP4HomeDomain } from "@p4home/domain-p4home";
 import {
   runTextAgent,
+  TEXT_AGENT_MODEL_OPTIONS,
+  TEXT_AGENT_SYSTEM_PROMPT,
   TextAgentError,
   type TextAgentRunOptions,
 } from "@p4home/runtime";
@@ -83,6 +85,10 @@ test("text agent executes validated calls in order and returns the final model t
     ],
   );
   assert.equal(domain.getState().room_id, "study");
+  const initial = requests[0];
+  assert.ok(initial !== undefined);
+  assert.deepEqual(initial.options, TEXT_AGENT_MODEL_OPTIONS);
+  assert.equal(initial.messages[0]?.content, TEXT_AGENT_SYSTEM_PROMPT);
   const followUp = requests[1];
   assert.ok(followUp !== undefined);
   assert.deepEqual(

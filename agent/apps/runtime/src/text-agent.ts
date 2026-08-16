@@ -24,8 +24,20 @@ import {
 export const TEXT_AGENT_TOOL_CALLS_MAX = 4;
 export const TEXT_AGENT_TOOL_ROUNDS_MAX = 4;
 
-const DEFAULT_SYSTEM_PROMPT =
-  "你是 P4 Home 的本地 Agent。需要执行动作时只能调用提供的工具；不得编造房间、工具或执行结果。";
+export const TEXT_AGENT_SYSTEM_PROMPT = [
+  "你是 P4 Home 的本地 Agent 意图路由器。",
+  "只调用用户明确要求且当前提供的工具，不得编造或替换房间、对象、动作、参数和执行结果。",
+  "目标不在工具参数枚举中、工具不支持、指令是否定句、条件由你判断、目标含糊时，不要调用任何工具，应简短说明或请求澄清。",
+  "用户明确要求多个动作时，必须在一次响应中按原始顺序返回全部调用；不得增加问候、确认、状态查询或其他推断动作。",
+  "character.say 的 text 必须逐字复制用户要求角色说出或显示的内容，不得润色或自行增删标点。",
+].join("");
+
+export const TEXT_AGENT_MODEL_OPTIONS = {
+  temperature: 0,
+  seed: 42,
+  num_ctx: 8_192,
+  num_predict: 256,
+} as const;
 
 export type TextAgentErrorCode =
   | "INVALID_CONFIGURATION"
@@ -210,7 +222,7 @@ async function runTextAgentLoop(
     const chatRequest = {
       messages: [...messages],
       tools: modelTools(options.tools),
-      options: { temperature: 0, num_ctx: 8192 },
+      options: TEXT_AGENT_MODEL_OPTIONS,
       think: false,
       ...(options.model_timeout_ms === undefined
         ? {}
@@ -310,7 +322,7 @@ async function runTextAgentLoop(
 
 export async function runTextAgent(options: TextAgentRunOptions): Promise<TextAgentRunResult> {
   const maxToolRounds = validateOptions(options);
-  const systemPrompt = options.system_prompt ?? DEFAULT_SYSTEM_PROMPT;
+  const systemPrompt = options.system_prompt ?? TEXT_AGENT_SYSTEM_PROMPT;
   const tools = await authorizedTools(options);
   const effectiveOptions = tools === options.tools ? options : { ...options, tools };
   const audit =

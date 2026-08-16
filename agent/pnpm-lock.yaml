@@ -17,6 +17,9 @@ importers:
       '@p4home/domain-p4home':
         specifier: workspace:*
         version: link:packages/domain-p4home
+      '@p4home/eval-cli':
+        specifier: workspace:*
+        version: link:apps/eval-cli
       '@p4home/provider-ollama':
         specifier: workspace:*
         version: link:packages/provider-ollama
@@ -35,6 +38,24 @@ importers:
       typescript:
         specifier: ^5.9.0
         version: 5.9.2
+
+  apps/eval-cli:
+    dependencies:
+      '@p4home/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@p4home/domain-p4home':
+        specifier: workspace:*
+        version: link:../../packages/domain-p4home
+      '@p4home/provider-ollama':
+        specifier: workspace:*
+        version: link:../../packages/provider-ollama
+      '@p4home/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@p4home/storage-sqlite':
+        specifier: workspace:*
+        version: link:../../packages/storage-sqlite
 
   apps/runtime:
     dependencies:

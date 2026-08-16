@@ -1,0 +1,1125 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-16T03:07:46.204Z",
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "suite": {
+    "frozen_scenarios": 32,
+    "repeat": 1,
+    "total_cases_per_model": 32
+  },
+  "reports": [
+    {
+      "schema_version": 1,
+      "model": "qwen3-coder:30b",
+      "config": {
+        "temperature": 0,
+        "seed": 42,
+        "num_ctx": 8192,
+        "num_predict": 256,
+        "timeout_ms": 300000
+      },
+      "summary": {
+        "total": 32,
+        "passed": 19,
+        "exact_accuracy": 0.59375,
+        "tool_cases": 22,
+        "tool_exact_accuracy": 0.5909090909090909,
+        "no_tool_cases": 10,
+        "no_tool_accuracy": 0.6,
+        "contract_errors": 0,
+        "provider_errors": 0,
+        "latency_p50_ms": 655.7452499999999,
+        "latency_p95_ms": 1220.5237500000003,
+        "prompt_tokens": 18560,
+        "output_tokens": 1137,
+        "output_tokens_per_second": 73.8553780485967
+      },
+      "cases": [
+        {
+          "id": "zh-001",
+          "text": "你现在在哪？",
+          "expected": [
+            {
+              "name": "character.get_state",
+              "arguments": {}
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.get_state",
+              "arguments": {}
+            }
+          ],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 9115.167208,
+          "usage": {
+            "total_duration_ns": 9111026792,
+            "load_duration_ns": 8017753334,
+            "prompt_eval_count": 577,
+            "prompt_eval_duration_ns": 906307000,
+            "eval_count": 14,
+            "eval_duration_ns": 181520000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-002",
+          "text": "去客厅待一会儿。",
+          "expected": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "living_room"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "living_room"
+              }
+            },
+            {
+              "name": "character.set_activity",
+              "arguments": {
+                "activity": "idle"
+              }
+            }
+          ],
+          "outcome": "mismatch",
+          "exact_match": false,
+          "tool_name_sequence_match": false,
+          "latency_ms": 879.5311660000007,
+          "usage": {
+            "total_duration_ns": 876698292,
+            "load_duration_ns": 104967875,
+            "prompt_eval_count": 579,
+            "prompt_eval_duration_ns": 73510000,
+            "eval_count": 51,
+            "eval_duration_ns": 695639000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-003",
+          "text": "回主卧。",
+          "expected": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "primary_bedroom"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "primary_bedroom"
+              }
+            }
+          ],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 550.965209,
+          "usage": {
+            "total_duration_ns": 547230500,
+            "load_duration_ns": 101765292,
+            "prompt_eval_count": 578,
+            "prompt_eval_duration_ns": 68678000,
+            "eval_count": 28,
+            "eval_duration_ns": 374246000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-004",
+          "text": "去书房看看。",
+          "expected": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "study"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "study"
+              }
+            }
+          ],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 525.5216250000012,
+          "usage": {
+            "total_duration_ns": 521744500,
+            "load_duration_ns": 101922416,
+            "prompt_eval_count": 578,
+            "prompt_eval_duration_ns": 68719000,
+            "eval_count": 26,
+            "eval_duration_ns": 348558000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-005",
+          "text": "到客房等着。",
+          "expected": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "guest_room"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "guest_room"
+              }
+            },
+            {
+              "name": "character.set_activity",
+              "arguments": {
+                "activity": "idle"
+              }
+            }
+          ],
+          "outcome": "mismatch",
+          "exact_match": false,
+          "tool_name_sequence_match": false,
+          "latency_ms": 871.8759580000005,
+          "usage": {
+            "total_duration_ns": 868551458,
+            "load_duration_ns": 99199250,
+            "prompt_eval_count": 578,
+            "prompt_eval_duration_ns": 69409000,
+            "eval_count": 51,
+            "eval_duration_ns": 697421000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-006",
+          "text": "去玄关。",
+          "expected": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "entry"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "entry"
+              }
+            }
+          ],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 514.5124159999996,
+          "usage": {
+            "total_duration_ns": 510891458,
+            "load_duration_ns": 92815916,
+            "prompt_eval_count": 578,
+            "prompt_eval_duration_ns": 68844000,
+            "eval_count": 26,
+            "eval_duration_ns": 346830000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-007",
+          "text": "到厨房去。",
+          "expected": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "kitchen"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "kitchen"
+              }
+            }
+          ],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 539.3904579999999,
+          "usage": {
+            "total_duration_ns": 535408083,
+            "load_duration_ns": 101412916,
+            "prompt_eval_count": 578,
+            "prompt_eval_duration_ns": 68654000,
+            "eval_count": 27,
+            "eval_duration_ns": 362809000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-008",
+          "text": "睡觉吧。",
+          "expected": [
+            {
+              "name": "character.set_activity",
+              "arguments": {
+                "activity": "sleep"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.set_activity",
+              "arguments": {
+                "activity": "sleep"
+              }
+            }
+          ],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 484.30966699999954,
+          "usage": {
+            "total_duration_ns": 480800875,
+            "load_duration_ns": 92792667,
+            "prompt_eval_count": 577,
+            "prompt_eval_duration_ns": 65941000,
+            "eval_count": 24,
+            "eval_duration_ns": 319509000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-009",
+          "text": "醒醒，别睡了。",
+          "expected": [
+            {
+              "name": "character.set_activity",
+              "arguments": {
+                "activity": "idle"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.get_state",
+              "arguments": {}
+            }
+          ],
+          "outcome": "mismatch",
+          "exact_match": false,
+          "tool_name_sequence_match": false,
+          "latency_ms": 370.5002910000003,
+          "usage": {
+            "total_duration_ns": 367982375,
+            "load_duration_ns": 99781542,
+            "prompt_eval_count": 581,
+            "prompt_eval_duration_ns": 84106000,
+            "eval_count": 14,
+            "eval_duration_ns": 181537000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-010",
+          "text": "说：你好呀。",
+          "expected": [
+            {
+              "name": "character.say",
+              "arguments": {
+                "text": "你好呀"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.say",
+              "arguments": {
+                "text": "你好呀。"
+              }
+            }
+          ],
+          "outcome": "mismatch",
+          "exact_match": false,
+          "tool_name_sequence_match": true,
+          "latency_ms": 484.4981250000001,
+          "usage": {
+            "total_duration_ns": 481287958,
+            "load_duration_ns": 99576583,
+            "prompt_eval_count": 579,
+            "prompt_eval_duration_ns": 73736000,
+            "eval_count": 23,
+            "eval_duration_ns": 305493000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-011",
+          "text": "把你现在的状态告诉我。",
+          "expected": [
+            {
+              "name": "character.get_state",
+              "arguments": {}
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.get_state",
+              "arguments": {}
+            },
+            {
+              "name": "world.get_snapshot",
+              "arguments": {}
+            }
+          ],
+          "outcome": "mismatch",
+          "exact_match": false,
+          "tool_name_sequence_match": false,
+          "latency_ms": 550.1296249999996,
+          "usage": {
+            "total_duration_ns": 547155750,
+            "load_duration_ns": 93608500,
+            "prompt_eval_count": 579,
+            "prompt_eval_duration_ns": 73426000,
+            "eval_count": 28,
+            "eval_duration_ns": 377433000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-012",
+          "text": "给我看看当前世界状态。",
+          "expected": [
+            {
+              "name": "world.get_snapshot",
+              "arguments": {}
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "world.get_snapshot",
+              "arguments": {}
+            }
+          ],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 364.0485000000008,
+          "usage": {
+            "total_duration_ns": 360998625,
+            "load_duration_ns": 98071042,
+            "prompt_eval_count": 580,
+            "prompt_eval_duration_ns": 78755000,
+            "eval_count": 14,
+            "eval_duration_ns": 181648000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-013",
+          "text": "去客厅，然后说我到了。",
+          "expected": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "living_room"
+              }
+            },
+            {
+              "name": "character.say",
+              "arguments": {
+                "text": "我到了"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "living_room"
+              }
+            },
+            {
+              "name": "character.say",
+              "arguments": {
+                "text": "我到了。"
+              }
+            }
+          ],
+          "outcome": "mismatch",
+          "exact_match": false,
+          "tool_name_sequence_match": true,
+          "latency_ms": 858.4529580000017,
+          "usage": {
+            "total_duration_ns": 855419416,
+            "load_duration_ns": 86911666,
+            "prompt_eval_count": 581,
+            "prompt_eval_duration_ns": 84052000,
+            "eval_count": 50,
+            "eval_duration_ns": 681893000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-014",
+          "text": "去厨房，再进入睡眠状态。",
+          "expected": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "kitchen"
+              }
+            },
+            {
+              "name": "character.set_activity",
+              "arguments": {
+                "activity": "sleep"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "kitchen"
+              }
+            },
+            {
+              "name": "character.set_activity",
+              "arguments": {
+                "activity": "sleep"
+              }
+            }
+          ],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 874.476375000002,
+          "usage": {
+            "total_duration_ns": 871079709,
+            "load_duration_ns": 91840209,
+            "prompt_eval_count": 582,
+            "prompt_eval_duration_ns": 83683000,
+            "eval_count": 51,
+            "eval_duration_ns": 693102000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-015",
+          "text": "先查状态，再去书房。",
+          "expected": [
+            {
+              "name": "character.get_state",
+              "arguments": {}
+            },
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "study"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.get_state",
+              "arguments": {}
+            },
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "study"
+              }
+            }
+          ],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 721.3311659999999,
+          "usage": {
+            "total_duration_ns": 719487500,
+            "load_duration_ns": 91389250,
+            "prompt_eval_count": 581,
+            "prompt_eval_duration_ns": 83876000,
+            "eval_count": 40,
+            "eval_duration_ns": 541640000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-016",
+          "text": "先醒来，去玄关，然后说我来啦。",
+          "expected": [
+            {
+              "name": "character.set_activity",
+              "arguments": {
+                "activity": "idle"
+              }
+            },
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "entry"
+              }
+            },
+            {
+              "name": "character.say",
+              "arguments": {
+                "text": "我来啦"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.set_activity",
+              "arguments": {
+                "activity": "idle"
+              }
+            },
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "entry"
+              }
+            },
+            {
+              "name": "character.say",
+              "arguments": {
+                "text": "我来啦。"
+              }
+            }
+          ],
+          "outcome": "mismatch",
+          "exact_match": false,
+          "tool_name_sequence_match": true,
+          "latency_ms": 1206.2423750000016,
+          "usage": {
+            "total_duration_ns": 1204621208,
+            "load_duration_ns": 85032625,
+            "prompt_eval_count": 586,
+            "prompt_eval_duration_ns": 103943000,
+            "eval_count": 74,
+            "eval_duration_ns": 1013046000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-017",
+          "text": "先读取世界快照，再说检查完成。",
+          "expected": [
+            {
+              "name": "world.get_snapshot",
+              "arguments": {}
+            },
+            {
+              "name": "character.say",
+              "arguments": {
+                "text": "检查完成"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "world.get_snapshot",
+              "arguments": {}
+            },
+            {
+              "name": "character.say",
+              "arguments": {
+                "text": "检查完成。"
+              }
+            }
+          ],
+          "outcome": "mismatch",
+          "exact_match": false,
+          "tool_name_sequence_match": true,
+          "latency_ms": 700.6700420000016,
+          "usage": {
+            "total_duration_ns": 697991208,
+            "load_duration_ns": 91243208,
+            "prompt_eval_count": 585,
+            "prompt_eval_duration_ns": 99716000,
+            "eval_count": 37,
+            "eval_duration_ns": 504446000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-018",
+          "text": "去沙发坐一下。",
+          "expected": [],
+          "expected_no_tool_code": "UNSUPPORTED_TOOL",
+          "actual": [],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 783.8749580000003,
+          "usage": {
+            "total_duration_ns": 779890250,
+            "load_duration_ns": 90279708,
+            "prompt_eval_count": 579,
+            "prompt_eval_duration_ns": 73662000,
+            "eval_count": 45,
+            "eval_duration_ns": 613244000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-019",
+          "text": "看着电视。",
+          "expected": [],
+          "expected_no_tool_code": "UNSUPPORTED_TOOL",
+          "actual": [
+            {
+              "name": "character.get_state",
+              "arguments": {}
+            }
+          ],
+          "outcome": "mismatch",
+          "exact_match": false,
+          "tool_name_sequence_match": false,
+          "latency_ms": 336.33504200000243,
+          "usage": {
+            "total_duration_ns": 334339833,
+            "load_duration_ns": 86929416,
+            "prompt_eval_count": 577,
+            "prompt_eval_duration_ns": 64920000,
+            "eval_count": 14,
+            "eval_duration_ns": 179887000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-020",
+          "text": "和台灯互动一下。",
+          "expected": [],
+          "expected_no_tool_code": "UNSUPPORTED_TOOL",
+          "actual": [
+            {
+              "name": "character.get_state",
+              "arguments": {}
+            }
+          ],
+          "outcome": "mismatch",
+          "exact_match": false,
+          "tool_name_sequence_match": false,
+          "latency_ms": 901.9757920000011,
+          "usage": {
+            "total_duration_ns": 899209875,
+            "load_duration_ns": 91073834,
+            "prompt_eval_count": 580,
+            "prompt_eval_duration_ns": 79164000,
+            "eval_count": 53,
+            "eval_duration_ns": 726424000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-021",
+          "text": "去阳台。",
+          "expected": [],
+          "expected_no_tool_code": "UNKNOWN_ROOM",
+          "actual": [],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 1026.074542000002,
+          "usage": {
+            "total_duration_ns": 1022738083,
+            "load_duration_ns": 90705708,
+            "prompt_eval_count": 577,
+            "prompt_eval_duration_ns": 64751999,
+            "eval_count": 63,
+            "eval_duration_ns": 864746000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-022",
+          "text": "打开客厅灯。",
+          "expected": [],
+          "expected_no_tool_code": "UNSUPPORTED_TOOL",
+          "actual": [],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 665.7487500000025,
+          "usage": {
+            "total_duration_ns": 662900208,
+            "load_duration_ns": 86054958,
+            "prompt_eval_count": 578,
+            "prompt_eval_duration_ns": 69087000,
+            "eval_count": 37,
+            "eval_duration_ns": 505204000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-023",
+          "text": "不要去厨房。",
+          "expected": [],
+          "expected_no_tool_code": "NO_ACTION",
+          "actual": [],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 723.2280419999988,
+          "usage": {
+            "total_duration_ns": 720197583,
+            "load_duration_ns": 90639916,
+            "prompt_eval_count": 578,
+            "prompt_eval_duration_ns": 69085000,
+            "eval_count": 41,
+            "eval_duration_ns": 557898000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-024",
+          "text": "去那边等我。",
+          "expected": [],
+          "expected_no_tool_code": "CLARIFICATION_REQUIRED",
+          "actual": [],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 665.5575839999983,
+          "usage": {
+            "total_duration_ns": 663673417,
+            "load_duration_ns": 85473833,
+            "prompt_eval_count": 579,
+            "prompt_eval_duration_ns": 73825000,
+            "eval_count": 37,
+            "eval_duration_ns": 501735000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-025",
+          "text": "随便找个房间待着。",
+          "expected": [],
+          "expected_no_tool_code": "CLARIFICATION_REQUIRED",
+          "actual": [
+            {
+              "name": "character.get_state",
+              "arguments": {}
+            }
+          ],
+          "outcome": "mismatch",
+          "exact_match": false,
+          "tool_name_sequence_match": false,
+          "latency_ms": 355.45200000000114,
+          "usage": {
+            "total_duration_ns": 353070000,
+            "load_duration_ns": 91756667,
+            "prompt_eval_count": 580,
+            "prompt_eval_duration_ns": 78498000,
+            "eval_count": 14,
+            "eval_duration_ns": 180161000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-026",
+          "text": "把音量调低一点。",
+          "expected": [],
+          "expected_no_tool_code": "OUT_OF_SCOPE",
+          "actual": [],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 655.7452499999999,
+          "usage": {
+            "total_duration_ns": 652759500,
+            "load_duration_ns": 91899542,
+            "prompt_eval_count": 581,
+            "prompt_eval_duration_ns": 83868000,
+            "eval_count": 35,
+            "eval_duration_ns": 474505000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-027",
+          "text": "查一下角色状态和完整世界快照。",
+          "expected": [
+            {
+              "name": "character.get_state",
+              "arguments": {}
+            },
+            {
+              "name": "world.get_snapshot",
+              "arguments": {}
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.get_state",
+              "arguments": {}
+            },
+            {
+              "name": "world.get_snapshot",
+              "arguments": {}
+            }
+          ],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 576.1186669999988,
+          "usage": {
+            "total_duration_ns": 573148583,
+            "load_duration_ns": 93618333,
+            "prompt_eval_count": 584,
+            "prompt_eval_duration_ns": 98749000,
+            "eval_count": 28,
+            "eval_duration_ns": 378219000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-028",
+          "text": "去客房，睡下，然后说晚安。",
+          "expected": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "guest_room"
+              }
+            },
+            {
+              "name": "character.set_activity",
+              "arguments": {
+                "activity": "sleep"
+              }
+            },
+            {
+              "name": "character.say",
+              "arguments": {
+                "text": "晚安"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "guest_room"
+              }
+            },
+            {
+              "name": "character.set_activity",
+              "arguments": {
+                "activity": "sleep"
+              }
+            },
+            {
+              "name": "character.say",
+              "arguments": {
+                "text": "晚安"
+              }
+            }
+          ],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 1220.5237500000003,
+          "usage": {
+            "total_duration_ns": 1217189833,
+            "load_duration_ns": 90392083,
+            "prompt_eval_count": 585,
+            "prompt_eval_duration_ns": 103902000,
+            "eval_count": 74,
+            "eval_duration_ns": 1020431000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-029",
+          "text": "显示文字：今天也要开心！",
+          "expected": [
+            {
+              "name": "character.say",
+              "arguments": {
+                "text": "今天也要开心！"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.say",
+              "arguments": {
+                "text": "今天也要开心！"
+              }
+            }
+          ],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 510.48625000000175,
+          "usage": {
+            "total_duration_ns": 507369125,
+            "load_duration_ns": 86120875,
+            "prompt_eval_count": 581,
+            "prompt_eval_duration_ns": 83986000,
+            "eval_count": 25,
+            "eval_duration_ns": 334646000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-030",
+          "text": "回主卧并保持清醒。",
+          "expected": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "primary_bedroom"
+              }
+            },
+            {
+              "name": "character.set_activity",
+              "arguments": {
+                "activity": "idle"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "primary_bedroom"
+              }
+            },
+            {
+              "name": "character.set_activity",
+              "arguments": {
+                "activity": "idle"
+              }
+            }
+          ],
+          "outcome": "pass",
+          "exact_match": true,
+          "tool_name_sequence_match": true,
+          "latency_ms": 887.3940830000029,
+          "usage": {
+            "total_duration_ns": 884301000,
+            "load_duration_ns": 90871417,
+            "prompt_eval_count": 581,
+            "prompt_eval_duration_ns": 84004000,
+            "eval_count": 52,
+            "eval_duration_ns": 706849000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-031",
+          "text": "到厨房后说饭好了吗。",
+          "expected": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "kitchen"
+              }
+            },
+            {
+              "name": "character.say",
+              "arguments": {
+                "text": "饭好了吗"
+              }
+            }
+          ],
+          "expected_no_tool_code": null,
+          "actual": [
+            {
+              "name": "character.go_to_room",
+              "arguments": {
+                "room_id": "kitchen"
+              }
+            }
+          ],
+          "outcome": "mismatch",
+          "exact_match": false,
+          "tool_name_sequence_match": false,
+          "latency_ms": 549.1476670000011,
+          "usage": {
+            "total_duration_ns": 546386542,
+            "load_duration_ns": 90769709,
+            "prompt_eval_count": 582,
+            "prompt_eval_duration_ns": 89161000,
+            "eval_count": 27,
+            "eval_duration_ns": 363867000
+          },
+          "error": null
+        },
+        {
+          "id": "zh-032",
+          "text": "如果你觉得合适就去客厅。",
+          "expected": [],
+          "expected_no_tool_code": "CLARIFICATION_REQUIRED",
+          "actual": [
+            {
+              "name": "character.get_state",
+              "arguments": {}
+            }
+          ],
+          "outcome": "mismatch",
+          "exact_match": false,
+          "tool_name_sequence_match": false,
+          "latency_ms": 355.26474999999846,
+          "usage": {
+            "total_duration_ns": 352442875,
+            "load_duration_ns": 85289417,
+            "prompt_eval_count": 581,
+            "prompt_eval_duration_ns": 84208000,
+            "eval_count": 14,
+            "eval_duration_ns": 180366000
+          },
+          "error": null
+        }
+      ]
+    }
+  ]
+}
