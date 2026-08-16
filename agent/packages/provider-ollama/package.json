@@ -5,6 +5,6 @@
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
-    "@p4home/core": "workspace:*"
+    "ajv": "^8.17.1"
   }
 }

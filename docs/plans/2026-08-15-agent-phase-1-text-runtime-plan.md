@@ -64,6 +64,14 @@ output、完整 Mock 闭环及跨轮预算。本机 Ollama `0.32.6` + `qwen3:8b`
 “文本请求 → 去书房 Mock Tool → 最终回复”的有限闭环约 1.86 秒。该次服务最初未运行，启动
 `ollama serve` 后通过；这些单次数字只作功能证据，不替代第 10 步的正式 p50/p95 模型评测。
 
+边界 review 修复（2026-08-16）：关闭 7 个 chat/tool/loop 异常路径缺口，并将同类修复扩展到
+`generate`。携带 `format` 的 generate/chat 现在由 provider 强制执行本地 JSON/AJV 校验；模型
+可见工具与 Runtime allowlist 求交集；空最终回复不再标记成功；provider 的取消、超时和传输错误
+映射为可审计 Run 终态。Core 会将任意工具错误规范到 Tool Result v1 的 256 字符上限，拒绝
+`NaN`、Infinity 和小数 timeout，并使用组合 `AbortSignal` 消除查找工具期间的取消竞态。新增
+11 项回归后，确定性测试为 41 项；本机 `qwen3:8b` 的 4 项真实回归仍全部通过，测试后已停止
+临时 Ollama 服务。
+
 下一项工作为 SQLite 审计存储与结构化日志，保持不接真实 P4。
 
 ## 4. 验证

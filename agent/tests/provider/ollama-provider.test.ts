@@ -118,6 +118,29 @@ test("generate sends a non-streaming request and normalizes usage metrics", asyn
   });
 });
 
+test("generate locally validates structured output", async () => {
+  const schema = {
+    type: "object",
+    required: ["answer"],
+    properties: { answer: { type: "string" } },
+    additionalProperties: false,
+  } as const;
+  const provider = new OllamaHttpProvider({
+    model: MODEL,
+    fetch: async () =>
+      jsonResponse({
+        model: MODEL,
+        response: '{"answer":1}',
+        done: true,
+      }),
+  });
+
+  await assert.rejects(
+    provider.generate({ prompt: "回答", format: schema }),
+    (error) => assertProviderError(error, "INVALID_RESPONSE"),
+  );
+});
+
 test("chat sends native tools and normalizes terminal tool calls", async () => {
   let requestBody: Record<string, unknown> | undefined;
   const fetch: OllamaFetch = async (_input, init) => {
@@ -234,6 +257,34 @@ test("chat passes structured-output format and rejects malformed tool calls", as
   });
   assert.deepEqual(requestBody?.format, schema);
 
+  const invalidJson = new OllamaHttpProvider({
+    model: MODEL,
+    fetch: async () =>
+      jsonResponse({
+        model: MODEL,
+        message: { role: "assistant", content: "not-json" },
+        done: true,
+      }),
+  });
+  await assert.rejects(
+    invalidJson.chat({ messages: [{ role: "user", content: "回答" }], format: schema }),
+    (error) => assertProviderError(error, "INVALID_RESPONSE"),
+  );
+
+  const schemaMismatch = new OllamaHttpProvider({
+    model: MODEL,
+    fetch: async () =>
+      jsonResponse({
+        model: MODEL,
+        message: { role: "assistant", content: '{"answer":1}' },
+        done: true,
+      }),
+  });
+  await assert.rejects(
+    schemaMismatch.chat({ messages: [{ role: "user", content: "回答" }], format: schema }),
+    (error) => assertProviderError(error, "INVALID_RESPONSE"),
+  );
+
   const malformed = new OllamaHttpProvider({
     model: MODEL,
     fetch: async () =>
@@ -251,6 +302,45 @@ test("chat passes structured-output format and rejects malformed tool calls", as
     malformed.chat({ messages: [{ role: "user", content: "说话" }] }),
     (error) => assertProviderError(error, "INVALID_RESPONSE"),
   );
+});
+
+test("structured format allows an empty content field while the model requests a tool", async () => {
+  const provider = new OllamaHttpProvider({
+    model: MODEL,
+    fetch: async () =>
+      jsonResponse({
+        model: MODEL,
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            { function: { name: "character.get_state", arguments: {} } },
+          ],
+        },
+        done: true,
+      }),
+  });
+
+  const result = await provider.chat({
+    messages: [{ role: "user", content: "状态" }],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "character.get_state",
+          description: "读取状态",
+          parameters: { type: "object", additionalProperties: false },
+        },
+      },
+    ],
+    format: {
+      type: "object",
+      required: ["answer"],
+      properties: { answer: { type: "string" } },
+    },
+  });
+
+  assert.equal(result.message.tool_calls?.[0]?.function.name, "character.get_state");
 });
 
 test("chat validates tool messages and supports cancellation", async () => {

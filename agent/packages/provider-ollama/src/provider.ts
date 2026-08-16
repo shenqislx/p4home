@@ -1,3 +1,9 @@
+import {
+  Ajv2020,
+  type ErrorObject,
+  type ValidateFunction,
+} from "ajv/dist/2020.js";
+
 import { OllamaProviderError } from "./errors.ts";
 import type {
   OllamaCapabilities,
@@ -75,6 +81,58 @@ function optionalIndex(value: unknown, field: string): number | undefined {
 
 function compact(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value).filter((entry) => entry[1] !== undefined));
+}
+
+function formatSchemaErrors(errors: ErrorObject[] | null | undefined): string {
+  if (errors === null || errors === undefined || errors.length === 0) {
+    return "unknown validation error";
+  }
+  return errors
+    .map((error) => `${error.instancePath || "/"} ${error.message ?? "is invalid"}`)
+    .join("; ");
+}
+
+function structuredOutputValidator(
+  format: OllamaChatRequest["format"],
+  context: string,
+): ((content: string) => void) | undefined {
+  if (format === undefined) {
+    return undefined;
+  }
+  let validate: ValidateFunction | undefined;
+  if (format !== "json") {
+    try {
+      validate = new Ajv2020({
+        allErrors: true,
+        strict: true,
+        strictRequired: false,
+        strictTypes: false,
+      }).compile(format);
+    } catch (error) {
+      throw new TypeError(
+        error instanceof Error
+          ? `format is not a valid JSON Schema: ${error.message}`
+          : "format is not a valid JSON Schema",
+      );
+    }
+  }
+  return (content: string): void => {
+    let value: unknown;
+    try {
+      value = JSON.parse(content);
+    } catch {
+      throw new OllamaProviderError(
+        "INVALID_RESPONSE",
+        `${context} is not valid JSON`,
+      );
+    }
+    if (validate !== undefined && !validate(value)) {
+      throw new OllamaProviderError(
+        "INVALID_RESPONSE",
+        `${context}: ${formatSchemaErrors(validate.errors)}`,
+      );
+    }
+  };
 }
 
 function validateTimeout(timeoutMs: number): number {
@@ -388,6 +446,10 @@ export class OllamaHttpProvider implements OllamaProvider {
     signal?: AbortSignal,
   ): Promise<OllamaGenerateResult> {
     validateGenerateRequest(request);
+    const validateStructuredOutput = structuredOutputValidator(
+      request.format,
+      "structured generate response",
+    );
     const result = await this.#jsonRequest(
       "/api/generate",
       {
@@ -398,7 +460,9 @@ export class OllamaHttpProvider implements OllamaProvider {
       signal,
       request.timeout_ms,
     );
-    return parseGenerateResult(result);
+    const parsed = parseGenerateResult(result);
+    validateStructuredOutput?.(parsed.response);
+    return parsed;
   }
 
   public async chat(
@@ -406,6 +470,10 @@ export class OllamaHttpProvider implements OllamaProvider {
     signal?: AbortSignal,
   ): Promise<OllamaChatResult> {
     validateChatRequest(request);
+    const validateStructuredOutput = structuredOutputValidator(
+      request.format,
+      "structured chat response",
+    );
     const result = await this.#jsonRequest(
       "/api/chat",
       {
@@ -416,7 +484,11 @@ export class OllamaHttpProvider implements OllamaProvider {
       signal,
       request.timeout_ms,
     );
-    return parseChatResult(result);
+    const parsed = parseChatResult(result);
+    if ((parsed.message.tool_calls?.length ?? 0) === 0) {
+      validateStructuredOutput?.(parsed.message.content);
+    }
+    return parsed;
   }
 
   public async *stream(

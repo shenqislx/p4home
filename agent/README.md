@@ -43,11 +43,15 @@ Phase 1 不得导入真实 P4 WebSocket 执行链，也不得把 token 暴露给
 - `generate()` 使用 `/api/generate` 的 `stream: false` 响应；
 - `chat()` 使用 `/api/chat` 的原生 `tools`、`tool_calls` 与 `format` 字段；
 - `stream()` 按 NDJSON 增量解析并要求出现 `done: true` 终态；
-- 不可达、超时、取消、模型不存在、HTTP 错误和非法响应使用稳定错误码；
-- Ollama 返回的 ToolCall 必须再次通过冻结 Tool Schema v1；structured output 即使使用 API
-  `format`，也必须由本地 AJV 重新校验；
+- 不可达、超时、取消、模型不存在、HTTP 错误和非法响应使用稳定错误码；Runtime 将 provider
+  失败映射为可审计的 `failed / cancelled / timed_out` 终态；
+- Ollama 返回的 ToolCall 必须再次通过冻结 Tool Schema v1；`generate()` 或 `chat()` 只要携带
+  `format`，provider 就会强制执行 JSON.parse 和本地 AJV 校验；
 - `runTextAgent()` 每个 Run 最多执行 4 个工具、最多 4 个工具轮次，并在每次回送模型前校验
-  Tool Result v1。未知工具、非法参数、超预算和非法结果全部 fail closed。
+  Tool Result v1。模型只看到冻结目录与当前执行 allowlist 的交集；空最终回复、未知工具、非法
+  参数、超预算和非法结果全部 fail closed；
+- Core 严格拒绝非有限数或小数 timeout，使用组合 `AbortSignal` 消除取消竞态，并把工具错误
+  规范到 Tool Result v1 的 256 字符上限。
 
 确定性测试不要求 Ollama 服务。真实本机 smoke 必须显式启用：
 

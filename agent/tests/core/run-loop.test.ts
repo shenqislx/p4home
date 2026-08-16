@@ -88,6 +88,30 @@ test("terminal tool error stops remaining calls", async () => {
   assert.equal(secondRan, false);
 });
 
+test("tool errors are normalized to the frozen result message limit", async () => {
+  const tools = new Map<string, ToolDefinition>([
+    [
+      "fail",
+      {
+        name: "fail",
+        async execute() {
+          throw new Error("x".repeat(300));
+        },
+      },
+    ],
+  ]);
+
+  const result = await runSequentialToolCalls({
+    run_id: "run-long-error",
+    tools,
+    calls: [{ tool_call_id: "call-long-error", name: "fail", arguments: {} }],
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.results[0]?.error?.code, "INTERNAL");
+  assert.equal(result.results[0]?.error?.message.length, 256);
+});
+
 test("duplicate IDs and more than four calls are rejected before execution", async () => {
   const tools = new Map<string, ToolDefinition>();
   await assert.rejects(
@@ -135,6 +159,20 @@ test("relative timeout terminates a tool that ignores cancellation", async () =>
   assert.equal(result.results[0]?.error?.code, "DEADLINE_EXCEEDED");
 });
 
+test("relative timeout rejects non-finite and fractional values", async () => {
+  for (const timeout_ms of [Number.NaN, Number.POSITIVE_INFINITY, 100.5]) {
+    await assert.rejects(
+      runSequentialToolCalls({
+        run_id: "run-invalid-timeout",
+        tools: new Map(),
+        timeout_ms,
+        calls: [],
+      }),
+      ToolLoopConfigurationError,
+    );
+  }
+});
+
 test("AbortSignal cancels an active tool", async () => {
   const controller = new AbortController();
   const tools = new Map<string, ToolDefinition>([
@@ -155,4 +193,37 @@ test("AbortSignal cancels an active tool", async () => {
   });
   assert.equal(result.status, "cancelled");
   assert.equal(result.results[0]?.error?.code, "CANCELLED");
+});
+
+test("an abort during tool lookup is observed before execution starts", async () => {
+  const controller = new AbortController();
+  let executed = false;
+  const tools = new Map<string, ToolDefinition>([
+    [
+      "wait",
+      {
+        name: "wait",
+        async execute() {
+          executed = true;
+          return {};
+        },
+      },
+    ],
+  ]);
+  const originalGet = tools.get.bind(tools);
+  tools.get = (name: string): ToolDefinition | undefined => {
+    controller.abort(new Error("abort during lookup"));
+    return originalGet(name);
+  };
+
+  const result = await runSequentialToolCalls({
+    run_id: "run-cancel-race",
+    tools,
+    signal: controller.signal,
+    calls: [{ tool_call_id: "wait-race", name: "wait", arguments: {} }],
+  });
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.results[0]?.error?.code, "CANCELLED");
+  assert.equal(executed, false);
 });

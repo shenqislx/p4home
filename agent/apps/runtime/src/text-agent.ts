@@ -8,10 +8,12 @@ import {
   type ToolDefinition,
   type ToolResult,
 } from "@p4home/core";
-import type {
-  OllamaChatMessage,
-  OllamaProvider,
-  OllamaToolDefinition,
+import {
+  OllamaProviderError,
+  type OllamaChatResult,
+  type OllamaChatMessage,
+  type OllamaProvider,
+  type OllamaToolDefinition,
 } from "@p4home/provider-ollama";
 
 export const TEXT_AGENT_TOOL_CALLS_MAX = 4;
@@ -52,6 +54,14 @@ export interface TextAgentRunResult {
   readonly final_text: string;
   readonly model_turns: number;
   readonly tool_results: readonly ToolResult[];
+  readonly error: TextAgentRunError | null;
+}
+
+export interface TextAgentRunError {
+  readonly source: "model" | "provider" | "tool";
+  readonly code: string;
+  readonly message: string;
+  readonly retryable: boolean;
 }
 
 function validateOptions(options: TextAgentRunOptions): number {
@@ -74,8 +84,85 @@ function validateOptions(options: TextAgentRunOptions): number {
   return rounds;
 }
 
-function modelTools(): readonly OllamaToolDefinition[] {
-  return getFrozenToolDefinitions().map((tool) => ({ type: "function", function: tool }));
+function modelTools(tools: ReadonlyMap<string, ToolDefinition>): readonly OllamaToolDefinition[] {
+  return getFrozenToolDefinitions()
+    .filter((tool) => tools.has(tool.name))
+    .map((tool) => ({ type: "function", function: tool }));
+}
+
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+function providerFailure(
+  error: OllamaProviderError,
+  modelTurn: number,
+  toolResults: readonly ToolResult[],
+): TextAgentRunResult {
+  const status =
+    error.code === "CANCELLED"
+      ? "cancelled"
+      : error.code === "TIMEOUT"
+        ? "timed_out"
+        : "failed";
+  return {
+    status,
+    final_text: "",
+    model_turns: modelTurn,
+    tool_results: toolResults,
+    error: {
+      source: "provider",
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+    },
+  };
+}
+
+function cancelledFailure(
+  modelTurn: number,
+  toolResults: readonly ToolResult[],
+): TextAgentRunResult {
+  return {
+    status: "cancelled",
+    final_text: "",
+    model_turns: modelTurn,
+    tool_results: toolResults,
+    error: {
+      source: "provider",
+      code: "CANCELLED",
+      message: "run was cancelled",
+      retryable: false,
+    },
+  };
+}
+
+function toolFailure(
+  status: Extract<TextAgentRunResult["status"], "failed" | "cancelled" | "timed_out">,
+  modelTurn: number,
+  toolResults: readonly ToolResult[],
+): TextAgentRunResult {
+  let failure: ToolResult | undefined;
+  for (let index = toolResults.length - 1; index >= 0; index -= 1) {
+    const candidate = toolResults[index];
+    if (candidate?.status === "error") {
+      failure = candidate;
+      break;
+    }
+  }
+  const error = failure?.error;
+  return {
+    status,
+    final_text: "",
+    model_turns: modelTurn,
+    tool_results: toolResults,
+    error: {
+      source: "tool",
+      code: error?.code ?? status.toUpperCase(),
+      message: error?.message ?? `tool execution ${status}`,
+      retryable: error?.retryable ?? false,
+    },
+  };
 }
 
 export async function runTextAgent(options: TextAgentRunOptions): Promise<TextAgentRunResult> {
@@ -88,27 +175,53 @@ export async function runTextAgent(options: TextAgentRunOptions): Promise<TextAg
   let toolCallOrdinal = 0;
 
   for (let modelTurn = 1; modelTurn <= maxToolRounds + 1; modelTurn += 1) {
+    if (isAborted(options.signal)) {
+      return cancelledFailure(modelTurn - 1, toolResults);
+    }
     const chatRequest = {
       messages: [...messages],
-      tools: modelTools(),
+      tools: modelTools(options.tools),
       options: { temperature: 0, num_ctx: 8192 },
       think: false,
       ...(options.model_timeout_ms === undefined
         ? {}
         : { timeout_ms: options.model_timeout_ms }),
     } as const;
-    const response = await options.provider.chat(
-      chatRequest,
-      options.signal,
-    );
+    let response: OllamaChatResult;
+    try {
+      response = await options.provider.chat(chatRequest, options.signal);
+    } catch (error) {
+      if (error instanceof OllamaProviderError) {
+        return providerFailure(error, modelTurn, toolResults);
+      }
+      throw error;
+    }
+    if (isAborted(options.signal)) {
+      return cancelledFailure(modelTurn, toolResults);
+    }
     messages.push(response.message);
     const nativeCalls = response.message.tool_calls ?? [];
     if (nativeCalls.length === 0) {
+      if (response.message.content.trim().length === 0) {
+        return {
+          status: "failed",
+          final_text: "",
+          model_turns: modelTurn,
+          tool_results: toolResults,
+          error: {
+            source: "model",
+            code: "EMPTY_MODEL_RESPONSE",
+            message: "model returned neither tool calls nor final text",
+            retryable: true,
+          },
+        };
+      }
       return {
         status: "completed",
         final_text: response.message.content,
         model_turns: modelTurn,
         tool_results: toolResults,
+        error: null,
       };
     }
     if (modelTurn > maxToolRounds) {
@@ -155,12 +268,7 @@ export async function runTextAgent(options: TextAgentRunOptions): Promise<TextAg
       });
     }
     if (execution.status !== "completed") {
-      return {
-        status: execution.status,
-        final_text: "",
-        model_turns: modelTurn,
-        tool_results: toolResults,
-      };
+      return toolFailure(execution.status, modelTurn, toolResults);
     }
   }
 

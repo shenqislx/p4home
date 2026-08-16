@@ -8,7 +8,11 @@ import {
   TextAgentError,
   type TextAgentRunOptions,
 } from "@p4home/runtime";
-import type { OllamaChatResult, OllamaProvider } from "@p4home/provider-ollama";
+import {
+  OllamaProviderError,
+  type OllamaChatResult,
+  type OllamaProvider,
+} from "@p4home/provider-ollama";
 
 function chatResult(
   content: string,
@@ -68,6 +72,7 @@ test("text agent executes validated calls in order and returns the final model t
   });
 
   assert.equal(result.status, "completed");
+  assert.equal(result.error, null);
   assert.equal(result.final_text, "已经到书房了。");
   assert.equal(result.model_turns, 2);
   assert.deepEqual(
@@ -87,6 +92,157 @@ test("text agent executes validated calls in order and returns the final model t
       ["tool", "character.say"],
     ],
   );
+});
+
+test("text agent exposes only tools present in the runtime allowlist", async () => {
+  let exposedTools: readonly string[] = [];
+  const provider: Pick<OllamaProvider, "chat"> = {
+    async chat(request): Promise<OllamaChatResult> {
+      exposedTools = (request.tools ?? []).map((tool) => tool.function.name);
+      return chatResult("状态读取完成。");
+    },
+  };
+  const getState = createMockP4HomeDomain().tools.get("character.get_state");
+  assert.ok(getState !== undefined);
+
+  const result = await runTextAgent({
+    run_id: "run-allowlist",
+    user_text: "读取状态",
+    provider,
+    tools: new Map([[getState.name, getState]]),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(exposedTools, ["character.get_state"]);
+});
+
+test("text agent rejects an empty final model response", async () => {
+  const result = await runTextAgent({
+    run_id: "run-empty-response",
+    user_text: "去书房",
+    provider: queuedProvider([chatResult("")]),
+    tools: createMockP4HomeDomain().tools,
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.error?.source, "model");
+  assert.equal(result.error?.code, "EMPTY_MODEL_RESPONSE");
+});
+
+test("text agent maps provider cancellation, timeout and transport errors to run results", async () => {
+  const cases = [
+    ["CANCELLED", "cancelled"],
+    ["TIMEOUT", "timed_out"],
+    ["UNREACHABLE", "failed"],
+  ] as const;
+  for (const [code, status] of cases) {
+    const provider: Pick<OllamaProvider, "chat"> = {
+      async chat(): Promise<OllamaChatResult> {
+        throw new OllamaProviderError(code, `provider ${code.toLowerCase()}`, {
+          retryable: code !== "CANCELLED",
+        });
+      },
+    };
+
+    const result = await runTextAgent({
+      run_id: `run-provider-${code.toLowerCase()}`,
+      user_text: "等待",
+      provider,
+      tools: createMockP4HomeDomain().tools,
+    });
+
+    assert.equal(result.status, status);
+    assert.equal(result.error?.source, "provider");
+    assert.equal(result.error?.code, code);
+  }
+});
+
+test("text agent does not process a model response that races with cancellation", async () => {
+  const controller = new AbortController();
+  let executed = false;
+  const provider: Pick<OllamaProvider, "chat"> = {
+    async chat(): Promise<OllamaChatResult> {
+      controller.abort(new Error("cancel as response completes"));
+      return chatResult("", [{ name: "character.say", arguments: { text: "不应执行" } }]);
+    },
+  };
+  const tools = new Map([
+    [
+      "character.say",
+      {
+        name: "character.say",
+        async execute(): Promise<Record<string, unknown>> {
+          executed = true;
+          return { text: "不应执行" };
+        },
+      },
+    ],
+  ]);
+
+  const result = await runTextAgent({
+    run_id: "run-provider-cancel-race",
+    user_text: "说话",
+    provider,
+    tools,
+    signal: controller.signal,
+  });
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.error?.code, "CANCELLED");
+  assert.equal(executed, false);
+});
+
+test("text agent does not start a model turn when already cancelled", async () => {
+  const controller = new AbortController();
+  controller.abort(new Error("cancel before run"));
+  let modelCalled = false;
+  const provider: Pick<OllamaProvider, "chat"> = {
+    async chat(): Promise<OllamaChatResult> {
+      modelCalled = true;
+      return chatResult("不应调用");
+    },
+  };
+
+  const result = await runTextAgent({
+    run_id: "run-pre-cancelled",
+    user_text: "等待",
+    provider,
+    tools: createMockP4HomeDomain().tools,
+    signal: controller.signal,
+  });
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.model_turns, 0);
+  assert.equal(modelCalled, false);
+});
+
+test("text agent preserves a long tool failure as a valid failed run", async () => {
+  const provider = queuedProvider([
+    chatResult("", [{ name: "character.say", arguments: { text: "你好" } }]),
+  ]);
+  const tools = new Map([
+    [
+      "character.say",
+      {
+        name: "character.say",
+        async execute(): Promise<Record<string, unknown>> {
+          throw new Error("x".repeat(300));
+        },
+      },
+    ],
+  ]);
+
+  const result = await runTextAgent({
+    run_id: "run-long-tool-error",
+    user_text: "说你好",
+    provider,
+    tools,
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.error?.source, "tool");
+  assert.equal(result.error?.code, "INTERNAL");
+  assert.equal(result.error?.message.length, 256);
 });
 
 test("text agent rejects a fabricated tool before execution", async () => {

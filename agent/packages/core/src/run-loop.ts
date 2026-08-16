@@ -11,6 +11,7 @@ import type {
 export const TOOL_CALLS_PER_RUN_MAX = 4;
 export const TOOL_TIMEOUT_MIN_MS = 100;
 export const TOOL_TIMEOUT_MAX_MS = 120_000;
+export const TOOL_ERROR_MESSAGE_MAX_LENGTH = 256;
 
 export interface ToolLoopOptions {
   readonly run_id: string;
@@ -72,7 +73,11 @@ function validateOptions(options: ToolLoopOptions): number {
     ids.add(call.tool_call_id);
   }
   const timeoutMs = options.timeout_ms ?? 10_000;
-  if (timeoutMs < TOOL_TIMEOUT_MIN_MS || timeoutMs > TOOL_TIMEOUT_MAX_MS) {
+  if (
+    !Number.isInteger(timeoutMs)
+    || timeoutMs < TOOL_TIMEOUT_MIN_MS
+    || timeoutMs > TOOL_TIMEOUT_MAX_MS
+  ) {
     throw new ToolLoopConfigurationError(
       `timeout_ms must be between ${TOOL_TIMEOUT_MIN_MS} and ${TOOL_TIMEOUT_MAX_MS}`,
     );
@@ -80,18 +85,26 @@ function validateOptions(options: ToolLoopOptions): number {
   return timeoutMs;
 }
 
+function normalizeErrorMessage(message: string, fallback: string): string {
+  const normalized = message.trim().length === 0 ? fallback : message;
+  return normalized.slice(0, TOOL_ERROR_MESSAGE_MAX_LENGTH);
+}
+
 function asToolError(error: unknown): ToolError {
   if (error instanceof ToolExecutionError) {
     const base = {
       code: error.code,
-      message: error.message,
+      message: normalizeErrorMessage(error.message, "tool execution failed"),
       retryable: error.retryable,
     } satisfies ToolError;
     return error.details === undefined ? base : { ...base, details: error.details };
   }
   return {
     code: "INTERNAL",
-    message: error instanceof Error ? error.message : "unknown tool failure",
+    message:
+      error instanceof Error
+        ? normalizeErrorMessage(error.message, "unexpected tool failure")
+        : "unknown tool failure",
     retryable: false,
   };
 }
@@ -104,19 +117,33 @@ async function executeOne(
 ): Promise<{ readonly result: ToolResult; readonly terminal: "success" | "failed" | "cancelled" | "timed_out" }> {
   const controller = new AbortController();
   let timedOut = false;
-  const forwardAbort = (): void => controller.abort(options.signal?.reason);
-  options.signal?.addEventListener("abort", forwardAbort, { once: true });
+  const executionSignal =
+    options.signal === undefined
+      ? controller.signal
+      : AbortSignal.any([controller.signal, options.signal]);
   const timeout = setTimeout(() => {
     timedOut = true;
     controller.abort(new Error("tool timeout elapsed"));
   }, timeoutMs);
 
+  if (executionSignal.aborted) {
+    clearTimeout(timeout);
+    return {
+      terminal: "cancelled",
+      result: failure(call, {
+        code: "CANCELLED",
+        message: "run was cancelled",
+        retryable: false,
+      }),
+    };
+  }
+
   const aborted = new Promise<never>((_resolve, reject) => {
-    if (controller.signal.aborted) {
+    if (executionSignal.aborted) {
       reject(new AbortedExecution());
       return;
     }
-    controller.signal.addEventListener("abort", () => reject(new AbortedExecution()), { once: true });
+    executionSignal.addEventListener("abort", () => reject(new AbortedExecution()), { once: true });
   });
 
   try {
@@ -124,7 +151,7 @@ async function executeOne(
       tool.execute(call.arguments, {
         run_id: options.run_id,
         tool_call_id: call.tool_call_id,
-        signal: controller.signal,
+        signal: executionSignal,
       }),
       aborted,
     ]);
@@ -157,7 +184,6 @@ async function executeOne(
     return { terminal: "failed", result: failure(call, asToolError(error)) };
   } finally {
     clearTimeout(timeout);
-    options.signal?.removeEventListener("abort", forwardAbort);
   }
 }
 
