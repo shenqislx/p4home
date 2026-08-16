@@ -10,7 +10,7 @@
   "scripts": {
     "check:runtime": "node scripts/check-runtime.mjs",
     "typecheck": "node scripts/check-runtime.mjs && tsc --noEmit -p tsconfig.json",
-    "test": "node scripts/check-runtime.mjs && node --import tsx --test tests/contracts/*.test.ts tests/core/*.test.ts tests/domain/*.test.ts tests/provider/*.test.ts",
+    "test": "node scripts/check-runtime.mjs && node --import tsx --test tests/contracts/*.test.ts tests/core/*.test.ts tests/domain/*.test.ts tests/provider/*.test.ts tests/runtime/*.test.ts",
     "test:ollama-live": "node scripts/check-runtime.mjs && node --import tsx --test tests/integration/ollama-live.test.ts",
     "validate:contracts": "node scripts/check-runtime.mjs && node --import tsx packages/contracts/src/cli.ts"
   },
@@ -19,6 +19,7 @@
     "@p4home/core": "workspace:*",
     "@p4home/domain-p4home": "workspace:*",
     "@p4home/provider-ollama": "workspace:*",
+    "@p4home/runtime": "workspace:*",
     "@types/node": "^24.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.0"

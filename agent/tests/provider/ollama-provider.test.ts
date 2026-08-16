@@ -118,6 +118,166 @@ test("generate sends a non-streaming request and normalizes usage metrics", asyn
   });
 });
 
+test("chat sends native tools and normalizes terminal tool calls", async () => {
+  let requestBody: Record<string, unknown> | undefined;
+  const fetch: OllamaFetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return jsonResponse({
+      model: MODEL,
+      message: {
+        role: "assistant",
+        content: "",
+        thinking: "需要移动角色",
+        tool_calls: [
+          {
+            function: {
+              index: 0,
+              name: "character.go_to_room",
+              arguments: { room_id: "study" },
+            },
+          },
+        ],
+      },
+      done: true,
+      done_reason: "stop",
+      prompt_eval_count: 30,
+    });
+  };
+  const provider = new OllamaHttpProvider({ model: MODEL, fetch });
+
+  const result = await provider.chat({
+    messages: [{ role: "user", content: "去书房" }],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "character.go_to_room",
+          description: "移动到房间",
+          parameters: {
+            type: "object",
+            required: ["room_id"],
+            properties: { room_id: { enum: ["study"] } },
+          },
+        },
+      },
+    ],
+    options: { temperature: 0, num_ctx: 8192 },
+    think: false,
+  });
+
+  assert.deepEqual(requestBody, {
+    model: MODEL,
+    messages: [{ role: "user", content: "去书房" }],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "character.go_to_room",
+          description: "移动到房间",
+          parameters: {
+            type: "object",
+            required: ["room_id"],
+            properties: { room_id: { enum: ["study"] } },
+          },
+        },
+      },
+    ],
+    options: { temperature: 0, num_ctx: 8192 },
+    think: false,
+    stream: false,
+  });
+  assert.deepEqual(result, {
+    model: MODEL,
+    message: {
+      role: "assistant",
+      content: "",
+      thinking: "需要移动角色",
+      tool_calls: [
+        {
+          type: "function",
+          function: {
+            index: 0,
+            name: "character.go_to_room",
+            arguments: { room_id: "study" },
+          },
+        },
+      ],
+    },
+    done_reason: "stop",
+    prompt_eval_count: 30,
+  });
+});
+
+test("chat passes structured-output format and rejects malformed tool calls", async () => {
+  const schema = {
+    type: "object",
+    required: ["answer"],
+    properties: { answer: { type: "string" } },
+    additionalProperties: false,
+  } as const;
+  let requestBody: Record<string, unknown> | undefined;
+  const structured = new OllamaHttpProvider({
+    model: MODEL,
+    fetch: async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return jsonResponse({
+        model: MODEL,
+        message: { role: "assistant", content: '{"answer":"ok"}' },
+        done: true,
+      });
+    },
+  });
+
+  await structured.chat({
+    messages: [{ role: "user", content: "回答" }],
+    format: schema,
+  });
+  assert.deepEqual(requestBody?.format, schema);
+
+  const malformed = new OllamaHttpProvider({
+    model: MODEL,
+    fetch: async () =>
+      jsonResponse({
+        model: MODEL,
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [{ function: { name: "character.say", arguments: "not-an-object" } }],
+        },
+        done: true,
+      }),
+  });
+  await assert.rejects(
+    malformed.chat({ messages: [{ role: "user", content: "说话" }] }),
+    (error) => assertProviderError(error, "INVALID_RESPONSE"),
+  );
+});
+
+test("chat validates tool messages and supports cancellation", async () => {
+  const provider = new OllamaHttpProvider({
+    model: MODEL,
+    fetch: async (_input, init) =>
+      await new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        assert.ok(signal !== undefined && signal !== null);
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+  });
+
+  await assert.rejects(
+    provider.chat({ messages: [{ role: "tool", content: "done" }] }),
+    /tool messages must include tool_name/,
+  );
+
+  const controller = new AbortController();
+  const pending = provider.chat(
+    { messages: [{ role: "user", content: "等待" }] },
+    controller.signal,
+  );
+  controller.abort(new Error("test cancellation"));
+  await assert.rejects(pending, (error) => assertProviderError(error, "CANCELLED"));
+});
+
 test("stream parses NDJSON across transport chunk boundaries", async () => {
   const encoder = new TextEncoder();
   const payload = [

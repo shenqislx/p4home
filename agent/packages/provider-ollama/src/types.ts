@@ -15,6 +15,7 @@ export interface OllamaGenerateOptions {
   readonly temperature?: number;
   readonly seed?: number;
   readonly num_predict?: number;
+  readonly num_ctx?: number;
 }
 
 export interface OllamaGenerateRequest {
@@ -50,10 +51,57 @@ export interface OllamaGenerateChunk extends OllamaUsage {
   readonly done_reason?: string;
 }
 
+export type OllamaChatRole = "system" | "user" | "assistant" | "tool";
+
+export interface OllamaFunctionDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly parameters: OllamaJsonSchema;
+}
+
+export interface OllamaToolDefinition {
+  readonly type: "function";
+  readonly function: OllamaFunctionDefinition;
+}
+
+export interface OllamaToolCall {
+  readonly type: "function";
+  readonly function: {
+    readonly index?: number;
+    readonly name: string;
+    readonly arguments: Record<string, unknown>;
+  };
+}
+
+export interface OllamaChatMessage {
+  readonly role: OllamaChatRole;
+  readonly content: string;
+  readonly thinking?: string;
+  readonly tool_name?: string;
+  readonly tool_calls?: readonly OllamaToolCall[];
+}
+
+export interface OllamaChatRequest {
+  readonly messages: readonly OllamaChatMessage[];
+  readonly tools?: readonly OllamaToolDefinition[];
+  readonly format?: "json" | OllamaJsonSchema;
+  readonly options?: OllamaGenerateOptions;
+  readonly think?: boolean | "low" | "medium" | "high";
+  readonly keep_alive?: string | number;
+  readonly timeout_ms?: number;
+}
+
+export interface OllamaChatResult extends OllamaUsage {
+  readonly model: string;
+  readonly message: OllamaChatMessage & { readonly role: "assistant" };
+  readonly done_reason?: string;
+}
+
 export interface OllamaProvider {
   probe(signal?: AbortSignal): Promise<OllamaCapabilities>;
   generate(request: OllamaGenerateRequest, signal?: AbortSignal): Promise<OllamaGenerateResult>;
   stream(request: OllamaGenerateRequest, signal?: AbortSignal): AsyncIterable<OllamaGenerateChunk>;
+  chat(request: OllamaChatRequest, signal?: AbortSignal): Promise<OllamaChatResult>;
 }
 
 export type OllamaFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;

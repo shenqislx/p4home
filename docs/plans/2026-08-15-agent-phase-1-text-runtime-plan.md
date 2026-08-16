@@ -31,6 +31,7 @@
 - [x] 实现 `AbortSignal`、相对 timeout、重复 ID 拒绝和最多四项的顺序 Tool Loop；
 - [x] 实现不连接真实 P4 的五工具 Mock、房间 allowlist 与精确错误码；
 - [x] 实现 Ollama capability probe、generate、stream 与 cancel；
+- [x] 接入 Ollama 原生 chat/tool calling、本地 structured output 校验与有限文本 Agent Loop；
 - [ ] 实现 SQLite 审计存储与结构化日志；
 - [ ] 建立模型 eval、性能基线与最小调试入口。
 
@@ -48,7 +49,22 @@ Ollama provider 里程碑（2026-08-16）：使用 Node 原生 `fetch` 实现 `/
 和 stream 取消等边界。本机 Ollama `0.32.6` 使用已安装的 `qwen3:8b` 完成 1 项显式 live smoke，
 probe 返回 `completion / tools / thinking`，冷启动 probe + generate 用例约 4.6 秒。该数字不是正式
 性能基线；运行日志显示模型上下文被钳制到 40,960、KV cache 约 5.76 GiB，模型对比阶段必须
-固定 `num_ctx` 后重新测量。原生 Tool Calling 与 structured output schema 校验仍属于下一项工作。
+固定 `num_ctx` 后重新测量。
+
+Tool Calling 里程碑（2026-08-16）：`/api/chat` 已支持 system/user/assistant/tool 历史、原生
+function tools、tool calls、thinking、`format` 与固定 `num_ctx`。Runtime 从冻结 Tool Schema v1
+生成模型可见的五工具目录；模型返回值先拒绝未知工具、非法参数和单轮超过四项，再生成稳定
+`tool_call_id` 顺序调用 Mock 执行器；Tool Result v1 再校验通过后才会回送模型。整个文本 Run
+最多四个 ToolCall、四个工具轮次，超预算 fail closed。structured output 即使由 Ollama `format`
+约束，也会再次执行 JSON.parse + AJV 2020 本地校验。
+
+新增后的确定性测试为 30 项，覆盖原生 chat 请求/响应、非法工具调用、冻结契约桥接、structured
+output、完整 Mock 闭环及跨轮预算。本机 Ollama `0.32.6` + `qwen3:8b` 的 4 项显式 live 回归
+全部通过：generate smoke 约 2.74 秒、原生 ToolCall 约 2.28 秒、structured output 约 0.61 秒，
+“文本请求 → 去书房 Mock Tool → 最终回复”的有限闭环约 1.86 秒。该次服务最初未运行，启动
+`ollama serve` 后通过；这些单次数字只作功能证据，不替代第 10 步的正式 p50/p95 模型评测。
+
+下一项工作为 SQLite 审计存储与结构化日志，保持不接真实 P4。
 
 ## 4. 验证
 

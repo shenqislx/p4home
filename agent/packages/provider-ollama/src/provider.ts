@@ -1,12 +1,16 @@
 import { OllamaProviderError } from "./errors.ts";
 import type {
   OllamaCapabilities,
+  OllamaChatMessage,
+  OllamaChatRequest,
+  OllamaChatResult,
   OllamaFetch,
   OllamaGenerateChunk,
   OllamaGenerateRequest,
   OllamaGenerateResult,
   OllamaHttpProviderOptions,
   OllamaProvider,
+  OllamaToolCall,
   OllamaUsage,
 } from "./types.ts";
 
@@ -59,6 +63,16 @@ function optionalNumber(value: unknown, field: string): number | undefined {
   return value;
 }
 
+function optionalIndex(value: unknown, field: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isInteger(value) || (value as number) < 0) {
+    throw new OllamaProviderError("INVALID_RESPONSE", `${field} must be a non-negative integer`);
+  }
+  return value as number;
+}
+
 function compact(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value).filter((entry) => entry[1] !== undefined));
 }
@@ -76,6 +90,31 @@ function validateGenerateRequest(request: OllamaGenerateRequest): void {
   }
   if (request.timeout_ms !== undefined) {
     validateTimeout(request.timeout_ms);
+  }
+}
+
+function validateChatRequest(request: OllamaChatRequest): void {
+  if (request.messages.length === 0) {
+    throw new TypeError("messages must not be empty");
+  }
+  if (request.timeout_ms !== undefined) {
+    validateTimeout(request.timeout_ms);
+  }
+  const toolNames = new Set<string>();
+  for (const tool of request.tools ?? []) {
+    const name = tool.function.name.trim();
+    if (tool.type !== "function" || name.length === 0) {
+      throw new TypeError("tools must contain named function definitions");
+    }
+    if (toolNames.has(name)) {
+      throw new TypeError(`duplicate tool definition: ${name}`);
+    }
+    toolNames.add(name);
+  }
+  for (const message of request.messages) {
+    if (message.role === "tool" && (message.tool_name?.trim().length ?? 0) === 0) {
+      throw new TypeError("tool messages must include tool_name");
+    }
   }
 }
 
@@ -105,6 +144,93 @@ function generateBody(model: string, request: OllamaGenerateRequest, stream: boo
       stream,
     }),
   );
+}
+
+function chatBody(model: string, request: OllamaChatRequest): string {
+  return JSON.stringify(
+    compact({
+      model,
+      messages: request.messages,
+      tools: request.tools,
+      format: request.format,
+      options: request.options,
+      think: request.think,
+      keep_alive: request.keep_alive,
+      stream: false,
+    }),
+  );
+}
+
+function parseToolCall(value: unknown, index: number): OllamaToolCall {
+  const record = requireRecord(value, `message.tool_calls[${index}]`);
+  if (record.type !== undefined && record.type !== "function") {
+    throw new OllamaProviderError(
+      "INVALID_RESPONSE",
+      `message.tool_calls[${index}].type must be function`,
+    );
+  }
+  const functionRecord = requireRecord(
+    record.function,
+    `message.tool_calls[${index}].function`,
+  );
+  const callIndex = optionalIndex(
+    functionRecord.index,
+    `message.tool_calls[${index}].function.index`,
+  );
+  const parsed = {
+    type: "function",
+    function: {
+      name: requireString(functionRecord.name, `message.tool_calls[${index}].function.name`),
+      arguments: requireRecord(
+        functionRecord.arguments,
+        `message.tool_calls[${index}].function.arguments`,
+      ),
+    },
+  } satisfies OllamaToolCall;
+  return callIndex === undefined
+    ? parsed
+    : { ...parsed, function: { ...parsed.function, index: callIndex } };
+}
+
+function parseChatMessage(value: unknown): OllamaChatMessage & { readonly role: "assistant" } {
+  const record = requireRecord(value, "message");
+  if (record.role !== "assistant") {
+    throw new OllamaProviderError("INVALID_RESPONSE", "message.role must be assistant");
+  }
+  let toolCalls: readonly OllamaToolCall[] | undefined;
+  if (record.tool_calls !== undefined) {
+    if (!Array.isArray(record.tool_calls)) {
+      throw new OllamaProviderError("INVALID_RESPONSE", "message.tool_calls must be an array");
+    }
+    toolCalls = record.tool_calls.map(parseToolCall);
+  }
+  const base = {
+    role: "assistant",
+    content: requireString(record.content, "message.content"),
+  } satisfies OllamaChatMessage & { readonly role: "assistant" };
+  const thinking = optionalString(record.thinking, "message.thinking");
+  return {
+    ...base,
+    ...(thinking === undefined ? {} : { thinking }),
+    ...(toolCalls === undefined ? {} : { tool_calls: toolCalls }),
+  };
+}
+
+function parseChatResult(value: unknown): OllamaChatResult {
+  const record = requireRecord(value, "Ollama chat response");
+  if (record.done !== true) {
+    throw new OllamaProviderError(
+      "INVALID_RESPONSE",
+      "non-streaming chat response must be terminal",
+    );
+  }
+  const base = {
+    model: requireString(record.model, "model"),
+    message: parseChatMessage(record.message),
+    ...usageFrom(record),
+  } satisfies OllamaChatResult;
+  const doneReason = optionalString(record.done_reason, "done_reason");
+  return doneReason === undefined ? base : { ...base, done_reason: doneReason };
 }
 
 function parseGenerateChunk(value: unknown): OllamaGenerateChunk {
@@ -275,6 +401,24 @@ export class OllamaHttpProvider implements OllamaProvider {
     return parseGenerateResult(result);
   }
 
+  public async chat(
+    request: OllamaChatRequest,
+    signal?: AbortSignal,
+  ): Promise<OllamaChatResult> {
+    validateChatRequest(request);
+    const result = await this.#jsonRequest(
+      "/api/chat",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: chatBody(this.#model, request),
+      },
+      signal,
+      request.timeout_ms,
+    );
+    return parseChatResult(result);
+  }
+
   public async *stream(
     request: OllamaGenerateRequest,
     signal?: AbortSignal,
@@ -382,7 +526,7 @@ export class OllamaHttpProvider implements OllamaProvider {
       if (!response.ok) {
         throw await this.#httpError(
           response,
-          path === "/api/generate" || path === "/api/show",
+          path === "/api/generate" || path === "/api/chat" || path === "/api/show",
         );
       }
       return await parseJson(response, path);

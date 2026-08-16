@@ -20,6 +20,9 @@ importers:
       '@p4home/provider-ollama':
         specifier: workspace:*
         version: link:packages/provider-ollama
+      '@p4home/runtime':
+        specifier: workspace:*
+        version: link:apps/runtime
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
