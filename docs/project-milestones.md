@@ -21,8 +21,8 @@
 | Milestone | 状态 | 退出结果 |
 |---|---|---|
 | M7.0 Baseline & Contract | `completed` | 可重复构建、实机资源基线、冻结协议 v1、Mock 合约测试 |
-| M7.1 Text Agent Runtime | `in_progress` | Ollama + 有限 Tool Loop + SQLite + eval |
-| M7.2 Role Runtime & Cat World | `pending` | Role Router、三角色隔离、Cat 房间动作闭环 |
+| M7.1 Text Agent Runtime | `completed` | Ollama + 有限 Tool Loop + SQLite + eval |
+| M7.2 Role Runtime & Cat World | `in_progress` | Role Router、三角色隔离、Cat 房间动作闭环 |
 | M7.3 Cat Object World | `pending` | sofa/window/desk 等 Cat 对象级动作 |
 | M7.4 Robot HA & Multi-role | `pending` | Robot 受限 HA 工具、Human/Robot 语义分割 |
 | M7.5 Role-aware Voice | `pending` | 本地唤醒、STT、Router/Roles、TTS 闭环 |
@@ -45,10 +45,13 @@ Agent WebSocket。
 
 ## 4. 当前唯一允许推进的工作
 
-执行 [Phase 1 plan](./plans/2026-08-15-agent-phase-1-text-runtime-plan.md)：Runtime、有限 Tool Loop、
-Ollama provider、SQLite Worker/启动恢复与包含 `qwen3.8:27b-mlx` 的模型 eval 已完成回归；当前
-默认模型已切换为 `qwen3.8:27b-mlx`，Role Router 与 Robot/Human/Cat 产品边界已写入 Phase 2–7；
-当前只等待用户 review。Phase 2 的真实 P4 WebSocket 执行链保持未启动。
+执行 [Phase 2 plan](./plans/2026-08-15-agent-phase-2-p4-room-world-plan.md)。2026-08-17 已重新设计为
+2A–2D 四个纵切。2A Role Contract & Router 的 Role Contract、三个 RoleProfile、Cat
+原文隔离、fail-closed Router、独立 Session、Human/Robot 入口、有界调度与路由审计已落地并通过
+92 项确定性测试。2026-08-18 review 修复后，Human 文本策略、本地 eval gate、Session 串行、模型
+轮次审计、SQLite schema v2 关联索引和统一 Role 组合入口均有回归覆盖；四角色两轮 v2 eval 分别为
+Router 24/24、Human 8/8、Robot 8/8、Cat 18/18，且无综合分。2A 退出门禁已重新满足，2B 尚未
+启动；Phase 2 的真实 P4 WebSocket 执行链保持未启动。
 
 ## 5. 状态更新规则
 

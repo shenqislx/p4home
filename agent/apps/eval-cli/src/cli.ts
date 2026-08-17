@@ -17,6 +17,11 @@ import {
 import { SqliteAuditStore } from "@p4home/storage-sqlite";
 
 import { evaluateToolCalling } from "./evaluator.ts";
+import {
+  assessRoleEvalGate,
+  evaluateRoleRuntime,
+  ROLE_EVAL_TOTAL_CASES_PER_REPEAT,
+} from "./role-evaluator.ts";
 
 interface ParsedArguments {
   readonly command: string;
@@ -87,14 +92,73 @@ function assertKnownOptions(
 }
 
 function printHelp(): void {
-  process.stdout.write(`P4 Home Phase 1 CLI
+  process.stdout.write(`P4 Home Agent CLI
 
 Eval:
   pnpm eval:ollama -- --model ${DEFAULT_OLLAMA_MODEL} [--case zh-018] [--limit 32] [--repeat 2] [--output FILE]
 
+Phase 2 role eval (separate Router/Human/Robot/Cat reports, no aggregate score):
+  pnpm eval:roles -- --model ${DEFAULT_OLLAMA_MODEL} [--repeat 2] [--output FILE]
+
 Debug one text run:
   pnpm debug:agent -- --model ${DEFAULT_OLLAMA_MODEL} --text "去书房" [--database :memory:]
 `);
+}
+
+async function roleEvalCommand(argumentsValue: ParsedArguments): Promise<void> {
+  assertKnownOptions(argumentsValue, new Set([
+    "--model",
+    "--output",
+    "--repeat",
+    "--timeout-ms",
+  ]));
+  const model = value(
+    argumentsValue,
+    "--model",
+    process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL,
+  );
+  if (model === undefined || model.trim().length === 0) {
+    throw new Error("--model is required");
+  }
+  const repeat = integer(argumentsValue, "--repeat", 2, 1, 10);
+  const timeoutMs = integer(argumentsValue, "--timeout-ms", 120_000, 100, 600_000);
+  const provider = new OllamaHttpProvider({ model, requestTimeoutMs: timeoutMs });
+  const capabilities = await provider.probe();
+  if (!capabilities.modelAvailable) {
+    throw new Error(`model ${model} is unavailable`);
+  }
+  let completed = 0;
+  const total = repeat * ROLE_EVAL_TOTAL_CASES_PER_REPEAT;
+  const report = await evaluateRoleRuntime({
+    model,
+    provider,
+    repeat,
+    timeout_ms: timeoutMs,
+    on_case(role, id, pass): void {
+      completed += 1;
+      process.stderr.write(`[${role}] ${completed}/${total} ${id} ${pass ? "pass" : "fail"}\n`);
+    },
+  });
+  const artifact = {
+    generated_at: new Date().toISOString(),
+    runtime: { node: process.version, platform: process.platform, arch: process.arch },
+    ...report,
+  };
+  const encoded = `${JSON.stringify(artifact, null, 2)}\n`;
+  const output = value(argumentsValue, "--output");
+  if (output !== undefined) {
+    const outputPath = resolve(output);
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(outputPath, encoded, { encoding: "utf8", mode: 0o600 });
+    chmodSync(outputPath, 0o600);
+    process.stderr.write(`role eval report: ${outputPath}\n`);
+  }
+  process.stdout.write(encoded);
+  const gate = assessRoleEvalGate(report);
+  if (!gate.passed) {
+    process.stderr.write(`role eval gate failed: ${gate.failures.join(", ")}\n`);
+    process.exitCode = 2;
+  }
 }
 
 async function evalCommand(argumentsValue: ParsedArguments): Promise<void> {
@@ -271,6 +335,10 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   }
   if (argumentsValue.command === "run") {
     await debugCommand(argumentsValue);
+    return;
+  }
+  if (argumentsValue.command === "roles") {
+    await roleEvalCommand(argumentsValue);
     return;
   }
   if (argumentsValue.command === "help") {

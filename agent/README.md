@@ -1,8 +1,8 @@
 # P4 Home Agent Runtime
 
-Phase 1 的 TypeScript workspace。当前纵切运行冻结契约、Ollama 原生 Tool Calling、有限文本
-Agent Loop 与 Mock P4 Home 工具；不连接真实 P4 或 Home Assistant。确定性测试不要求 Ollama
-服务，真实模型回归必须显式启用。
+Phase 1 建立、Phase 2 正在扩展的 TypeScript workspace。当前包含冻结契约、Ollama 原生 Tool
+Calling、有限文本 Agent Loop、Role Contract/Router 与 Mock P4 Home 工具；尚不连接真实 P4 或
+Home Assistant。确定性测试不要求 Ollama 服务，真实模型回归必须显式启用。
 
 ## 环境
 
@@ -23,7 +23,9 @@ Node 主版本时产生假通过。
 
 ## 当前分层
 
-- `apps/runtime`：有限文本 Agent Loop、SQLite 审计接入与 JSON Lines 结构化日志；
+- `apps/runtime`：有限文本 Agent Loop、Role Contract/Profile/Router、独立 Role Session、
+  Router → Scheduler → Session → Runner/Audit 组合入口、Human 本地输出策略、有界调度、SQLite 审计
+  接入与 JSON Lines 结构化日志；
 - `apps/eval-cli`：中文黄金场景评测与单次文本调试入口；
 - `packages/contracts`：AJV 加载并验证仓库根目录冻结的两份 v1 契约；
 - `packages/core`：核心实体类型、取消、相对 timeout、最多四项的顺序 Tool Loop；
@@ -32,7 +34,23 @@ Node 主版本时产生假通过。
   stream、`AbortSignal` 取消和相对 timeout；
 - `packages/storage-sqlite`：基于 Node 24 内置 `node:sqlite` 的审计存储、schema migration 与关联查询。
 
-Phase 1 不得导入真实 P4 WebSocket 执行链，也不得把 token 暴露给模型或日志。
+Phase 2A Role Contract & Router 已满足退出门禁，2B 尚未启动；当前仍不得导入真实 P4 WebSocket
+执行链，任何阶段都不得把 token 暴露给模型或日志。
+
+Role Router 不向模型提供 Tool，也不依赖 Ollama `format`：默认 27B 已实测会在部分分类样例中违反
+`format`。Router prompt 只允许三个精确 JSON，响应仍由 Runtime 使用 JSON Schema/AJV 本地复验；
+非法 key、Markdown、ToolCall、thinking 与 provider error 全部闭合到 Human clarification。
+
+运行 Phase 2A 四角色独立评测：
+
+```bash
+pnpm eval:roles -- --model qwen3.8:27b-mlx --repeat 2 \
+  --output ../evidence/agent-phase-2/qwen3.8-27b-role-eval-v2.json
+```
+
+报告分别包含 Router/Human/Robot/Cat，`aggregate_score` 固定为 `null`。Robot 和 Cat 在 2A 只评估
+确定性未上线/契约边界，不宣称真实 HA 或 P4 动作已经通过。任一角色存在失败、Router unsafe
+misroute、Human policy failure 或禁用调用时，CLI 仍输出完整报告，但以非零状态结束。
 
 ## 评测与调试 CLI
 
@@ -75,12 +93,14 @@ completion API，`structuredOutput` 在这种 metadata-only probe 中保持保�
 
 ## SQLite 审计与结构化日志
 
-`SqliteAuditStore` 使用 schema version 1、WAL、STRICT table、外键和 JSON 有效性约束，保存
+`SqliteAuditStore` 使用 schema version 2、WAL、STRICT table、外键和 JSON 有效性约束，保存
 AgentProfile、Session、Run、Message、ToolCall、Action 与 Event。Run、Session、Action 的身份字段
 不可重写，终态 Run/Action 不可回退；一个 ToolCall 只能从 `pending` 写入一次终态结果。查询
 `getRunTrace(runId)` 可获得同一读快照下的完整关联记录。Run 不能在 ToolCall 或 Action 未终止时
 结束；前序工具失败导致后续调用未执行时，审计会以合成失败结果终止这些调用，再和 Run 终态原子
 提交。同一审计阶段的 Run、Message、ToolCall、ToolResult 和 Event 使用 batch transaction 写入。
+schema v2 为 Interaction → Run 关联增加可索引查询并按 `run_id` 去重，旧 schema v1 数据库在打开时
+原子迁移。
 所有 `DatabaseSync` 操作在专用 Worker 中串行执行，SQLite 锁等待不会阻塞主线程的取消、健康检查
 和心跳 timer。
 

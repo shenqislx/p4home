@@ -125,6 +125,10 @@ export class SqliteAuditStore implements AuditStore, Disposable, AsyncDisposable
     return await this.#request("listSessionMessages", [sessionId]) as readonly Message[];
   }
 
+  public async listRunIdsForInteraction(interactionId: string): Promise<readonly string[]> {
+    return await this.#request("listRunIdsForInteraction", [interactionId]) as readonly string[];
+  }
+
   public async reconcileInterruptedRuns(recoveredAtMs = Date.now()): Promise<AuditRecoveryReport> {
     return await this.#request("reconcileInterruptedRuns", [recoveredAtMs]) as AuditRecoveryReport;
   }

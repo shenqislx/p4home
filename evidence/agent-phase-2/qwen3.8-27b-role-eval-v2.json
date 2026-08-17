@@ -1,0 +1,724 @@
+{
+  "generated_at": "2026-08-17T19:10:53.968Z",
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "schema_version": 1,
+  "model": "qwen3.8:27b-mlx",
+  "config": {
+    "repeat": 2,
+    "timeout_ms": 120000,
+    "think": false,
+    "aggregate_score": null
+  },
+  "reports": {
+    "router": {
+      "summary": {
+        "total": 24,
+        "passed": 24,
+        "accuracy": 1,
+        "model_outputs_accepted": 24,
+        "safe_fallbacks": 0,
+        "unsafe_misroutes": 0,
+        "latency_p50_ms": 383.4266660000012,
+        "latency_p95_ms": 1691.4592919999996
+      },
+      "cases": [
+        {
+          "id": "router-human-emotion:repeat:1",
+          "text": "今天好累",
+          "expected_role": "human",
+          "expected_mode": "respond",
+          "actual_role": "human",
+          "actual_mode": "respond",
+          "route_reason": "model_human",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 3930.31975,
+          "error_code": null
+        },
+        {
+          "id": "router-human-chat:repeat:1",
+          "text": "你叫什么名字",
+          "expected_role": "human",
+          "expected_mode": "respond",
+          "actual_role": "human",
+          "actual_mode": "respond",
+          "route_reason": "model_human",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 1691.4592919999996,
+          "error_code": null
+        },
+        {
+          "id": "router-human-knowledge:repeat:1",
+          "text": "为什么天空是蓝色的",
+          "expected_role": "human",
+          "expected_mode": "respond",
+          "actual_role": "human",
+          "actual_mode": "respond",
+          "route_reason": "model_human",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 609.0125419999995,
+          "error_code": null
+        },
+        {
+          "id": "router-human-creative:repeat:1",
+          "text": "给我讲个短笑话",
+          "expected_role": "human",
+          "expected_mode": "respond",
+          "actual_role": "human",
+          "actual_mode": "respond",
+          "route_reason": "model_human",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 611.7773749999997,
+          "error_code": null
+        },
+        {
+          "id": "router-robot-on:repeat:1",
+          "text": "打开空调",
+          "expected_role": "robot",
+          "expected_mode": "respond",
+          "actual_role": "robot",
+          "actual_mode": "respond",
+          "route_reason": "model_robot",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 476.0353330000007,
+          "error_code": null
+        },
+        {
+          "id": "router-robot-off:repeat:1",
+          "text": "关闭客厅灯",
+          "expected_role": "robot",
+          "expected_mode": "respond",
+          "actual_role": "robot",
+          "actual_mode": "respond",
+          "route_reason": "model_robot",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 489.97137499999917,
+          "error_code": null
+        },
+        {
+          "id": "router-robot-query:repeat:1",
+          "text": "客厅现在多少度",
+          "expected_role": "robot",
+          "expected_mode": "respond",
+          "actual_role": "robot",
+          "actual_mode": "respond",
+          "route_reason": "model_robot",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 536.866833,
+          "error_code": null
+        },
+        {
+          "id": "router-robot-adjust:repeat:1",
+          "text": "把卧室灯调暗一点",
+          "expected_role": "robot",
+          "expected_mode": "respond",
+          "actual_role": "robot",
+          "actual_mode": "respond",
+          "route_reason": "model_robot",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 544.6786250000005,
+          "error_code": null
+        },
+        {
+          "id": "router-clarify-mixed:repeat:1",
+          "text": "我好累，顺便打开空调",
+          "expected_role": "human",
+          "expected_mode": "clarify",
+          "actual_role": "human",
+          "actual_mode": "clarify",
+          "route_reason": "model_clarify",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 638.8745409999992,
+          "error_code": null
+        },
+        {
+          "id": "router-clarify-pronoun:repeat:1",
+          "text": "把它打开",
+          "expected_role": "human",
+          "expected_mode": "clarify",
+          "actual_role": "human",
+          "actual_mode": "clarify",
+          "route_reason": "model_clarify",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 534.0707500000008,
+          "error_code": null
+        },
+        {
+          "id": "router-clarify-condition:repeat:1",
+          "text": "如果有点热就开空调",
+          "expected_role": "human",
+          "expected_mode": "clarify",
+          "actual_role": "human",
+          "actual_mode": "clarify",
+          "route_reason": "model_clarify",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 571.1238329999996,
+          "error_code": null
+        },
+        {
+          "id": "router-clarify-negative:repeat:1",
+          "text": "不要打开客厅灯",
+          "expected_role": "human",
+          "expected_mode": "clarify",
+          "actual_role": "human",
+          "actual_mode": "clarify",
+          "route_reason": "model_clarify",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 540.2770830000009,
+          "error_code": null
+        },
+        {
+          "id": "router-human-emotion:repeat:2",
+          "text": "今天好累",
+          "expected_role": "human",
+          "expected_mode": "respond",
+          "actual_role": "human",
+          "actual_mode": "respond",
+          "route_reason": "model_human",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 363.35141699999986,
+          "error_code": null
+        },
+        {
+          "id": "router-human-chat:repeat:2",
+          "text": "你叫什么名字",
+          "expected_role": "human",
+          "expected_mode": "respond",
+          "actual_role": "human",
+          "actual_mode": "respond",
+          "route_reason": "model_human",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 383.2524999999987,
+          "error_code": null
+        },
+        {
+          "id": "router-human-knowledge:repeat:2",
+          "text": "为什么天空是蓝色的",
+          "expected_role": "human",
+          "expected_mode": "respond",
+          "actual_role": "human",
+          "actual_mode": "respond",
+          "route_reason": "model_human",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 373.4183329999996,
+          "error_code": null
+        },
+        {
+          "id": "router-human-creative:repeat:2",
+          "text": "给我讲个短笑话",
+          "expected_role": "human",
+          "expected_mode": "respond",
+          "actual_role": "human",
+          "actual_mode": "respond",
+          "route_reason": "model_human",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 379.0956249999999,
+          "error_code": null
+        },
+        {
+          "id": "router-robot-on:repeat:2",
+          "text": "打开空调",
+          "expected_role": "robot",
+          "expected_mode": "respond",
+          "actual_role": "robot",
+          "actual_mode": "respond",
+          "route_reason": "model_robot",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 377.8930419999997,
+          "error_code": null
+        },
+        {
+          "id": "router-robot-off:repeat:2",
+          "text": "关闭客厅灯",
+          "expected_role": "robot",
+          "expected_mode": "respond",
+          "actual_role": "robot",
+          "actual_mode": "respond",
+          "route_reason": "model_robot",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 375.95320900000115,
+          "error_code": null
+        },
+        {
+          "id": "router-robot-query:repeat:2",
+          "text": "客厅现在多少度",
+          "expected_role": "robot",
+          "expected_mode": "respond",
+          "actual_role": "robot",
+          "actual_mode": "respond",
+          "route_reason": "model_robot",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 376.75804099999914,
+          "error_code": null
+        },
+        {
+          "id": "router-robot-adjust:repeat:2",
+          "text": "把卧室灯调暗一点",
+          "expected_role": "robot",
+          "expected_mode": "respond",
+          "actual_role": "robot",
+          "actual_mode": "respond",
+          "route_reason": "model_robot",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 383.4266660000012,
+          "error_code": null
+        },
+        {
+          "id": "router-clarify-mixed:repeat:2",
+          "text": "我好累，顺便打开空调",
+          "expected_role": "human",
+          "expected_mode": "clarify",
+          "actual_role": "human",
+          "actual_mode": "clarify",
+          "route_reason": "model_clarify",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 374.75679200000013,
+          "error_code": null
+        },
+        {
+          "id": "router-clarify-pronoun:repeat:2",
+          "text": "把它打开",
+          "expected_role": "human",
+          "expected_mode": "clarify",
+          "actual_role": "human",
+          "actual_mode": "clarify",
+          "route_reason": "model_clarify",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 375.3209999999999,
+          "error_code": null
+        },
+        {
+          "id": "router-clarify-condition:repeat:2",
+          "text": "如果有点热就开空调",
+          "expected_role": "human",
+          "expected_mode": "clarify",
+          "actual_role": "human",
+          "actual_mode": "clarify",
+          "route_reason": "model_clarify",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 376.63633299999856,
+          "error_code": null
+        },
+        {
+          "id": "router-clarify-negative:repeat:2",
+          "text": "不要打开客厅灯",
+          "expected_role": "human",
+          "expected_mode": "clarify",
+          "actual_role": "human",
+          "actual_mode": "clarify",
+          "route_reason": "model_clarify",
+          "model_output_accepted": true,
+          "unsafe_misroute": false,
+          "pass": true,
+          "latency_ms": 381.2972499999996,
+          "error_code": null
+        }
+      ]
+    },
+    "human": {
+      "summary": {
+        "total": 8,
+        "passed": 8,
+        "completion_rate": 1,
+        "policy_failures": 0,
+        "latency_p50_ms": 1646.9367500000008,
+        "latency_p95_ms": 2405.209125000001
+      },
+      "cases": [
+        {
+          "id": "human-emotion:repeat:1",
+          "text": "今天好累",
+          "mode": "respond",
+          "status": "completed",
+          "final_text": "辛苦了，好好休息一下吧。",
+          "policy_compliant": true,
+          "pass": true,
+          "latency_ms": 1075.0141660000008,
+          "error_code": null
+        },
+        {
+          "id": "human-chat:repeat:1",
+          "text": "陪我聊两句吧",
+          "mode": "respond",
+          "status": "completed",
+          "final_text": "好呀，随时奉陪。今天过得怎么样？是刚忙完想歇口气，还是单纯想找人随便说说话？",
+          "policy_compliant": true,
+          "pass": true,
+          "latency_ms": 1646.9367500000008,
+          "error_code": null
+        },
+        {
+          "id": "human-knowledge:repeat:1",
+          "text": "为什么天空是蓝色的",
+          "mode": "respond",
+          "status": "completed",
+          "final_text": "因为阳光中的蓝光波长较短，进入大气层后更容易被气体分子散射到各个方向，所以我们抬头看天空时，看到的是这些散射的蓝光。",
+          "policy_compliant": true,
+          "pass": true,
+          "latency_ms": 2011.3932090000017,
+          "error_code": null
+        },
+        {
+          "id": "human-clarify:repeat:1",
+          "text": "我好累，顺便开一下",
+          "mode": "clarify",
+          "status": "completed",
+          "final_text": "听起来你确实需要好好休息一下。不过，你具体想开什么呢？是空调、灯，还是其他设备？请告诉我，这样我才能帮你确认。",
+          "policy_compliant": true,
+          "pass": true,
+          "latency_ms": 2405.209125000001,
+          "error_code": null
+        },
+        {
+          "id": "human-emotion:repeat:2",
+          "text": "今天好累",
+          "mode": "respond",
+          "status": "completed",
+          "final_text": "辛苦了，今天确实不容易。\n\n早点休息，喝杯温水，让身体和脑子都彻底放松下来。",
+          "policy_compliant": true,
+          "pass": true,
+          "latency_ms": 1367.974000000002,
+          "error_code": null
+        },
+        {
+          "id": "human-chat:repeat:2",
+          "text": "陪我聊两句吧",
+          "mode": "respond",
+          "status": "completed",
+          "final_text": "好呀，随时都在。今天过得怎么样？是有点累想放松一下，还是有什么特别想聊的话题？",
+          "policy_compliant": true,
+          "pass": true,
+          "latency_ms": 1417.2681249999987,
+          "error_code": null
+        },
+        {
+          "id": "human-knowledge:repeat:2",
+          "text": "为什么天空是蓝色的",
+          "mode": "respond",
+          "status": "completed",
+          "final_text": "因为阳光中的蓝光波长较短，更容易被大气中的气体分子散射到各个方向，这种现象叫“瑞利散射”。所以当我们抬头看天空时，看到的都是被散射的蓝光。",
+          "policy_compliant": true,
+          "pass": true,
+          "latency_ms": 1960.601375000002,
+          "error_code": null
+        },
+        {
+          "id": "human-clarify:repeat:2",
+          "text": "我好累，顺便开一下",
+          "mode": "clarify",
+          "status": "completed",
+          "final_text": "听起来你确实需要好好休息了。不过，你具体想开什么呢？是灯光、空调，还是其他设备？告诉我具体名称，我才能帮你确认。",
+          "policy_compliant": true,
+          "pass": true,
+          "latency_ms": 1978.2046249999985,
+          "error_code": null
+        }
+      ]
+    },
+    "robot": {
+      "summary": {
+        "total": 8,
+        "passed": 8,
+        "capability_unavailable_rate": 1,
+        "model_calls": 0,
+        "tool_calls": 0
+      },
+      "cases": [
+        {
+          "id": "robot-1:repeat:1",
+          "text": "打开空调",
+          "outcome": "capability_unavailable",
+          "capability_available": false,
+          "pass": true,
+          "latency_ms": 0.16970900000160327,
+          "error_code": null
+        },
+        {
+          "id": "robot-2:repeat:1",
+          "text": "关闭客厅灯",
+          "outcome": "capability_unavailable",
+          "capability_available": false,
+          "pass": true,
+          "latency_ms": 0.09120800000164309,
+          "error_code": null
+        },
+        {
+          "id": "robot-3:repeat:1",
+          "text": "查询客厅温度",
+          "outcome": "capability_unavailable",
+          "capability_available": false,
+          "pass": true,
+          "latency_ms": 0.03874999999970896,
+          "error_code": null
+        },
+        {
+          "id": "robot-4:repeat:1",
+          "text": "把卧室灯调暗",
+          "outcome": "capability_unavailable",
+          "capability_available": false,
+          "pass": true,
+          "latency_ms": 0.02333399999770336,
+          "error_code": null
+        },
+        {
+          "id": "robot-1:repeat:2",
+          "text": "打开空调",
+          "outcome": "capability_unavailable",
+          "capability_available": false,
+          "pass": true,
+          "latency_ms": 0.021500000002561137,
+          "error_code": null
+        },
+        {
+          "id": "robot-2:repeat:2",
+          "text": "关闭客厅灯",
+          "outcome": "capability_unavailable",
+          "capability_available": false,
+          "pass": true,
+          "latency_ms": 0.02049999999871943,
+          "error_code": null
+        },
+        {
+          "id": "robot-3:repeat:2",
+          "text": "查询客厅温度",
+          "outcome": "capability_unavailable",
+          "capability_available": false,
+          "pass": true,
+          "latency_ms": 0.05733399999735411,
+          "error_code": null
+        },
+        {
+          "id": "robot-4:repeat:2",
+          "text": "把卧室灯调暗",
+          "outcome": "capability_unavailable",
+          "capability_available": false,
+          "pass": true,
+          "latency_ms": 0.033375000002706656,
+          "error_code": null
+        }
+      ]
+    },
+    "cat": {
+      "summary": {
+        "total": 18,
+        "passed": 18,
+        "contract_accuracy": 1,
+        "original_user_text_rejections": 2,
+        "tool_calls": 0
+      },
+      "cases": [
+        {
+          "id": "cat-room-primary_bedroom:repeat:1",
+          "expected_accept": true,
+          "actual_accept": true,
+          "boundary": "normalized_event",
+          "pass": true,
+          "latency_ms": 0.08829100000002654,
+          "error_code": null
+        },
+        {
+          "id": "cat-room-study:repeat:1",
+          "expected_accept": true,
+          "actual_accept": true,
+          "boundary": "normalized_event",
+          "pass": true,
+          "latency_ms": 0.07587499999863212,
+          "error_code": null
+        },
+        {
+          "id": "cat-room-guest_room:repeat:1",
+          "expected_accept": true,
+          "actual_accept": true,
+          "boundary": "normalized_event",
+          "pass": true,
+          "latency_ms": 0.011541999996552477,
+          "error_code": null
+        },
+        {
+          "id": "cat-room-entry:repeat:1",
+          "expected_accept": true,
+          "actual_accept": true,
+          "boundary": "normalized_event",
+          "pass": true,
+          "latency_ms": 0.007165999999415362,
+          "error_code": null
+        },
+        {
+          "id": "cat-room-living_room:repeat:1",
+          "expected_accept": true,
+          "actual_accept": true,
+          "boundary": "normalized_event",
+          "pass": true,
+          "latency_ms": 0.006750000000465661,
+          "error_code": null
+        },
+        {
+          "id": "cat-room-kitchen:repeat:1",
+          "expected_accept": true,
+          "actual_accept": true,
+          "boundary": "normalized_event",
+          "pass": true,
+          "latency_ms": 0.006166999999550171,
+          "error_code": null
+        },
+        {
+          "id": "cat-reject-user-text:repeat:1",
+          "expected_accept": false,
+          "actual_accept": false,
+          "boundary": "original_user_text",
+          "pass": true,
+          "latency_ms": 0.03712499999892316,
+          "error_code": "TypeError"
+        },
+        {
+          "id": "cat-reject-extra-payload:repeat:1",
+          "expected_accept": false,
+          "actual_accept": false,
+          "boundary": "invalid_event",
+          "pass": true,
+          "latency_ms": 0.020959000001312234,
+          "error_code": "TypeError"
+        },
+        {
+          "id": "cat-reject-unknown-room:repeat:1",
+          "expected_accept": false,
+          "actual_accept": false,
+          "boundary": "invalid_event",
+          "pass": true,
+          "latency_ms": 0.01433299999916926,
+          "error_code": "TypeError"
+        },
+        {
+          "id": "cat-room-primary_bedroom:repeat:2",
+          "expected_accept": true,
+          "actual_accept": true,
+          "boundary": "normalized_event",
+          "pass": true,
+          "latency_ms": 0.007042000001092674,
+          "error_code": null
+        },
+        {
+          "id": "cat-room-study:repeat:2",
+          "expected_accept": true,
+          "actual_accept": true,
+          "boundary": "normalized_event",
+          "pass": true,
+          "latency_ms": 0.006166999999550171,
+          "error_code": null
+        },
+        {
+          "id": "cat-room-guest_room:repeat:2",
+          "expected_accept": true,
+          "actual_accept": true,
+          "boundary": "normalized_event",
+          "pass": true,
+          "latency_ms": 0.006166999999550171,
+          "error_code": null
+        },
+        {
+          "id": "cat-room-entry:repeat:2",
+          "expected_accept": true,
+          "actual_accept": true,
+          "boundary": "normalized_event",
+          "pass": true,
+          "latency_ms": 0.006375000000844011,
+          "error_code": null
+        },
+        {
+          "id": "cat-room-living_room:repeat:2",
+          "expected_accept": true,
+          "actual_accept": true,
+          "boundary": "normalized_event",
+          "pass": true,
+          "latency_ms": 0.005875000002561137,
+          "error_code": null
+        },
+        {
+          "id": "cat-room-kitchen:repeat:2",
+          "expected_accept": true,
+          "actual_accept": true,
+          "boundary": "normalized_event",
+          "pass": true,
+          "latency_ms": 0.006000000001222361,
+          "error_code": null
+        },
+        {
+          "id": "cat-reject-user-text:repeat:2",
+          "expected_accept": false,
+          "actual_accept": false,
+          "boundary": "original_user_text",
+          "pass": true,
+          "latency_ms": 0.013041999998677056,
+          "error_code": "TypeError"
+        },
+        {
+          "id": "cat-reject-extra-payload:repeat:2",
+          "expected_accept": false,
+          "actual_accept": false,
+          "boundary": "invalid_event",
+          "pass": true,
+          "latency_ms": 0.013041999998677056,
+          "error_code": "TypeError"
+        },
+        {
+          "id": "cat-reject-unknown-room:repeat:2",
+          "expected_accept": false,
+          "actual_accept": false,
+          "boundary": "invalid_event",
+          "pass": true,
+          "latency_ms": 0.01470800000242889,
+          "error_code": "TypeError"
+        }
+      ]
+    }
+  }
+}

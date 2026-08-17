@@ -31,7 +31,8 @@ Cat 作为事件驱动电子宠物使用最小 P4 World 能力。它们默认共
 - [当前里程碑](./docs/project-milestones.md)
 - [Harness Workflow](./docs/harness-workflow.md)
 
-当前仅推进 Phase 0：恢复可重复构建、固化 ESP32-C6 Hosted 配置、关闭 M6 遗留状态、采集运行期基线、冻结 Device Protocol v1/Tool Schema v1，并建立 Mock 合约测试。
+当前推进 Phase 2，并按 Role Contract & Router、Cat Action Adapter、P4 World Service、真实传输与
+实机门禁四个纵切实施；2A 已完成，2B 尚未启动，当前不连接真实 P4 WebSocket。
 
 ## 工作规则
 

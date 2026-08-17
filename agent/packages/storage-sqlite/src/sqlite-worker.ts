@@ -80,6 +80,9 @@ if (store !== undefined) {
         case "listSessionMessages":
           value = await auditStore.listSessionMessages(...request.args);
           break;
+        case "listRunIdsForInteraction":
+          value = await auditStore.listRunIdsForInteraction(...request.args);
+          break;
         case "reconcileInterruptedRuns":
           value = auditStore.reconcileInterruptedRuns(...request.args);
           break;

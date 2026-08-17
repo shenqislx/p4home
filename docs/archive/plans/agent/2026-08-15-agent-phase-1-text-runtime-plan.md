@@ -1,6 +1,6 @@
 # Agent Phase 1 — Text Agent Runtime Plan
 
-> Status: `in_progress`
+> Status: `completed`
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 0 complete
 
@@ -180,4 +180,4 @@ Ollama 运行态还报告 262,144 context、31 GB SIZE，未遵循请求的 8,19
 - [x] timeout/cancel/budget 可重复验证；
 - [x] Runtime 无需真实 P4 即可完成全套测试；
 - [x] 新离线候选模型完成同一冻结 eval，并记录与当前基线的可复现对比；
-- [ ] 用户 review 通过后启动 Phase 2。
+- [x] 用户于 2026-08-17 要求重新设计并推进 Phase 2，Phase 1 退出门禁视为 review 通过。

@@ -682,7 +682,7 @@ Device Protocol v1 与 Tool Schema v1 已冻结。
 
 ### Phase 1 — Text Agent Runtime
 
-执行计划：[Phase 1 — Text Agent Runtime](./plans/2026-08-15-agent-phase-1-text-runtime-plan.md)
+归档计划：[Phase 1 — Text Agent Runtime](./archive/plans/agent/2026-08-15-agent-phase-1-text-runtime-plan.md)
 
 交付：
 

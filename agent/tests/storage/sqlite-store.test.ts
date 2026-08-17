@@ -101,6 +101,56 @@ test("SQLite audit store persists a complete correlated run trace", async () => 
   assert.equal(await store.getRunTrace("missing"), null);
 });
 
+test("interaction correlation lookup deduplicates repeated start events", async () => {
+  using store = new SqliteAuditStore(":memory:");
+  await seed(store);
+  for (const [index, occurredAtMs] of [111, 112].entries()) {
+    await store.appendEvent({
+      event_id: `role-start-${index + 1}`,
+      run_id: "run-1",
+      type: "role.run.started",
+      occurred_at_ms: occurredAtMs,
+      payload: { interaction_id: "interaction-1" },
+    });
+  }
+
+  assert.deepEqual(await store.listRunIdsForInteraction("interaction-1"), ["run-1"]);
+});
+
+test("schema v1 databases migrate the interaction correlation index to v2", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "p4home-audit-migration-"));
+  const databasePath = join(directory, "audit.sqlite");
+  try {
+    {
+      using store = new SqliteAuditStore(databasePath, { reconcile_on_open: false });
+      await store.listRunIdsForInteraction("initialization-probe");
+    }
+    const oldDatabase = new DatabaseSync(databasePath);
+    oldDatabase.exec(`
+      DROP INDEX events_role_interaction_idx;
+      PRAGMA user_version = 1;
+    `);
+    oldDatabase.close();
+
+    {
+      using store = new SqliteAuditStore(databasePath, { reconcile_on_open: false });
+      await store.listRunIdsForInteraction("migration-probe");
+    }
+    const migratedDatabase = new DatabaseSync(databasePath, { readOnly: true });
+    const version = migratedDatabase.prepare("PRAGMA user_version").get();
+    const index = migratedDatabase.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'index' AND name = 'events_role_interaction_idx'
+    `).get();
+    migratedDatabase.close();
+
+    assert.equal(version?.user_version, 2);
+    assert.equal(index?.name, "events_role_interaction_idx");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("SQLite constraints reject orphaned and cross-run audit records", async () => {
   using store = new SqliteAuditStore(":memory:");
   await assert.rejects(

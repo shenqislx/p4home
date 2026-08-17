@@ -20,7 +20,7 @@ import type {
   StoredToolCall,
 } from "./types.ts";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export interface SqliteAuditStoreOptions {
   readonly timeout_ms?: number;
@@ -352,6 +352,18 @@ export class SynchronousSqliteAuditStore implements AuditStore, Disposable {
     `).all(sessionId).map(messageFromRow);
   }
 
+  public async listRunIdsForInteraction(interactionId: string): Promise<readonly string[]> {
+    this.#assertOpen();
+    return this.#database.prepare(`
+      SELECT run_id, MIN(occurred_at_ms) AS first_started_at_ms
+      FROM events
+      WHERE type = 'role.run.started'
+        AND json_extract(payload_json, '$.interaction_id') = ?
+      GROUP BY run_id
+      ORDER BY first_started_at_ms, run_id
+    `).all(interactionId).map((row) => stringValue(row.run_id, "events.run_id"));
+  }
+
   public reconcileInterruptedRuns(recoveredAtMs: number): AuditRecoveryReport {
     this.#assertOpen();
     if (!Number.isSafeInteger(recoveredAtMs) || recoveredAtMs < 0) {
@@ -661,6 +673,19 @@ export class SynchronousSqliteAuditStore implements AuditStore, Disposable {
     if (currentVersion === SCHEMA_VERSION) {
       return;
     }
+    if (currentVersion === 1) {
+      this.#transaction(() => {
+        this.#database.exec(`
+          CREATE INDEX IF NOT EXISTS events_role_interaction_idx
+            ON events(type, json_extract(payload_json, '$.interaction_id'), occurred_at_ms, run_id);
+          PRAGMA user_version = 2;
+        `);
+      });
+      return;
+    }
+    if (currentVersion !== 0) {
+      throw new AuditStorageError(`database schema version ${currentVersion} cannot be migrated`);
+    }
     this.#transaction(() => {
       this.#database.exec(`
         CREATE TABLE agent_profiles (
@@ -758,6 +783,8 @@ export class SynchronousSqliteAuditStore implements AuditStore, Disposable {
           ON actions(run_id, created_at_ms, action_id);
         CREATE INDEX events_run_time_idx
           ON events(run_id, occurred_at_ms, event_id);
+        CREATE INDEX events_role_interaction_idx
+          ON events(type, json_extract(payload_json, '$.interaction_id'), occurred_at_ms, run_id);
       `);
       this.#database.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     });

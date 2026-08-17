@@ -60,4 +60,5 @@ export interface AuditStore {
   getSessionAgentProfile(sessionId: string): Promise<AgentProfile | null>;
   getRunTrace(runId: string): Promise<RunAuditTrace | null>;
   listSessionMessages(sessionId: string): Promise<readonly Message[]>;
+  listRunIdsForInteraction(interactionId: string): Promise<readonly string[]>;
 }

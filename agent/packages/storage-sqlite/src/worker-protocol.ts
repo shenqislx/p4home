@@ -30,6 +30,7 @@ export type WorkerRequest =
   | { readonly id: number; readonly operation: "getSessionAgentProfile"; readonly args: [string] }
   | { readonly id: number; readonly operation: "getRunTrace"; readonly args: [string] }
   | { readonly id: number; readonly operation: "listSessionMessages"; readonly args: [string] }
+  | { readonly id: number; readonly operation: "listRunIdsForInteraction"; readonly args: [string] }
   | { readonly id: number; readonly operation: "reconcileInterruptedRuns"; readonly args: [number] }
   | { readonly id: number; readonly operation: "close"; readonly args: [] };
 
