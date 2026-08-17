@@ -1,7 +1,7 @@
 # P4 Home 当前工作计划
 
 > Current Focus: [P4 Home 本地 LLM Agent 化架构](../p4-local-agent-architecture.md)
-> Updated: 2026-08-16
+> Updated: 2026-08-17
 > Working Branch: `feature/agent-harness`
 
 ## 工作规则
@@ -32,9 +32,8 @@
 
 只执行 Phase 1：
 
-1. 使用同一冻结 32 场景 eval 验证新的离线候选模型；
-2. 记录与当前 8B、30B Coder、35B 基线的准确率、无工具拒绝、延迟和资源对比；
-3. 完成用户 review，再启动 Phase 2。
+1. 完成用户 review；
+2. review 通过后归档 Phase 1，再启动 Phase 2。
 
 Phase 1 不修改 P4 固件角色执行链，也不提前引入 Phase 2 的真实 WebSocket 控制。
 

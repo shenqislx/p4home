@@ -1,6 +1,6 @@
 # P4 Home 当前里程碑
 
-> Updated: 2026-08-16
+> Updated: 2026-08-17
 > Current Architecture: [P4 Local Agent Architecture](./p4-local-agent-architecture.md)
 > Active Work: [Agent Phase Plans](./plans/README.md)
 
@@ -46,8 +46,8 @@ Agent WebSocket。
 ## 4. 当前唯一允许推进的工作
 
 执行 [Phase 1 plan](./plans/2026-08-15-agent-phase-1-text-runtime-plan.md)：Runtime、有限 Tool Loop、
-Ollama provider、SQLite Worker/启动恢复与现有模型 eval 已完成回归；当前只验证新的离线候选模型
-并完成用户 review。Phase 2 的真实 P4 WebSocket 执行链保持未启动。
+Ollama provider、SQLite Worker/启动恢复与包含 `qwen3.8:27b-mlx` 的模型 eval 已完成回归；当前
+只等待用户 review。Phase 2 的真实 P4 WebSocket 执行链保持未启动。
 
 ## 5. 状态更新规则
 

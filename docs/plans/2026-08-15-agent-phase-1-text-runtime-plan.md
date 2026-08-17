@@ -150,8 +150,17 @@ details 明确记录物理 outcome unknown、`replay_allowed=false`；重复启�
 幂等和 snapshot reconciliation 仍属于 Phase 2。Node 24.19.0 严格类型检查、69 项 Agent
 确定性测试、30 项协议测试和 2 项 harness 测试全部通过。
 
-用户另有一个新的离线候选模型等待验证。在该模型完成同一冻结 eval 前，不更新现有模型基线，
-也不把候选模型的潜在表现计入真实 Action 安全门禁；无工具误调用仍由 Phase 2 确定性策略层兜底。
+离线候选模型复测（2026-08-17）：`qwen3.8:27b-mlx` 在同一冻结 32 场景、两轮 64 次下取得
+exact 78.13%、工具场景 68.18%、工具名顺序 81.25%、无工具拒绝 100%，contract/invalid/provider
+error 均为 0，p50/p95 为 1,276/2,406 ms，输出 27.54 tokens/s。为消除 Ollama 版本差异，35B
+也在当前 0.32.14 同环境重跑，结果为 exact 75%、工具场景 77.27%、工具名顺序 85.94%、无工具
+拒绝 70%、p50/p95 561/1,410 ms、60.15 tokens/s。27B 两轮 32/32 输出一致；但两动作
+首轮只有 42.86% exact、三动作 0%，通常只返回第一项，完整 Loop 会在后续轮补发但增加延迟并可能
+改写 `character.say` 标点。四项 live smoke 为 3/4，structured output 非 JSON 被 provider 拒绝。
+Ollama 运行态还报告 262,144 context、31 GB SIZE，未遵循请求的 8,192 context 资源预期；同环境
+35B 为 8,192 context、28 GB。因此保留
+35B 为默认模型，27B 作为高拒绝候选；真实 Action 仍必须由 Phase 2 确定性策略层兜底。完整证据见
+[Phase 1 model eval](../../evidence/agent-phase-1/model-eval.md)。
 
 ## 4. 验证
 
@@ -167,5 +176,5 @@ details 明确记录物理 outcome unknown、`replay_allowed=false`；重复启�
 - [x] ToolCall schema 成功率达到 Mock Demo 约定门槛；
 - [x] timeout/cancel/budget 可重复验证；
 - [x] Runtime 无需真实 P4 即可完成全套测试；
-- [ ] 新离线候选模型完成同一冻结 eval，并记录与当前基线的可复现对比；
+- [x] 新离线候选模型完成同一冻结 eval，并记录与当前基线的可复现对比；
 - [ ] 用户 review 通过后启动 Phase 2。
