@@ -14,6 +14,11 @@
 
 通用 LLM 不运行在 ESP32-P4 上。P4 负责 UI、交互、音频前端和世界动作执行；Mac mini/PC/Home Server 负责模型推理、Agent、Memory 与工具编排。
 
+Agent 产品层使用统一 Role Router 和三个隔离角色：Robot 只执行受限 HA 命令，Human 只负责对话，
+Cat 作为事件驱动电子宠物使用最小 P4 World 能力。它们默认共用一个已加载的
+`qwen3.8:27b-mlx`，但不共享上下文、工具权限或推理参数；所有 Qwen 请求固定使用
+`think: false`。
+
 ## 当前工作重点
 
 当前进入 M7 Agent 化主线，唯一架构基线为：

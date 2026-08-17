@@ -198,6 +198,7 @@ function generateBody(model: string, request: OllamaGenerateRequest, stream: boo
       system: request.system,
       format: request.format,
       options: request.options,
+      think: request.think,
       keep_alive: request.keep_alive,
       stream,
     }),

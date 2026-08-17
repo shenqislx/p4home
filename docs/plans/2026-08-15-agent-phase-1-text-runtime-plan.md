@@ -111,7 +111,7 @@ golden intents 和五工具目录；评测固定 Runtime system prompt、`temper
 前 N 条、1–10 轮重复和 JSON 证据输出；标准 pnpm `--` 参数分隔符已回归验证。
 
 Apple M4 Pro 14 核、64 GB 本机对已安装的 `qwen3:8b`、`qwen3-coder:30b`、
-`qwen3.6:35b-mlx` 做了固定上下文对照；缺失的 14B 未临时下载。选定 35B MLX 为开发默认，8B
+`qwen3.6:35b-mlx` 做了固定上下文对照；缺失的 14B 未临时下载。当时选定 35B MLX 为开发默认，8B
 只作 structured-output/低内存功能 fallback，且不得自动承接真实 Action。默认模型最终 64 次
 结果为 exact 73.44%、工具名顺序 82.81%、工具场景
 75%、无工具拒绝 70%，contract/provider error 均为 0，p50 538 ms、p95 1,420 ms、
@@ -147,7 +147,7 @@ SQLite 写锁等待期间主线程 timer 可继续准时运行。文件数据库
 details 明确记录物理 outcome unknown、`replay_allowed=false`；重复启动不会重复恢复或生成事件。
 新增回归还证明协作型 Tool 在 await 后重新检查 AbortSignal 时不会产生晚到副作用。至此，Phase 1
 负责的 SQLite 隔离、启动恢复、相对 timeout 与协作取消边界已关闭；设备侧 deadline、action_id
-幂等和 snapshot reconciliation 仍属于 Phase 2。Node 24.19.0 严格类型检查、69 项 Agent
+幂等和 snapshot reconciliation 仍属于 Phase 2。Node 24.19.0 严格类型检查、70 项 Agent
 确定性测试、30 项协议测试和 2 项 harness 测试全部通过。
 
 离线候选模型复测（2026-08-17）：`qwen3.8:27b-mlx` 在同一冻结 32 场景、两轮 64 次下取得
@@ -158,8 +158,11 @@ error 均为 0，p50/p95 为 1,276/2,406 ms，输出 27.54 tokens/s。为消除 
 首轮只有 42.86% exact、三动作 0%，通常只返回第一项，完整 Loop 会在后续轮补发但增加延迟并可能
 改写 `character.say` 标点。四项 live smoke 为 3/4，structured output 非 JSON 被 provider 拒绝。
 Ollama 运行态还报告 262,144 context、31 GB SIZE，未遵循请求的 8,192 context 资源预期；同环境
-35B 为 8,192 context、28 GB。因此保留
-35B 为默认模型，27B 作为高拒绝候选；真实 Action 仍必须由 Phase 2 确定性策略层兜底。完整证据见
+35B 为 8,192 context、28 GB。单看该命令执行集，35B 的工具准确率和延迟更优；用户在
+2026-08-17 结合 Role Router + Robot/Human/Cat 产品架构，明确选择 27B 作为统一默认模型。Phase 1
+这套评测降级为命令执行型专项基线，不再代表整个 Agent；真实 Action 仍必须由角色权限和确定性
+策略层兜底。所有 Qwen 请求固定 `think: false`；默认 27B 的真实 generate smoke 已验证
+响应正文非空且 `thinking` 为空。完整证据见
 [Phase 1 model eval](../../evidence/agent-phase-1/model-eval.md)。
 
 ## 4. 验证

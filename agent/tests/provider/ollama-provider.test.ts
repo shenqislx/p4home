@@ -100,6 +100,7 @@ test("generate sends a non-streaming request and normalizes usage metrics", asyn
     prompt: "打个招呼",
     system: "只说一句话",
     options: { temperature: 0 },
+    think: false,
   });
 
   assert.deepEqual(requestBody, {
@@ -107,6 +108,7 @@ test("generate sends a non-streaming request and normalizes usage metrics", asyn
     prompt: "打个招呼",
     system: "只说一句话",
     options: { temperature: 0 },
+    think: false,
     stream: false,
   });
   assert.deepEqual(result, {

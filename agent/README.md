@@ -36,19 +36,20 @@ Phase 1 不得导入真实 P4 WebSocket 执行链，也不得把 token 暴露给
 
 ## 评测与调试 CLI
 
-默认 ToolCall 开发模型为 `qwen3.6:35b-mlx`，structured output 或低内存功能 smoke 使用
-`qwen3:8b`。35B 当前 Ollama 模板忽略 JSON Schema，provider 会把其非法 structured output
-fail closed；8B 在无工具拒绝集上的误调用率又过高，因此两者都不是可自动承接真实设备动作的
-安全降级。新测的 `qwen3.8:27b-mlx` 无工具拒绝为 100%，但多动作首轮经常只返回第一个调用、
-structured output 失败、延迟和内存均高于 35B，因此暂不替换默认模型。两条入口都固定使用
+默认模型由产品决策选定为 `qwen3.8:27b-mlx`，structured output 或低内存功能 smoke 使用
+`qwen3:8b`。27B 在冻结 Robot 风格执行集上无工具拒绝为 100%，但多动作首轮经常只返回第一个
+调用、structured output 失败、延迟和内存均高于 35B；这些退化保留为显式证据，不用综合分数
+掩盖。Phase 2 起由同一已加载模型服务 Role Router、Robot、Human、Cat，但四者上下文、工具、
+temperature、预算与评测独立；任何模型都不能自动承接真实设备动作。两条入口都固定使用
 Runtime 的 system prompt、`temperature=0`、`seed=42`、
-`num_ctx=8192` 和 `num_predict=256`。
+`num_ctx=8192`、`num_predict=256` 和 `think=false`。后续四个角色可分别调节 temperature，
+但所有 Qwen 请求都必须保持 `think=false`。
 
 运行冻结的 32 条中文场景两轮（64 次），保存完整逐例报告：
 
 ```bash
-pnpm eval:ollama -- --model qwen3.6:35b-mlx --repeat 2 \
-  --output ../evidence/agent-phase-1/qwen3.6-35b-mlx-eval-v2.json
+pnpm eval:ollama -- --model qwen3.8:27b-mlx --repeat 2 \
+  --output ../evidence/agent-phase-1/qwen3.8-27b-mlx-eval-v2.json
 ```
 
 `--model`、`--case` 可重复；`--limit` 用于前 N 条 smoke，不能和 `--case` 同时使用。

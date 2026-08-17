@@ -15,6 +15,11 @@
 
 通用 LLM 不运行在 P4。P4 是 UI、音频前端和 World Action 执行端；Agent 节点负责推理、会话、工具、Memory 和编排。
 
+产品角色固定为：Role Router 只分发语义且无 Tool；Robot 只执行受限 HA 命令；Human 只负责对话
+且无执行权限；Cat 是事件驱动电子宠物，只使用最小 P4 World 能力且不直接接收用户原文。四者可
+共用同一个已加载的 `qwen3.8:27b-mlx` 和 Provider，但上下文、工具、参数、预算与审计隔离。
+所有 Qwen 请求都必须显式设置 Ollama `think: false`，不允许角色自行开启思考模式。
+
 ## 接手顺序
 
 1. 读取本文件；
@@ -70,8 +75,10 @@
 
 Agent Phase 2 计划新增：
 
+- `role_router`：用户输入到 Human/Robot 的结构化分发；
+- `roles`：Robot/Human/Cat RoleProfile、Context 与 Policy；
 - `agent_transport`：P4 Device WebSocket；
-- `world_service`：角色真值、Action Queue 与状态机。
+- `world_service`：Cat 真值、Action Queue 与状态机。
 
 ## 开发与验证
 

@@ -26,6 +26,7 @@ export interface OllamaGenerateRequest {
   readonly system?: string;
   readonly format?: "json" | OllamaJsonSchema;
   readonly options?: OllamaGenerateOptions;
+  readonly think?: boolean | "low" | "medium" | "high";
   readonly keep_alive?: string | number;
   readonly timeout_ms?: number;
 }

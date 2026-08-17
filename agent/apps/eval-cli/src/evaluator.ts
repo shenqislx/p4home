@@ -13,6 +13,7 @@ import type {
   OllamaUsage,
 } from "@p4home/provider-ollama";
 import {
+  QWEN_THINKING_ENABLED,
   TEXT_AGENT_MODEL_OPTIONS,
   TEXT_AGENT_SYSTEM_PROMPT,
 } from "@p4home/runtime";
@@ -200,7 +201,7 @@ export async function evaluateToolCalling(
           num_ctx: numCtx,
           num_predict: numPredict,
         },
-        think: false,
+        think: QWEN_THINKING_ENABLED,
         timeout_ms: timeoutMs,
         ...(options.keep_alive === undefined ? {} : { keep_alive: options.keep_alive }),
       });

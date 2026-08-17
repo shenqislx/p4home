@@ -21,12 +21,12 @@
 |---|---|---|---|---|
 | 0 | Baseline & Contract | `completed` | 可重复构建、运行期基线、协议 v1、Mock | [Phase 0 归档](../archive/plans/agent/2026-08-15-agent-phase-0-baseline-contract-plan.md) |
 | 1 | Text Agent Runtime | `in_progress` | TypeScript Runtime、Ollama、有限 Tool Loop | [Phase 1](./2026-08-15-agent-phase-1-text-runtime-plan.md) |
-| 2 | P4 Room-level World | `pending` | 房间级 Character Action 闭环 | [Phase 2](./2026-08-15-agent-phase-2-p4-room-world-plan.md) |
-| 3 | Object-level World | `pending` | sofa 等对象锚点与交互动作 | [Phase 3](./2026-08-15-agent-phase-3-object-world-plan.md) |
-| 4 | Home Assistant Tool | `pending` | Agent 直连 HA 的受限读写工具 | [Phase 4](./2026-08-15-agent-phase-4-ha-tool-plan.md) |
-| 5 | Voice Pipeline | `pending` | ESP-SR → STT → Agent → TTS 闭环 | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
-| 6 | Memory | `pending` | 可追溯、可删除的长期记忆 | [Phase 6](./2026-08-15-agent-phase-6-memory-plan.md) |
-| 7 | Autonomy | `pending` | 低频、可控、可审计自主行为 | [Phase 7](./2026-08-15-agent-phase-7-autonomy-plan.md) |
+| 2 | Role Runtime & Cat World | `pending` | Role Router、三角色隔离、Cat 房间动作 | [Phase 2](./2026-08-15-agent-phase-2-p4-room-world-plan.md) |
+| 3 | Cat Object World | `pending` | sofa 等对象锚点与 Cat 交互动作 | [Phase 3](./2026-08-15-agent-phase-3-object-world-plan.md) |
+| 4 | Robot HA & Multi-role | `pending` | Robot 受限 HA 工具、Human/Robot 语义分割 | [Phase 4](./2026-08-15-agent-phase-4-ha-tool-plan.md) |
+| 5 | Role-aware Voice | `pending` | ESP-SR → STT → Router/Roles → TTS | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
+| 6 | Role-aware Memory | `pending` | 比较共享、私有和混合记忆可见性 | [Phase 6](./2026-08-15-agent-phase-6-memory-plan.md) |
+| 7 | Cat Autonomy | `pending` | Timer/HA 事件驱动、低频、可审计 Cat 行为 | [Phase 7](./2026-08-15-agent-phase-7-autonomy-plan.md) |
 
 ## 下一步
 
@@ -39,6 +39,11 @@ Phase 1 不修改 P4 固件角色执行链，也不提前引入 Phase 2 的真�
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 属于 Phase 2，必须在真实 Action 前完成。
+
+产品角色边界已纳入 Phase 2–7：默认模型统一使用 `qwen3.8:27b-mlx`，但 Role Router、Robot、
+Human、Cat 的上下文、工具、temperature、预算与 eval 独立。当前 32 场景 ToolCall 结果只作为
+命令执行型专项证据，不作为整个 Agent 总分。所有 Qwen 请求统一显式传入
+`think: false`，不将思考模式开关暴露给各 RoleProfile。
 
 SQLite 的生产化延后项集中记录在
 [Agent SQLite Production TODO](./2026-08-16-agent-sqlite-production-todo.md)，不与当前 Demo

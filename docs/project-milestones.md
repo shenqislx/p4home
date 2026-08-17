@@ -22,12 +22,12 @@
 |---|---|---|
 | M7.0 Baseline & Contract | `completed` | 可重复构建、实机资源基线、冻结协议 v1、Mock 合约测试 |
 | M7.1 Text Agent Runtime | `in_progress` | Ollama + 有限 Tool Loop + SQLite + eval |
-| M7.2 P4 Room-level World | `pending` | 房间级角色动作完整反馈闭环 |
-| M7.3 Object-level World | `pending` | sofa/window/desk 等对象级动作 |
-| M7.4 Home Assistant Tool | `pending` | Agent 直连 HA 的受限读写工具 |
-| M7.5 Voice Pipeline | `pending` | 本地唤醒、STT、Agent、TTS 闭环 |
-| M7.6 Memory | `pending` | 可追溯、可删除的长期记忆 |
-| M7.7 Autonomy | `pending` | 低频、低优先级、可关闭的自主行为 |
+| M7.2 Role Runtime & Cat World | `pending` | Role Router、三角色隔离、Cat 房间动作闭环 |
+| M7.3 Cat Object World | `pending` | sofa/window/desk 等 Cat 对象级动作 |
+| M7.4 Robot HA & Multi-role | `pending` | Robot 受限 HA 工具、Human/Robot 语义分割 |
+| M7.5 Role-aware Voice | `pending` | 本地唤醒、STT、Router/Roles、TTS 闭环 |
+| M7.6 Role-aware Memory | `pending` | 评测共享、私有与混合角色记忆 |
+| M7.7 Cat Autonomy | `pending` | Timer/HA 事件驱动、低优先级、可关闭 Cat 行为 |
 
 ## 3. M6 遗留裁决
 
@@ -47,7 +47,8 @@ Agent WebSocket。
 
 执行 [Phase 1 plan](./plans/2026-08-15-agent-phase-1-text-runtime-plan.md)：Runtime、有限 Tool Loop、
 Ollama provider、SQLite Worker/启动恢复与包含 `qwen3.8:27b-mlx` 的模型 eval 已完成回归；当前
-只等待用户 review。Phase 2 的真实 P4 WebSocket 执行链保持未启动。
+默认模型已切换为 `qwen3.8:27b-mlx`，Role Router 与 Robot/Human/Cat 产品边界已写入 Phase 2–7；
+当前只等待用户 review。Phase 2 的真实 P4 WebSocket 执行链保持未启动。
 
 ## 5. 状态更新规则
 

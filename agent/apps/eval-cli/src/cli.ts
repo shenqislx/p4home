@@ -9,7 +9,11 @@ import {
 } from "@p4home/contracts";
 import { createMockP4HomeDomain } from "@p4home/domain-p4home";
 import { OllamaHttpProvider } from "@p4home/provider-ollama";
-import { createJsonLineLogger, runTextAgent } from "@p4home/runtime";
+import {
+  createJsonLineLogger,
+  DEFAULT_OLLAMA_MODEL,
+  runTextAgent,
+} from "@p4home/runtime";
 import { SqliteAuditStore } from "@p4home/storage-sqlite";
 
 import { evaluateToolCalling } from "./evaluator.ts";
@@ -86,10 +90,10 @@ function printHelp(): void {
   process.stdout.write(`P4 Home Phase 1 CLI
 
 Eval:
-  pnpm eval:ollama -- --model qwen3.6:35b-mlx [--case zh-018] [--limit 32] [--repeat 2] [--output FILE]
+  pnpm eval:ollama -- --model ${DEFAULT_OLLAMA_MODEL} [--case zh-018] [--limit 32] [--repeat 2] [--output FILE]
 
 Debug one text run:
-  pnpm debug:agent -- --model qwen3.6:35b-mlx --text "去书房" [--database :memory:]
+  pnpm debug:agent -- --model ${DEFAULT_OLLAMA_MODEL} --text "去书房" [--database :memory:]
 `);
 }
 
@@ -107,7 +111,7 @@ async function evalCommand(argumentsValue: ParsedArguments): Promise<void> {
   ]));
   const modelArguments = values(argumentsValue, "--model");
   const models = modelArguments.length === 0
-    ? [process.env.OLLAMA_MODEL ?? "qwen3.6:35b-mlx"]
+    ? [process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL]
     : modelArguments.flatMap((item) => item.split(",")).filter((item) => item.length > 0);
   if (models.length === 0 || new Set(models).size !== models.length) {
     throw new Error("--model must contain one or more unique model names");
@@ -209,7 +213,7 @@ async function debugCommand(argumentsValue: ParsedArguments): Promise<void> {
   const model = value(
     argumentsValue,
     "--model",
-    process.env.OLLAMA_MODEL ?? "qwen3.6:35b-mlx",
+    process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL,
   );
   if (model === undefined) {
     throw new Error("--model is required");

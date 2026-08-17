@@ -7,7 +7,7 @@ import {
 } from "@p4home/contracts";
 import { createMockP4HomeDomain } from "@p4home/domain-p4home";
 import { OllamaHttpProvider } from "@p4home/provider-ollama";
-import { runTextAgent } from "@p4home/runtime";
+import { QWEN_THINKING_ENABLED, runTextAgent } from "@p4home/runtime";
 import { SqliteAuditStore } from "@p4home/storage-sqlite";
 
 const liveTest = process.env.P4HOME_OLLAMA_LIVE === "1" ? test : test.skip;
@@ -24,9 +24,11 @@ liveTest("local Ollama probes and generates with the selected installed model", 
   const result = await provider.generate({
     prompt: "只回复 OK，不要解释。",
     options: { temperature: 0, num_predict: 64 },
+    think: QWEN_THINKING_ENABLED,
     keep_alive: "2m",
   });
-  assert.ok(result.response.trim().length > 0 || result.thinking.trim().length > 0);
+  assert.ok(result.response.trim().length > 0);
+  assert.equal(result.thinking, "");
 });
 
 liveTest("local Ollama emits a Tool Schema v1 call through native chat", async () => {
@@ -47,7 +49,7 @@ liveTest("local Ollama emits a Tool Schema v1 call through native chat", async (
     ],
     tools,
     options: { temperature: 0, num_ctx: 8192, num_predict: 128 },
-    think: false,
+    think: QWEN_THINKING_ENABLED,
     keep_alive: "2m",
   });
   const calls = validateFrozenToolCalls(
@@ -79,7 +81,7 @@ liveTest("local Ollama structured output is revalidated by AJV", async () => {
     messages: [{ role: "user", content: "把“去书房”解析为指定 JSON。" }],
     format: schema,
     options: { temperature: 0, num_ctx: 8192, num_predict: 128 },
-    think: false,
+    think: QWEN_THINKING_ENABLED,
     keep_alive: "2m",
   });
 

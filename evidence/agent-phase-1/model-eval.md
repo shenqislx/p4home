@@ -56,8 +56,8 @@ Ollama + 35B MLX 组合也不是完全确定性的；门槛必须按多轮统计
 
 ## 结论与边界
 
-- 默认 ToolCall 开发模型：`qwen3.6:35b-mlx`。在当前机器上热态延迟、路由准确率和拒绝能力
-  综合最佳；
+- 当时的单执行器工程建议为 `qwen3.6:35b-mlx`：在该轮机器环境上热态延迟、ToolCall 准确率和
+  拒绝能力综合最佳；2026-08-17 的产品角色架构决策见后文，当前默认已改为 27B；
 - structured-output/低内存 fallback：`qwen3:8b`。常驻仅约 6.6 GB，4 项 live 全部通过；但无工具
   拒绝明显不足，不能作为真实 Action 的自动安全降级；
 - `qwen3-coder:30b` 不作为 fallback：本机模型是 30.5B 总参数、每 token 仅激活约 3.3B 的 MoE
@@ -135,11 +135,16 @@ Loop 后，模型会在收到第一个工具结果后于第二轮补发 `charact
 评测请求固定 `num_ctx=8192`，但 `ollama ps` 在完成请求后报告 27B 运行态 CONTEXT 为 262,144、
 SIZE 为 31 GB；同一时刻 35B 为 8,192、28 GB。故本次准确率仍与冻结输入口径可比，但 27B 的
 内存和速度不能解释为严格的 8K context 资源基线；在确认该 MLX tag/runner 是否接受 `num_ctx`
-前，不用它替换当前 35B 默认模型。
+前，该轮原始评测当时不建议它替换 35B 工程默认；后续产品裁决见下文。
 
-综合裁决：保留 `qwen3.6:35b-mlx` 作为默认 ToolCall 开发模型；`qwen3.8:27b-mlx` 记录为高拒绝、
-高稳定候选，不作为 structured-output 或低内存 fallback。Phase 2 确定性策略建立后，应增加 holdout
-负例和多动作端到端成功率，再决定是否切换默认模型。
+若只按当前命令执行型评测，35B 仍是工具准确率和延迟更好的工程建议；但产品决策选择
+`qwen3.8:27b-mlx` 作为统一默认模型，因为后续系统不再由一个 ToolCall 总分定义，而是拆为无 Tool
+的 Role Router、仅执行 HA 命令的 Robot、无执行权限的 Human 和事件驱动 Cat。27B 的高拒绝与
+稳定性成为可利用特征，多动作退化则由 Robot 专项评测持续暴露，不能被 Router/Human/Cat 分数
+抵消。该模型不作为 structured-output 或低内存 fallback；各角色仍须通过独立门禁。
+全部 Qwen 请求必须显式传入 `think: false`，该开关不作为角色可调参数。
+2026-08-17 使用默认 27B 实测 `/api/generate`，约 2.84 秒返回非空正文且 `thinking` 为空，
+证明当前 Ollama/model tag 已遵循该开关。
 
 ## 调试闭环
 

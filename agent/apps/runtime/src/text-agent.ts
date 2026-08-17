@@ -20,10 +20,16 @@ import {
   TextAgentAuditTrail,
   type TextAgentAuditOptions,
 } from "./text-agent-audit.ts";
+import { QWEN_THINKING_ENABLED } from "./model-config.ts";
 
 export const TEXT_AGENT_TOOL_CALLS_MAX = 4;
 export const TEXT_AGENT_TOOL_ROUNDS_MAX = 4;
 
+/**
+ * Frozen Phase 1 command-execution eval prompt. This is not the product
+ * Role Router: the Router introduced in Phase 2 has no tools and emits only a
+ * validated RoutePlan.
+ */
 export const TEXT_AGENT_SYSTEM_PROMPT = [
   "你是 P4 Home 的本地 Agent 意图路由器。",
   "只调用用户明确要求且当前提供的工具，不得编造或替换房间、对象、动作、参数和执行结果。",
@@ -223,7 +229,7 @@ async function runTextAgentLoop(
       messages: [...messages],
       tools: modelTools(options.tools),
       options: TEXT_AGENT_MODEL_OPTIONS,
-      think: false,
+      think: QWEN_THINKING_ENABLED,
       ...(options.model_timeout_ms === undefined
         ? {}
         : { timeout_ms: options.model_timeout_ms }),
