@@ -57,12 +57,12 @@ Phase 2 建立可审计的 Role Runtime，并让 Cat 通过冻结的 Device Prot
 
 只有 2A 退出门禁通过后开始：
 
-- 从归一化 `test.room_target` event 创建 Cat Run，不从用户文本创建；
-- 在模型调用之前增加 Cat Event Policy：来源、频率、时效、目标房间和工具 allowlist；
-- 实现 Agent 侧 Device WebSocket adapter 与容量受限的 action waiter；
-- 在 deterministic fake device 上跑通 hello/capabilities/heartbeat/snapshot/reconnect；
-- 实现 accepted/started/completed/failed、duplicate、deadline、cancel、queue full；
-- timeout/断线后标记 outcome unknown，通过 snapshot 对账，不盲目重放。
+- [x] 从归一化 `test.room_target` event 创建 Cat Run，不从用户文本创建；
+- [x] 在任何模型或动作调用之前增加 Cat Event Policy：来源、频率、时效、目标房间和工具 allowlist；
+- [x] 实现 Agent 侧 Device WebSocket adapter 与容量受限的 action waiter；
+- [x] 在 deterministic fake device 上跑通 hello/capabilities/heartbeat/snapshot/reconnect；
+- [x] 实现 accepted/started/completed/failed、duplicate、deadline、cancel、queue full；
+- [x] timeout/断线后标记 outcome unknown，通过 snapshot 对账，不盲目重放。
 
 退出门禁：相同 `action_id` 重发不产生第二次副作用；100 次 fake device 动作无静默丢失；断线后
 snapshot 恢复一致；过期与越权 event 100% 在 WebSocket 前被拒绝。
@@ -123,8 +123,22 @@ Cat 用户原文拒绝为 2/2。CLI 现在对任一角色失败返回非零状�
 [Phase 2A Role Eval](../../evidence/agent-phase-2/role-eval.md)。
 
 据此，Phase 2A 的退出门禁于 2026-08-18 review 修复后重新满足。尚未连接 simulator、P4 或 HA，
-因此只能开始 2B，不得把当前结果描述为 Phase 2 完成；本次请求只准备了 2B 安全组合入口，未启动
-Cat Action Adapter 或真实副作用链。
+因此该结果只允许开始 2B，不得把它描述为 Phase 2 完成。
+
+2026-08-18，2B 已新增逐帧冻结协议校验、Cat Event Policy、容量受限 Device WebSocket adapter、
+deterministic fake device 和 Cat Run 审计入口。专项测试覆盖连续 100 次动作、`action_id` 幂等、
+accepted/started/completed/failed、queue full、deadline、cancel、heartbeat、断线 unknown 与 reconnect
+snapshot 对账；拒绝事件不会产生 action frame 或审计 Run。review 后进一步修复了 snapshot
+伪完成、outbound seq 消耗、resync correlation、Run 对账审计和无界缓存，并接入只暴露批准 Tool
+的 Cat 模型决策。Node 24.19.0 严格类型检查和 111 项全量
+确定性测试通过，详细证据见
+[Phase 2B Cat Action Adapter & Deterministic Device Evidence](../../evidence/agent-phase-2/phase-2b-deterministic-device.md)。
+该 deterministic 验收链使用 fake provider 验证一次 Cat 模型 ToolCall，并在审计中记录
+`model_turns=1`；尚未执行 live Cat 模型专项评测。冻结 v1 snapshot 只用于恢复权威状态，不能把
+“目标状态已满足”伪装成特定 `action_id` 的 completed。
+
+据此，2B 的 fake device 退出门禁满足，可以开始 2C；目前仍未修改 P4 固件、`world_service`、真实
+网络或 HA 链路，不能把 2B 结果描述为 Phase 2 完成或实机通过。
 
 ## 8. Phase 2 完成定义
 

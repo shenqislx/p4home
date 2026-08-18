@@ -67,10 +67,42 @@ export interface FrozenToolCallInput {
   readonly arguments: Record<string, unknown>;
 }
 
+export type FrozenDeviceMessageType =
+  | "device.hello"
+  | "device.capabilities"
+  | "world.snapshot"
+  | "world.changed"
+  | "world.resync.request"
+  | "user.text"
+  | "action.request"
+  | "action.accepted"
+  | "action.started"
+  | "action.completed"
+  | "action.failed"
+  | "action.cancel"
+  | "heartbeat"
+  | "error";
+
+export interface FrozenDeviceMessage<
+  TType extends FrozenDeviceMessageType = FrozenDeviceMessageType,
+  TPayload extends Record<string, unknown> = Record<string, unknown>,
+> {
+  readonly protocol_version: 1;
+  readonly message_id: string;
+  readonly correlation_id: string | null;
+  readonly device_id: string;
+  readonly session_id: string;
+  readonly seq: number;
+  readonly sent_at_ms: number;
+  readonly type: TType;
+  readonly payload: TPayload;
+}
+
 export type ContractBoundaryErrorCode =
   | "UNKNOWN_TOOL"
   | "INVALID_TOOL_ARGUMENTS"
   | "INVALID_TOOL_RESULT"
+  | "INVALID_DEVICE_MESSAGE"
   | "TOO_MANY_TOOL_CALLS"
   | "INVALID_STRUCTURED_JSON"
   | "INVALID_STRUCTURED_OUTPUT";
@@ -143,6 +175,32 @@ function assertValid(
   if (!validate(value)) {
     throw new FrozenContractError(`${label}: ${formatErrors(validate.errors)}`);
   }
+}
+
+let frozenDeviceMessageValidator: ValidateFunction | undefined;
+
+function getFrozenDeviceMessageValidator(): ValidateFunction {
+  if (frozenDeviceMessageValidator !== undefined) {
+    return frozenDeviceMessageValidator;
+  }
+  const ajv = createAjv();
+  ajv.addSchema(readJson<AnySchema>(`${DEVICE_PROTOCOL_ROOT}/envelope.schema.json`));
+  ajv.addSchema(readJson<AnySchema>(`${DEVICE_PROTOCOL_ROOT}/messages/payloads.schema.json`));
+  frozenDeviceMessageValidator = ajv.compile(
+    readJson<AnySchema>(`${DEVICE_PROTOCOL_ROOT}/message.schema.json`),
+  );
+  return frozenDeviceMessageValidator;
+}
+
+export function validateFrozenDeviceMessage<T extends FrozenDeviceMessage>(message: unknown): T {
+  const validate = getFrozenDeviceMessageValidator();
+  if (!validate(message)) {
+    throw new ContractBoundaryError(
+      "INVALID_DEVICE_MESSAGE",
+      `Device Protocol v1 message: ${formatErrors(validate.errors)}`,
+    );
+  }
+  return structuredClone(message) as T;
 }
 
 function mutateInvalidFixture(fixture: InvalidFixture): Record<string, unknown> {
