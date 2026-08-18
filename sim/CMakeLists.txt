@@ -30,6 +30,29 @@ message(STATUS "Using LVGL from ${LVGL_DIR}")
 set(FIRMWARE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../firmware")
 set(UI_PAGES_DIR "${FIRMWARE_DIR}/components/ui_pages")
 set(UI_ART_DIR "${FIRMWARE_DIR}/components/ui_pixel_art")
+set(WORLD_SERVICE_DIR "${FIRMWARE_DIR}/components/world_service")
+
+function(add_world_service_host_test_target)
+    add_executable(world_service_host_test
+        world_service_host_test.c
+        shim/esp_err.c
+        "${WORLD_SERVICE_DIR}/world_service.c"
+    )
+    target_include_directories(world_service_host_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/shim"
+        "${WORLD_SERVICE_DIR}/include"
+    )
+    target_compile_options(world_service_host_test PRIVATE -Wall -Wextra -Werror -g -O1)
+    target_compile_definitions(world_service_host_test PRIVATE WORLD_SERVICE_HOST_TEST=1)
+endfunction()
+
+option(P4HOME_WORLD_SERVICE_TEST_ONLY "Build only the dependency-free world service test" OFF)
+if(P4HOME_WORLD_SERVICE_TEST_ONLY)
+    add_world_service_host_test_target()
+    enable_testing()
+    add_test(NAME world_service_host_test COMMAND world_service_host_test)
+    return()
+endif()
 
 # Nothing here needs LVGL's bundled demos, examples or ThorVG, and skipping them
 # keeps the host build to a few seconds.
@@ -38,10 +61,39 @@ set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
 
-add_subdirectory("${LVGL_DIR}" lvgl_build EXCLUDE_FROM_ALL)
+# LVGL's SDL driver includes SDL headers while the lvgl target itself is being
+# compiled, so SDL discovery and directory-wide include flags must precede the
+# LVGL subdirectory. Homebrew can provide sdl2-config without pkg-config.
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(SDL2 REQUIRED sdl2)
+    include_directories(${SDL2_INCLUDE_DIRS})
+    add_compile_options(${SDL2_CFLAGS_OTHER})
+else()
+    find_program(SDL2_CONFIG_EXECUTABLE sdl2-config REQUIRED)
+    execute_process(COMMAND "${SDL2_CONFIG_EXECUTABLE}" --cflags
+                    OUTPUT_VARIABLE SDL2_CFLAGS_TEXT
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND "${SDL2_CONFIG_EXECUTABLE}" --libs
+                    OUTPUT_VARIABLE SDL2_LIBRARIES_TEXT
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    COMMAND_ERROR_IS_FATAL ANY)
+    separate_arguments(SDL2_CFLAGS NATIVE_COMMAND "${SDL2_CFLAGS_TEXT}")
+    separate_arguments(SDL2_LIBRARIES NATIVE_COMMAND "${SDL2_LIBRARIES_TEXT}")
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(SDL2 REQUIRED sdl2)
+    foreach(flag IN LISTS SDL2_CFLAGS)
+        if(flag MATCHES "^-I(.+)")
+            list(APPEND SDL2_INCLUDE_DIRS "${CMAKE_MATCH_1}")
+        else()
+            list(APPEND SDL2_COMPILE_OPTIONS "${flag}")
+        endif()
+    endforeach()
+    include_directories(${SDL2_INCLUDE_DIRS})
+    add_compile_options(${SDL2_COMPILE_OPTIONS})
+endif()
+
+add_subdirectory("${LVGL_DIR}" lvgl_build EXCLUDE_FROM_ALL)
 
 # CONFIGURE_DEPENDS so adding a .pxart and regenerating does not leave a stale
 # source list behind.
@@ -64,6 +116,7 @@ add_executable(pixel_sim
     "${UI_PAGES_DIR}/ui_home_actor.c"
     "${UI_PAGES_DIR}/ui_pixel_fx.c"
     "${UI_PAGES_DIR}/ui_time_source.c"
+    "${WORLD_SERVICE_DIR}/world_service.c"
     "${UI_PAGES_DIR}/fonts/ui_font_source_han_sans_sc_16.c"
     "${UI_PAGES_DIR}/fonts/ui_font_pixel_modes_48.c"
     ${UI_ART_SOURCES}
@@ -76,6 +129,7 @@ target_include_directories(pixel_sim PRIVATE
     "${UI_PAGES_DIR}"
     "${UI_PAGES_DIR}/include"
     "${UI_ART_DIR}/include"
+    "${WORLD_SERVICE_DIR}/include"
     "${FIRMWARE_DIR}/components/ha_client/include"
     "${FIRMWARE_DIR}/components/panel_data_store/include"
     "${FIRMWARE_DIR}/components/time_service/include"
@@ -85,3 +139,7 @@ target_include_directories(pixel_sim PRIVATE
 target_compile_options(pixel_sim PRIVATE -Wall -Wextra -Wno-unused-parameter -g -O1)
 target_link_libraries(pixel_sim PRIVATE lvgl ${SDL2_LIBRARIES} m)
 target_link_directories(pixel_sim PRIVATE ${SDL2_LIBRARY_DIRS})
+
+add_world_service_host_test_target()
+enable_testing()
+add_test(NAME world_service_host_test COMMAND world_service_host_test)

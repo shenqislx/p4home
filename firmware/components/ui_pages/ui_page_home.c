@@ -17,6 +17,7 @@
 #include "ui_pixel_fx.h"
 #include "ui_pixel_palette.h"
 #include "ui_time_source.h"
+#include "world_service.h"
 
 static const char *TAG = "ui_home";
 
@@ -620,59 +621,32 @@ static bool ui_page_home_collect(const panel_sensor_t *sensor, void *user_data)
     return true;
 }
 
-static void ui_page_home_apply_actor(const ui_home_summary_t *summary)
+static void ui_page_home_apply_world(const ui_home_summary_t *summary)
 {
-    bool connected = ha_client_ready();
+    static const world_room_id_t world_rooms[UI_HOME_ROOM_COUNT] = {
+        WORLD_ROOM_PRIMARY_BEDROOM,
+        WORLD_ROOM_STUDY,
+        WORLD_ROOM_GUEST_ROOM,
+        WORLD_ROOM_ENTRY,
+        WORLD_ROOM_LIVING_ROOM,
+        WORLD_ROOM_KITCHEN,
+    };
+    world_local_fallback_context_t context = {
+        .ha_connected = ha_client_ready(),
+        .online_entities = summary->online,
+        .lights_on_total = summary->lights_on,
+        .climates_on_total = summary->climates_on,
+    };
+    for (size_t index = 0U; index < UI_HOME_ROOM_COUNT; ++index) {
+        world_room_id_t room = world_rooms[index];
+        context.room_lit[room] = ui_home_room_is_lit(index);
+        context.room_climate_on[room] = ui_home_room_has_climate_on(index);
+    }
+    (void)world_service_apply_local_fallback(&context);
 
-    if (!connected || summary->online == 0U) {
-        ui_home_actor_set_state(UI_ACTOR_STATE_DOZE);
-        ui_home_actor_say("信号断了…先打个盹", UI_PAL_MUTED);
-        return;
-    }
-    if (summary->lights_on == 0U && summary->climates_on == 0U) {
-        ui_home_actor_go_to_room(0U, true); /* master bedroom */
-        if (ui_home_actor_state() == UI_ACTOR_STATE_IDLE) {
-            ui_home_actor_set_state(UI_ACTOR_STATE_SLEEP);
-        }
-        ui_home_actor_say("全屋熄灯，去睡了", UI_PAL_ACCENT_VIOLET);
-        return;
-    }
-
-    if (ui_home_actor_state() == UI_ACTOR_STATE_SLEEP ||
-        ui_home_actor_state() == UI_ACTOR_STATE_DOZE) {
-        ui_home_actor_set_state(UI_ACTOR_STATE_IDLE);
-    }
-
-    /* Walk to the most interesting room: cooling beats merely lit. */
-    size_t destination = ui_home_actor_room();
-    bool found = false;
-    for (size_t i = 0; i < UI_HOME_ROOM_COUNT && !found; ++i) {
-        if (ui_home_room_has_climate_on(i)) {
-            destination = i;
-            found = true;
-        }
-    }
-    for (size_t i = 0; i < UI_HOME_ROOM_COUNT && !found; ++i) {
-        if (ui_home_room_is_lit(i)) {
-            destination = i;
-            found = true;
-        }
-    }
-    if (found) {
-        ui_home_actor_go_to_room(destination, false);
-    }
-
-    const ui_home_room_def_t *def = ui_home_room_def(destination);
-    char message[96];
-    if (ui_home_room_has_climate_on(destination)) {
-        snprintf(message, sizeof(message), "%s在制冷，好凉快", def->title);
-        ui_home_actor_say(message, UI_PAL_COOL_LIGHT);
-    } else if (summary->lights_on >= 8U) {
-        ui_home_actor_say("灯火通明！氛围值拉满", UI_PAL_LAMP_HI);
-    } else {
-        snprintf(message, sizeof(message), "去%s看看", def->title);
-        ui_home_actor_say(message, UI_PAL_ACCENT_CYAN);
-    }
+    world_service_snapshot_t snapshot = {0};
+    world_service_get_snapshot(&snapshot);
+    ui_home_actor_apply_snapshot(&snapshot);
 }
 
 static void ui_page_home_apply_hud(const ui_home_summary_t *summary)
@@ -706,7 +680,7 @@ static void ui_page_home_refresh_locked(void)
     for (size_t i = 0; i < UI_HOME_ROOM_COUNT; ++i) {
         ui_home_rooms_apply(i);
     }
-    ui_page_home_apply_actor(&summary);
+    ui_page_home_apply_world(&summary);
     ui_page_home_apply_hud(&summary);
 }
 
@@ -717,6 +691,22 @@ static void ui_page_home_refresh_async(void *user_data)
     s_refresh_queued = false;
     portEXIT_CRITICAL(&s_refresh_lock);
     ui_page_home_refresh_locked();
+}
+
+static void ui_page_home_queue_refresh(void)
+{
+    bool should_queue = false;
+    portENTER_CRITICAL(&s_refresh_lock);
+    if (!s_refresh_queued) {
+        s_refresh_queued = true;
+        should_queue = true;
+    }
+    portEXIT_CRITICAL(&s_refresh_lock);
+    if (should_queue && lv_async_call(ui_page_home_refresh_async, NULL) != LV_RESULT_OK) {
+        portENTER_CRITICAL(&s_refresh_lock);
+        s_refresh_queued = false;
+        portEXIT_CRITICAL(&s_refresh_lock);
+    }
 }
 
 static void ui_page_home_store_observer(const panel_sensor_t *sensor, void *user_data)
@@ -730,19 +720,15 @@ static void ui_page_home_store_observer(const panel_sensor_t *sensor, void *user
         sensor->kind != PANEL_SENSOR_KIND_TEXT) {
         return;
     }
-    bool should_queue = false;
-    portENTER_CRITICAL(&s_refresh_lock);
-    if (!s_refresh_queued) {
-        s_refresh_queued = true;
-        should_queue = true;
-    }
-    portEXIT_CRITICAL(&s_refresh_lock);
-    if (should_queue) {
-        if (lv_async_call(ui_page_home_refresh_async, NULL) != LV_RESULT_OK) {
-            portENTER_CRITICAL(&s_refresh_lock);
-            s_refresh_queued = false;
-            portEXIT_CRITICAL(&s_refresh_lock);
-        }
+    ui_page_home_queue_refresh();
+}
+
+static void ui_page_home_world_observer(const world_service_snapshot_t *snapshot,
+                                        void *user_data)
+{
+    (void)user_data;
+    if (snapshot != NULL) {
+        ui_page_home_queue_refresh();
     }
 }
 
@@ -884,6 +870,7 @@ esp_err_t ui_page_home_init(void)
 {
     lv_obj_t *screen = lv_screen_active();
     ESP_RETURN_ON_FALSE(screen != NULL, ESP_ERR_INVALID_STATE, TAG, "no active screen");
+    ESP_RETURN_ON_ERROR(world_service_init(NULL), TAG, "world service init failed");
 
     s_root = ui_page_home_panel(screen, UI_HOME_ROOT_X, UI_HOME_ROOT_Y,
                                 UI_HOME_ROOT_W, UI_HOME_ROOT_H, UI_PAL_SCREEN);
@@ -944,6 +931,8 @@ esp_err_t ui_page_home_init(void)
 
     ESP_RETURN_ON_ERROR(panel_data_store_add_observer(ui_page_home_store_observer, NULL),
                         TAG, "failed to attach home observer");
+    ESP_RETURN_ON_ERROR(world_service_add_observer(ui_page_home_world_observer, NULL),
+                        TAG, "failed to attach world observer");
 
     s_ready = true;
     ui_page_home_refresh_locked();

@@ -32,9 +32,9 @@
 
 只执行 Phase 2。2026-08-17 用户要求重新设计并推进 Phase 2，Phase 1 review 已通过。
 Phase 2 按 2A Role Contract & Router、2B Cat Action Adapter、2C P4 World Service、2D Real
-Transport & Hardware Gate 四个纵切推进；2A 在 2026-08-18 review 修复与 v2 live eval 后重新满足
-退出门禁，下一项为 2B。本次只准备了统一 Role 组合入口，尚未启动 Cat Action Adapter，也不提前
-引入真实 WebSocket 控制。
+Transport & Hardware Gate 四个纵切推进。2026-08-18，2A、2B、2C 的各自退出门禁已依次满足；
+下一项为 2D 真实 Device WebSocket 与实机门禁。2C 结果只证明 host 状态机、UI 分层和固件可构建，
+尚未证明真实传输、连续动作或运行期资源指标。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 属于 Phase 2，必须在真实 Action 前完成。

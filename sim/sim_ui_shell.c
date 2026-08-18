@@ -6,6 +6,7 @@
 #include "ui_page_home.h"
 #include "ui_pages.h"
 #include "ui_pixel_palette.h"
+#include "world_service.h"
 
 /* Stands in for ui_pages.c inside the simulator.
  *
@@ -93,6 +94,7 @@ static lv_obj_t *sim_create_nav_button(lv_obj_t *screen, const char *text,
 
 esp_err_t ui_pages_render_bootstrap(void)
 {
+    ESP_RETURN_ON_ERROR(world_service_init(NULL), TAG, "world service init failed");
     lv_obj_t *screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, lv_color_hex(UI_PAL_SCREEN), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);

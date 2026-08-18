@@ -20,6 +20,7 @@
 #include "time_service.h"
 #include "touch_service.h"
 #include "weather_service.h"
+#include "world_service.h"
 
 static const char *TAG = "board_support";
 static bool s_board_initialized;
@@ -123,6 +124,11 @@ esp_err_t board_support_init(void)
         if (panel_ret != ESP_OK) {
             ESP_LOGW(TAG, "panel whitelist load failed: %s", esp_err_to_name(panel_ret));
         }
+    }
+
+    esp_err_t world_ret = world_service_init(NULL);
+    if (world_ret != ESP_OK) {
+        ESP_LOGW(TAG, "world service init failed: %s", esp_err_to_name(world_ret));
     }
 
     esp_err_t ha_ret = ha_client_init();
@@ -279,6 +285,14 @@ void board_support_log_summary(void)
              ha_client_initial_state_count(),
              ha_client_last_error_text());
     panel_data_store_log_summary();
+    world_service_snapshot_t world_snapshot = {0};
+    world_service_get_snapshot(&world_snapshot);
+    ESP_LOGI(TAG, "world ready=%s state_version=%" PRIu32 " room=%s activity=%s active_action=%s",
+             world_service_is_ready() ? "yes" : "no",
+             world_snapshot.state_version,
+             world_service_room_text(world_snapshot.room),
+             world_snapshot.activity == WORLD_ACTIVITY_SLEEP ? "sleep" : "idle",
+             world_snapshot.active_action_id[0] != '\0' ? world_snapshot.active_action_id : "none");
     ESP_LOGI(TAG, "panel_whitelist count=%u", (unsigned)panel_entity_whitelist_count());
     gateway_service_log_summary();
     display_service_log_summary();

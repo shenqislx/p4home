@@ -1,6 +1,7 @@
 #include <stddef.h>
 
 #include "fake_backend.h"
+#include "world_service.h"
 
 /* A deterministic walkthrough of every state the pixel home page reacts to.
  *
@@ -112,6 +113,37 @@ static void step_weather_clear(void)
     fake_store_set_weather("Clear");
 }
 
+static void step_agent_world_action(void)
+{
+    world_action_event_t event = {0};
+    world_action_request_t move = {
+        .action_id = "sim-agent-move-1",
+        .tool = WORLD_ACTION_CHARACTER_GO_TO_ROOM,
+        .arguments.room = WORLD_ROOM_GUEST_ROOM,
+        .timeout_ms = 5000U,
+    };
+    world_action_request_t say = {
+        .action_id = "sim-agent-say-1",
+        .tool = WORLD_ACTION_CHARACTER_SAY,
+        .arguments.text = "Agent 指定我来次卧看看",
+        .timeout_ms = 5000U,
+    };
+    (void)world_service_set_agent_connected(true);
+    if (world_service_submit(&move, &event) == ESP_OK &&
+        world_service_start_next(&event) == ESP_OK) {
+        (void)world_service_complete_active(&event);
+    }
+    if (world_service_submit(&say, &event) == ESP_OK &&
+        world_service_start_next(&event) == ESP_OK) {
+        (void)world_service_complete_active(&event);
+    }
+}
+
+static void step_agent_offline(void)
+{
+    (void)world_service_set_agent_connected(false);
+}
+
 static const fake_scenario_step_t s_steps[] = {
     {"00 boot: waiting for Home Assistant", 4, step_reset},
     {"01 connected, house dark", 24, step_connect},
@@ -126,6 +158,8 @@ static const fake_scenario_step_t s_steps[] = {
     {"10 snow", 288, step_weather_snow},
     {"11 fog", 336, step_weather_fog},
     {"12 clear again", 368, step_weather_clear},
+    {"12a Agent world snapshot drives actor", 376, step_agent_world_action},
+    {"12b Agent offline, local fallback resumes", 388, step_agent_offline},
     {"13 downstairs off", 392, step_downstairs_off},
     {"14 all dark, actor goes to sleep", 420, step_all_dark},
     {"15 offline", 460, step_offline},

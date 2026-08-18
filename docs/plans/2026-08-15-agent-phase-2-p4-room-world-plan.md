@@ -140,6 +140,19 @@ snapshot 对账；拒绝事件不会产生 action frame 或审计 Run。review �
 据此，2B 的 fake device 退出门禁满足，可以开始 2C；目前仍未修改 P4 固件、`world_service`、真实
 网络或 HA 链路，不能把 2B 结果描述为 Phase 2 完成或实机通过。
 
+2026-08-18，2C 已新增 P4 `world_service`，统一持有 Cat room/activity/active action 与单调
+`state_version`，并将本地 HA fallback policy 从 actor view 抽离。`ui_home_actor` 公开 API 现在只
+接收复制的 World snapshot；容量 8 的总 in-flight 队列、128 条 PSRAM 幂等记录、10 分钟终态保留、
+accepted/started due sweep、cancel、duplicate/conflict 和五个 v1 Tool 生命周期均由 `-Werror` host test
+覆盖。
+Python 协议/分层契约 33/33、Agent 回归 111/111、完整像素 simulator 构建与 headless smoke 均通过。
+ESP-IDF v5.5.4 固件在将动作记录从内部 BSS 迁移到 PSRAM 后构建成功，应用镜像 `0x162370`，3 MiB
+分区剩余 54%。详细证据见
+[Phase 2C P4 World Service & UI Separation Evidence](../../evidence/agent-phase-2/phase-2c-world-service.md)。
+
+据此，2C 的 host 与固件编译退出门禁满足，可以开始 2D。当前仍未接入真实 Device WebSocket 或
+执行实机连续动作、断线与性能门禁，不能把 Phase 2 描述为完成或实机通过。
+
 ## 8. Phase 2 完成定义
 
 - [ ] 2A–2D 四个纵切的退出门禁全部通过；

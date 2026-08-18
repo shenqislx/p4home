@@ -16,7 +16,9 @@ static const char *TAG = "ui_actor";
 #define UI_ACTOR_ART_W 8
 #define UI_ACTOR_ART_H 13
 #define UI_ACTOR_PET_ART_W 10
-#define UI_ACTOR_DIALOG_MAX 96U
+#define UI_ACTOR_DIALOG_PAGE_MAX 96U
+#define UI_ACTOR_DIALOG_TEXT_MAX (WORLD_SERVICE_SAY_TEXT_MAX_BYTES + 1U)
+#define UI_ACTOR_DIALOG_PAGE_HOLD_TICKS 24U
 #define UI_ACTOR_PET_LAG 2U
 
 /* Floor lines the actor stands on, in house art pixels. */
@@ -29,6 +31,13 @@ typedef struct {
     int16_t y;
 } ui_actor_point_t;
 
+typedef enum {
+    UI_ACTOR_RENDER_IDLE = 0,
+    UI_ACTOR_RENDER_WALK,
+    UI_ACTOR_RENDER_SLEEP,
+    UI_ACTOR_RENDER_DOZE,
+} ui_actor_render_state_t;
+
 static lv_obj_t *s_actor;
 static lv_obj_t *s_actor_shadow;
 static lv_obj_t *s_pet;
@@ -36,8 +45,10 @@ static lv_obj_t *s_dialog_panel;
 static lv_obj_t *s_dialog_label;
 static lv_obj_t *s_dialog_cursor;
 
-static ui_actor_state_t s_state = UI_ACTOR_STATE_IDLE;
-static size_t s_room = 4U; /* start in the living room */
+static ui_actor_render_state_t s_state = UI_ACTOR_RENDER_IDLE;
+static world_activity_t s_desired_activity = WORLD_ACTIVITY_IDLE;
+static world_speech_tone_t s_desired_tone = WORLD_SPEECH_TONE_DEFAULT;
+static size_t s_room = WORLD_ROOM_LIVING_ROOM;
 static ui_actor_point_t s_pos;
 static ui_actor_point_t s_target;
 /* Two-leg route so crossing storeys goes via the stairs instead of through the
@@ -54,14 +65,65 @@ static ui_actor_point_t s_pet_trail[UI_ACTOR_PET_LAG + 1U];
 static uint8_t s_pet_trail_head;
 static uint8_t s_pet_frame;
 
-static char s_dialog_full[UI_ACTOR_DIALOG_MAX];
+static char s_dialog_full[UI_ACTOR_DIALOG_TEXT_MAX];
+static size_t s_dialog_length;
+static size_t s_dialog_page_start;
+static size_t s_dialog_page_end;
 static size_t s_dialog_revealed;
+static uint16_t s_dialog_page_hold;
 static bool s_cursor_visible;
+static uint32_t s_speech_revision;
 
 static const lv_image_dsc_t *const s_idle_frames[] = ACTOR_IDLE_FRAMES;
 static const lv_image_dsc_t *const s_walk_frames[] = ACTOR_WALK_FRAMES;
 static const lv_image_dsc_t *const s_sleep_frames[] = ACTOR_SLEEP_FRAMES;
 static const lv_image_dsc_t *const s_pet_frames[] = PET_IDLE_FRAMES;
+
+static void ui_home_actor_set_render_state(ui_actor_render_state_t state);
+static void ui_home_actor_say(const char *text, uint32_t accent);
+
+static bool ui_home_actor_room_index(world_room_id_t room, size_t *room_index)
+{
+    static const world_room_id_t world_rooms[UI_HOME_ROOM_COUNT] = {
+        WORLD_ROOM_PRIMARY_BEDROOM,
+        WORLD_ROOM_STUDY,
+        WORLD_ROOM_GUEST_ROOM,
+        WORLD_ROOM_ENTRY,
+        WORLD_ROOM_LIVING_ROOM,
+        WORLD_ROOM_KITCHEN,
+    };
+    for (size_t index = 0U; index < UI_HOME_ROOM_COUNT; ++index) {
+        if (world_rooms[index] == room) {
+            *room_index = index;
+            return true;
+        }
+    }
+    return false;
+}
+
+static size_t ui_home_actor_dialog_page_end(size_t start)
+{
+    if (start >= s_dialog_length) {
+        return s_dialog_length;
+    }
+    size_t end = start + UI_ACTOR_DIALOG_PAGE_MAX - 1U;
+    if (end >= s_dialog_length) {
+        return s_dialog_length;
+    }
+    while (end > start && ((unsigned char)s_dialog_full[end] & 0xC0U) == 0x80U) {
+        end--;
+    }
+    return end;
+}
+
+static ui_actor_render_state_t ui_home_actor_desired_rest_state(world_speech_tone_t tone)
+{
+    if (s_desired_activity != WORLD_ACTIVITY_SLEEP) {
+        return UI_ACTOR_RENDER_IDLE;
+    }
+    return tone == WORLD_SPEECH_TONE_MUTED ? UI_ACTOR_RENDER_DOZE
+                                           : UI_ACTOR_RENDER_SLEEP;
+}
 
 static int16_t ui_home_actor_room_stand_x(size_t room_index)
 {
@@ -134,7 +196,7 @@ static bool ui_home_actor_tick(uint32_t tick, void *user_data)
     }
 
     switch (s_state) {
-    case UI_ACTOR_STATE_WALK: {
+    case UI_ACTOR_RENDER_WALK: {
         ui_actor_point_t goal = s_has_waypoint ? s_waypoint : s_target;
         /* One art pixel per tick, so the walk cycle and the travel distance stay
          * in lockstep and never look like sliding. */
@@ -145,22 +207,24 @@ static bool ui_home_actor_tick(uint32_t tick, void *user_data)
         } else if (s_has_waypoint) {
             s_has_waypoint = false;
         } else {
-            s_state = UI_ACTOR_STATE_IDLE;
+            ui_home_actor_set_render_state(
+                ui_home_actor_desired_rest_state(s_desired_tone));
             s_walk_frame = 0;
+            break;
         }
         s_walk_frame = (uint8_t)((s_walk_frame + 1U) % ACTOR_WALK_FRAME_COUNT);
         ui_home_actor_set_pose(s_walk_frames[s_walk_frame]);
         ui_home_actor_place();
         break;
     }
-    case UI_ACTOR_STATE_SLEEP:
-    case UI_ACTOR_STATE_DOZE:
+    case UI_ACTOR_RENDER_SLEEP:
+    case UI_ACTOR_RENDER_DOZE:
         if ((tick % 8U) == 0U) {
             s_idle_frame = (uint8_t)((s_idle_frame + 1U) % ACTOR_SLEEP_FRAME_COUNT);
             ui_home_actor_set_pose(s_sleep_frames[s_idle_frame]);
         }
         break;
-    case UI_ACTOR_STATE_IDLE:
+    case UI_ACTOR_RENDER_IDLE:
     default:
         if (s_blinking) {
             s_blinking = false;
@@ -188,22 +252,33 @@ static bool ui_home_actor_tick(uint32_t tick, void *user_data)
         ui_pixel_fx_sprite_set_src(s_pet, s_pet_frames[s_pet_frame]);
     }
 
-    /* Typewriter reveal: two characters per tick. lv_label_set_text_fmt on a
-     * byte prefix would split multi-byte UTF-8, so advance whole code points. */
-    if (s_dialog_label != NULL && s_dialog_revealed < strlen(s_dialog_full)) {
-        for (int step = 0; step < 2 && s_dialog_revealed < strlen(s_dialog_full); ++step) {
+    /* Typewriter reveal: two characters per tick. Long v1 say payloads are
+     * paged through the fixed-size HUD without truncating UTF-8 code points. */
+    if (s_dialog_label != NULL && s_dialog_revealed < s_dialog_page_end) {
+        for (int step = 0; step < 2 && s_dialog_revealed < s_dialog_page_end; ++step) {
             s_dialog_revealed++;
-            while (s_dialog_revealed < strlen(s_dialog_full) &&
-                   (s_dialog_full[s_dialog_revealed] & 0xC0) == 0x80) {
+            while (s_dialog_revealed < s_dialog_page_end &&
+                   ((unsigned char)s_dialog_full[s_dialog_revealed] & 0xC0U) == 0x80U) {
                 s_dialog_revealed++;
             }
         }
-        char partial[UI_ACTOR_DIALOG_MAX];
-        size_t copy = s_dialog_revealed < sizeof(partial) - 1U ? s_dialog_revealed
-                                                              : sizeof(partial) - 1U;
-        memcpy(partial, s_dialog_full, copy);
+        char partial[UI_ACTOR_DIALOG_PAGE_MAX];
+        size_t copy = s_dialog_revealed - s_dialog_page_start;
+        memcpy(partial, &s_dialog_full[s_dialog_page_start], copy);
         partial[copy] = '\0';
         lv_label_set_text(s_dialog_label, partial);
+    } else if (s_dialog_label != NULL && s_dialog_page_end < s_dialog_length) {
+        if (++s_dialog_page_hold >= UI_ACTOR_DIALOG_PAGE_HOLD_TICKS) {
+            s_dialog_page_start = s_dialog_page_end;
+            s_dialog_page_end = ui_home_actor_dialog_page_end(s_dialog_page_start);
+            s_dialog_revealed = s_dialog_page_start;
+            s_dialog_page_hold = 0U;
+            s_cursor_visible = false;
+            if (s_dialog_cursor != NULL) {
+                lv_obj_set_style_opa(s_dialog_cursor, LV_OPA_TRANSP, LV_PART_MAIN);
+            }
+            lv_label_set_text(s_dialog_label, "");
+        }
     } else if (s_dialog_cursor != NULL && (tick % 4U) == 0U) {
         s_cursor_visible = !s_cursor_visible;
         lv_obj_set_style_opa(s_dialog_cursor,
@@ -216,6 +291,15 @@ static bool ui_home_actor_tick(uint32_t tick, void *user_data)
 esp_err_t ui_home_actor_create(lv_obj_t *house)
 {
     ESP_RETURN_ON_FALSE(house != NULL, ESP_ERR_INVALID_ARG, TAG, "null house");
+
+    world_service_snapshot_t snapshot = {0};
+    world_service_get_snapshot(&snapshot);
+    size_t snapshot_room = 0U;
+    if (ui_home_actor_room_index(snapshot.room, &snapshot_room)) {
+        s_room = snapshot_room;
+        s_desired_activity = snapshot.activity;
+        s_desired_tone = snapshot.speech_tone;
+    }
 
     s_pos.x = ui_home_actor_room_stand_x(s_room);
     s_pos.y = ui_home_actor_room_floor_y(s_room);
@@ -243,22 +327,20 @@ esp_err_t ui_home_actor_create(lv_obj_t *house)
     ESP_RETURN_ON_FALSE(s_pet != NULL, ESP_ERR_NO_MEM, TAG, "pet alloc failed");
 
     ui_home_actor_place();
+    ui_home_actor_set_render_state(
+        ui_home_actor_desired_rest_state(snapshot.speech_tone));
     ESP_RETURN_ON_ERROR(ui_pixel_fx_register(ui_home_actor_tick, NULL, 1, 0), TAG,
                         "actor tick registration failed");
     return ESP_OK;
 }
 
-void ui_home_actor_go_to_room(size_t room_index, bool force)
+static void ui_home_actor_go_to_room(size_t room_index)
 {
     const ui_home_room_def_t *def = ui_home_room_def(room_index);
     if (def == NULL || s_actor == NULL) {
         return;
     }
-    if (!force && (s_state == UI_ACTOR_STATE_SLEEP || s_state == UI_ACTOR_STATE_DOZE)) {
-        return;
-    }
-    if (room_index == s_room && s_state != UI_ACTOR_STATE_SLEEP &&
-        s_state != UI_ACTOR_STATE_DOZE) {
+    if (room_index == s_room) {
         return;
     }
 
@@ -275,12 +357,12 @@ void ui_home_actor_go_to_room(size_t room_index, bool force)
     } else {
         s_has_waypoint = false;
     }
-    s_state = UI_ACTOR_STATE_WALK;
+    s_state = UI_ACTOR_RENDER_WALK;
     ui_home_actor_set_pose(s_walk_frames[0]);
     ESP_LOGI(TAG, "actor heading to %s", def->title);
 }
 
-void ui_home_actor_set_state(ui_actor_state_t state)
+static void ui_home_actor_set_render_state(ui_actor_render_state_t state)
 {
     if (s_actor == NULL || s_state == state) {
         return;
@@ -288,28 +370,57 @@ void ui_home_actor_set_state(ui_actor_state_t state)
     s_state = state;
     s_idle_frame = 0;
     switch (state) {
-    case UI_ACTOR_STATE_SLEEP:
-    case UI_ACTOR_STATE_DOZE:
+    case UI_ACTOR_RENDER_SLEEP:
+    case UI_ACTOR_RENDER_DOZE:
         ui_home_actor_set_pose(s_sleep_frames[0]);
         break;
-    case UI_ACTOR_STATE_WALK:
+    case UI_ACTOR_RENDER_WALK:
         ui_home_actor_set_pose(s_walk_frames[0]);
         break;
-    case UI_ACTOR_STATE_IDLE:
+    case UI_ACTOR_RENDER_IDLE:
     default:
         ui_home_actor_set_pose(s_idle_frames[0]);
         break;
     }
 }
 
-ui_actor_state_t ui_home_actor_state(void)
+void ui_home_actor_apply_snapshot(const world_service_snapshot_t *snapshot)
 {
-    return s_state;
-}
-
-size_t ui_home_actor_room(void)
-{
-    return s_room;
+    size_t room_index = 0U;
+    if (snapshot == NULL || s_actor == NULL ||
+        !ui_home_actor_room_index(snapshot->room, &room_index)) {
+        return;
+    }
+    s_desired_activity = snapshot->activity;
+    s_desired_tone = snapshot->speech_tone;
+    if (room_index != s_room) {
+        ui_home_actor_go_to_room(room_index);
+    } else if (s_state != UI_ACTOR_RENDER_WALK) {
+        ui_home_actor_set_render_state(
+            ui_home_actor_desired_rest_state(snapshot->speech_tone));
+    }
+    if (snapshot->speech_revision != 0U && snapshot->speech_revision != s_speech_revision) {
+        uint32_t accent = UI_PAL_ACCENT_CYAN;
+        switch (snapshot->speech_tone) {
+        case WORLD_SPEECH_TONE_MUTED:
+            accent = UI_PAL_MUTED;
+            break;
+        case WORLD_SPEECH_TONE_SLEEP:
+            accent = UI_PAL_ACCENT_VIOLET;
+            break;
+        case WORLD_SPEECH_TONE_COOL:
+            accent = UI_PAL_COOL_LIGHT;
+            break;
+        case WORLD_SPEECH_TONE_BRIGHT:
+            accent = UI_PAL_LAMP_HI;
+            break;
+        case WORLD_SPEECH_TONE_DEFAULT:
+        default:
+            break;
+        }
+        ui_home_actor_say(snapshot->speech_text, accent);
+        s_speech_revision = snapshot->speech_revision;
+    }
 }
 
 esp_err_t ui_home_actor_create_dialog(lv_obj_t *parent, int32_t art_w, int32_t art_h)
@@ -372,21 +483,32 @@ esp_err_t ui_home_actor_create_dialog(lv_obj_t *parent, int32_t art_w, int32_t a
     return ESP_OK;
 }
 
-void ui_home_actor_say(const char *text, uint32_t accent)
+static void ui_home_actor_say(const char *text, uint32_t accent)
 {
     if (text == NULL || s_dialog_label == NULL) {
         return;
     }
-    if (strncmp(s_dialog_full, text, sizeof(s_dialog_full) - 1U) == 0) {
-        return;
+    size_t length = strlen(text);
+    size_t copy = length < sizeof(s_dialog_full) ? length : sizeof(s_dialog_full) - 1U;
+    if (copy < length) {
+        while (copy > 0U && ((unsigned char)text[copy] & 0xC0U) == 0x80U) {
+            copy--;
+        }
     }
-    snprintf(s_dialog_full, sizeof(s_dialog_full), "%s", text);
-    s_dialog_revealed = 0;
+    memcpy(s_dialog_full, text, copy);
+    s_dialog_full[copy] = '\0';
+    s_dialog_length = copy;
+    s_dialog_page_start = 0U;
+    s_dialog_page_end = ui_home_actor_dialog_page_end(0U);
+    s_dialog_revealed = 0U;
+    s_dialog_page_hold = 0U;
+    s_cursor_visible = false;
     lv_label_set_text(s_dialog_label, "");
     if (s_dialog_panel != NULL) {
         lv_obj_set_style_border_color(s_dialog_panel, lv_color_hex(accent), LV_PART_MAIN);
     }
     if (s_dialog_cursor != NULL) {
+        lv_obj_set_style_opa(s_dialog_cursor, LV_OPA_TRANSP, LV_PART_MAIN);
         uint32_t count = lv_obj_get_child_count(s_dialog_cursor);
         for (uint32_t i = 0; i < count; ++i) {
             lv_obj_set_style_bg_color(lv_obj_get_child(s_dialog_cursor, i),
