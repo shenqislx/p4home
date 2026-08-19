@@ -137,11 +137,14 @@ class AgentTransportPhase2DContractTests(unittest.TestCase):
         self.assertIn("7200000ULL", main)
         self.assertIn('log_verify_marker("agent_transport", "offline_2h_fallback"', main)
 
-    def test_hardware_workflow_starts_node_from_the_agent_workspace(self) -> None:
+    def test_hardware_workflow_preserves_node_24_in_the_agent_workspace(self) -> None:
         workflow = HARDWARE_WORKFLOW.read_text(encoding="utf-8")
 
-        self.assertIn("cd agent\n            node --import tsx apps/device-harness/src/cli.ts", workflow)
+        self.assertIn("shell: zsh {0}\n        working-directory: agent", workflow)
+        self.assertIn("node --import tsx apps/device-harness/src/cli.ts", workflow)
         self.assertNotIn("node --import tsx agent/apps/device-harness", workflow)
+        self.assertIn("exit_code=$?", workflow)
+        self.assertNotIn("status=$?", workflow)
         self.assertIn("P4HOME_AGENT_DEVICE_TOKEN_FILE", workflow)
         self.assertNotIn("P4HOME_AGENT_DEVICE_TOKEN=", workflow)
 

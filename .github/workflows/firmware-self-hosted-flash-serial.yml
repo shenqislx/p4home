@@ -195,11 +195,13 @@ jobs:
 
       - name: Start Phase 2D Agent Runtime harness
         if: inputs.validation_profile == 'phase2d_agent'
+        shell: zsh {0}
+        working-directory: agent
         run: |
           set -euo pipefail
           corepack enable
           corepack prepare pnpm@11.19.0 --activate
-          pnpm -C agent install --frozen-lockfile
+          pnpm install --frozen-lockfile
           export P4HOME_AGENT_DEVICE_ID="$AGENT_DEVICE_ID"
           export P4HOME_AGENT_DEVICE_TOKEN_FILE="$AGENT_TMP_DIR/device-token"
           export P4HOME_AGENT_TLS_KEY_FILE="$AGENT_TMP_DIR/agent-key.pem"
@@ -209,10 +211,9 @@ jobs:
           export P4HOME_HARNESS_RESULT_FILE="$AGENT_HARNESS_RESULT_FILE"
           export P4HOME_HARNESS_STATUS_FILE="$AGENT_HARNESS_STATUS_FILE"
           nohup zsh -c '
-            cd agent
             node --import tsx apps/device-harness/src/cli.ts
-            status=$?
-            echo "$status" > "$P4HOME_HARNESS_STATUS_FILE"
+            exit_code=$?
+            echo "$exit_code" > "$P4HOME_HARNESS_STATUS_FILE"
           ' > "$AGENT_HARNESS_LOG" 2>&1 &
           echo "$!" > "$AGENT_TMP_DIR/pid"
           for attempt in {1..300}; do
