@@ -9,6 +9,7 @@
     "@p4home/core": "workspace:*",
     "@p4home/domain-p4home": "workspace:*",
     "@p4home/provider-ollama": "workspace:*",
-    "@p4home/storage-sqlite": "workspace:*"
+    "@p4home/storage-sqlite": "workspace:*",
+    "ws": "^8.21.3"
   }
 }

@@ -59,6 +59,7 @@ static bool s_active;
 static uint32_t s_budget_spent;
 static uint32_t s_budget_peak;
 static uint32_t s_budget_denied;
+static uint32_t s_last_verify_ms;
 
 /* Colour ramps for the palette cyclers. The candle ramp repeats entries
  * unevenly on purpose: a uniform cycle looks electronic, an irregular one reads
@@ -251,10 +252,17 @@ static void ui_pixel_fx_timer_cb(lv_timer_t *timer)
      * rather than all time, because that is what identifies which effect
      * combination is close to the stripe budget. */
     if ((s_tick % 64U) == 0U) {
+        uint32_t now_ms = lv_tick_get();
+        uint32_t interval_ms = now_ms - s_last_verify_ms;
+        bool cadence_ok = interval_ms >= 7000U && interval_ms <= 10000U;
         ESP_LOGW(TAG, "VERIFY: fx tick=%u dirty=%upx peak=%upx budget=%upx denied=%u",
                  (unsigned)s_tick, (unsigned)s_budget_spent,
                  (unsigned)ui_pixel_fx_budget_peak(), (unsigned)UI_FX_TICK_BUDGET_PX,
                  (unsigned)s_budget_denied);
+        ESP_LOGW(TAG, "VERIFY:ui:8fps:%s interval_ms=%u tick=%u denied=%u",
+                 cadence_ok ? "PASS" : "FAIL", (unsigned)interval_ms,
+                 (unsigned)s_tick, (unsigned)s_budget_denied);
+        s_last_verify_ms = now_ms;
     }
 }
 
@@ -270,6 +278,7 @@ esp_err_t ui_pixel_fx_init(void)
     ESP_RETURN_ON_FALSE(s_timer != NULL, ESP_ERR_NO_MEM, TAG,
                         "fx heartbeat alloc failed");
     s_active = true;
+    s_last_verify_ms = lv_tick_get();
     ESP_LOGI(TAG, "pixel fx heartbeat started period=%ums", (unsigned)UI_FX_TICK_MS);
     return ESP_OK;
 }

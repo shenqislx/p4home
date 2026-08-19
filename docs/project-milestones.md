@@ -50,8 +50,9 @@ Agent WebSocket。
 原文隔离、fail-closed Router、独立 Session、Human/Robot 入口、有界调度与路由审计已落地并通过
 92 项确定性测试。2026-08-18 review 修复后，Human 文本策略、本地 eval gate、Session 串行、模型
 轮次审计、SQLite schema v2 关联索引和统一 Role 组合入口均有回归覆盖；四角色两轮 v2 eval 分别为
-Router 24/24、Human 8/8、Robot 8/8、Cat 18/18，且无综合分。2A 退出门禁已重新满足，2B 尚未
-启动；Phase 2 的真实 P4 WebSocket 执行链保持未启动。
+Router 24/24、Human 8/8、Robot 8/8、Cat 18/18，且无综合分。2A、2B、2C 已依次满足退出门禁。
+2026-08-19，2D 真实 WSS 软件链、P4 `agent_transport` 与硬件 harness 已通过软件回归和
+Agent-enabled 固件构建；Phase 2 仍等待实机 100 次动作、重连、两小时离线和资源 artifact 判定。
 
 ## 5. 状态更新规则
 

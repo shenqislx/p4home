@@ -108,6 +108,10 @@ export class DeterministicFakeDeviceSocket implements DeviceWebSocketConnection 
     this.#device.receiveFrame(frame);
   }
 
+  public close(_code: number, _reason: string): void {
+    this.disconnect();
+  }
+
   public onFrame(listener: (frame: string) => void): () => void {
     this.#frameListeners.add(listener);
     return () => this.#frameListeners.delete(listener);

@@ -234,6 +234,30 @@ test("a locally invalid frame does not create an action, consume seq, or poison 
   assert.equal(device.executionCount("invalid-timeout"), 1);
 });
 
+test("an invalid local wait timeout does not retain or poison an action id", async () => {
+  const { adapter, device } = connectedHarness();
+  await assert.rejects(
+    adapter.executeAction({
+      action_id: "invalid-wait-timeout",
+      tool: "character.go_to_room",
+      arguments: { room_id: "study" },
+      timeout_ms: 1_000,
+      wait_timeout_ms: 0,
+    }),
+    /wait_timeout_ms must be a positive integer/,
+  );
+  assert.equal(adapter.getAction("invalid-wait-timeout"), undefined);
+
+  const outcome = await adapter.executeAction({
+    action_id: "invalid-wait-timeout",
+    tool: "character.go_to_room",
+    arguments: { room_id: "study" },
+    timeout_ms: 1_000,
+  });
+  assert.equal(outcome.status, "completed");
+  assert.equal(device.executionCount("invalid-wait-timeout"), 1);
+});
+
 test("a pre-aborted action never reaches the device", async () => {
   const { adapter, device } = connectedHarness();
   const controller = new AbortController();
@@ -294,7 +318,7 @@ test("completed adapter records are evicted when the configured capacity is reac
 });
 
 test("fake device fails closed when retained idempotency records reach capacity", async () => {
-  const { adapter, device } = connectedHarness({ idempotency_capacity: 1 });
+  const { adapter, device, socket } = connectedHarness({ idempotency_capacity: 1 });
   const first = await adapter.executeAction({
     action_id: "fake-cache-action-1",
     tool: "character.go_to_room",
@@ -312,6 +336,7 @@ test("fake device fails closed when retained idempotency records reach capacity"
   assert.equal(overflow.status, "unknown");
   assert.equal(overflow.status === "unknown" ? overflow.reason : null, "send_failed");
   assert.equal(adapter.is_ready, false);
+  assert.equal(socket.is_open, false, "ambiguous send failure must force a new handshake");
   assert.equal(device.executionCount("fake-cache-action-2"), 0);
 });
 

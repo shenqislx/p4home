@@ -43,11 +43,17 @@ Actions secret。workflow 只把解码结果写入 `$RUNNER_TEMP`，不会复制
 
 | 参数 | 默认值 | 约束 |
 |---|---|---|
+| `validation_profile` | `generic` | `generic` 或 `phase2d_agent` |
 | `serial_port` | `/dev/cu.usbserial-210` | runner 上的字符设备 |
 | `monitor_seconds` | `120` | `10–7200` 秒 |
+| `agent_host` | 空 | `phase2d_agent` 时必填；P4 可访问的 runner LAN host |
+| `agent_port` | `8443` | `1–65535` |
 
-两小时 Phase 0 长跑使用 `monitor_seconds=7200`。同一时间只允许一个硬件 job，且新任务
-不会取消正在执行的刷写或采集。
+两小时 Phase 0 长跑使用 `monitor_seconds=7200`。Phase 2D 必须选择 `phase2d_agent` 且固定
+`monitor_seconds=7200`；workflow 额外保留 300 秒给启动、100 次动作与重连，因此 manifest 中的
+`capture_seconds` 为 7500。该 profile 在 runner 临时目录生成一次性 P-256 TLS key/cert、256-bit
+device token 与 SPKI pin，不把凭据写入仓库、日志或 artifact。同一时间只允许一个硬件 job，且
+新任务不会取消正在执行的刷写或采集。
 
 ## 4. Artifact Contract
 
@@ -71,6 +77,8 @@ manifest schema version 1 的必需字段：
   "job": "flash-and-monitor",
   "serial_port": "/dev/cu.usbserial-210",
   "monitor_seconds": 120,
+  "capture_seconds": 120,
+  "validation_profile": "generic",
   "log_file": "monitor.log"
 }
 ```
@@ -80,6 +88,8 @@ workflow 还写入 app image 文件名、字节数与 SHA-256；这些字段用�
 `main_task_stack_size_bytes`，用于确认私密全量配置没有覆盖仓库的栈安全基线；并记录
 `dependency_lock_sha256`，用于确认 managed component 解析使用了仓库锁文件。构建后若
 `firmware/dependencies.lock` 被解析器改写，workflow 必须失败，不允许隐式组件升级进入硬件验证。
+`phase2d_agent` 还会写入无凭据的 `agent_harness_status` 与 `agent_hardware_result`；它们仍需和
+`monitor.log` 的设备侧、Agent 侧 marker 交叉判定，不能单独替代串口证据。
 
 ## 5. 判定顺序
 

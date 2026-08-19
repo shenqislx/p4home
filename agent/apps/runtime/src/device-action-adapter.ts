@@ -19,6 +19,7 @@ import {
 export interface DeviceWebSocketConnection {
   readonly is_open: boolean;
   send(frame: string): Promise<void>;
+  close(code: number, reason: string): void;
   onFrame(listener: (frame: string) => void): () => void;
   onClose(listener: () => void): () => void;
 }
@@ -75,6 +76,11 @@ export interface DeviceAdapterActionRecord {
   readonly status: DeviceAdapterActionStatus;
   readonly baseline_state_version: number;
   readonly outcome: DeviceActionOutcome | null;
+  readonly timing: Readonly<{
+    accepted_latency_ms: number | null;
+    started_latency_ms: number | null;
+    terminal_latency_ms: number | null;
+  }>;
 }
 
 export type DeviceActionAdapterErrorCode =
@@ -109,6 +115,9 @@ interface MutableActionRecord {
   readonly fingerprint: string;
   readonly baselineStateVersion: number;
   terminalAtMonotonicMs: number | null;
+  readonly requestedAtMonotonicMs: number;
+  acceptedAtMonotonicMs: number | null;
+  startedAtMonotonicMs: number | null;
   status: DeviceAdapterActionStatus;
   outcome: DeviceActionOutcome | null;
 }
@@ -223,6 +232,17 @@ export class DeviceWebSocketActionAdapter {
       status: record.status,
       baseline_state_version: record.baselineStateVersion,
       outcome: record.outcome === null ? null : structuredClone(record.outcome),
+      timing: {
+        accepted_latency_ms: record.acceptedAtMonotonicMs === null
+          ? null
+          : record.acceptedAtMonotonicMs - record.requestedAtMonotonicMs,
+        started_latency_ms: record.startedAtMonotonicMs === null
+          ? null
+          : record.startedAtMonotonicMs - record.requestedAtMonotonicMs,
+        terminal_latency_ms: record.terminalAtMonotonicMs === null
+          ? null
+          : record.terminalAtMonotonicMs - record.requestedAtMonotonicMs,
+      },
     };
   }
 
@@ -267,6 +287,10 @@ export class DeviceWebSocketActionAdapter {
         return existingWaiter.promise;
       }
     }
+    const waitTimeoutMs = spec.wait_timeout_ms ?? spec.timeout_ms + 1_000;
+    if (!Number.isInteger(waitTimeoutMs) || waitTimeoutMs < 1) {
+      throw new RangeError("wait_timeout_ms must be a positive integer");
+    }
     if (this.#waiters.size >= this.#waiterCapacity) {
       throw new DeviceActionAdapterError(
         "WAITER_CAPACITY_EXCEEDED",
@@ -291,6 +315,9 @@ export class DeviceWebSocketActionAdapter {
       fingerprint: requestFingerprint,
       baselineStateVersion: this.#lastSnapshot.state_version,
       terminalAtMonotonicMs: null,
+      requestedAtMonotonicMs: this.#monotonicNow(),
+      acceptedAtMonotonicMs: null,
+      startedAtMonotonicMs: null,
       status: "requested",
       outcome: null,
     };
@@ -300,10 +327,6 @@ export class DeviceWebSocketActionAdapter {
     const promise = new Promise<DeviceActionOutcome>((resolve) => {
       resolveWaiter = resolve;
     });
-    const waitTimeoutMs = spec.wait_timeout_ms ?? spec.timeout_ms + 1_000;
-    if (!Number.isInteger(waitTimeoutMs) || waitTimeoutMs < 1) {
-      throw new RangeError("wait_timeout_ms must be a positive integer");
-    }
     const onAbort = spec.signal === undefined
       ? undefined
       : () => {
@@ -331,7 +354,8 @@ export class DeviceWebSocketActionAdapter {
 
     try {
       await this.#send("action.request", request);
-    } catch {
+    } catch (error) {
+      this.#lastProtocolError = error instanceof Error ? error : new Error(String(error));
       this.#finish(spec.action_id, {
         status: "unknown",
         action_id: spec.action_id,
@@ -339,6 +363,7 @@ export class DeviceWebSocketActionAdapter {
         replay_allowed: false,
         reconciliation: null,
       });
+      this.#connection.close(1011, "device send failed");
     }
     return promise;
   }
@@ -347,7 +372,12 @@ export class DeviceWebSocketActionAdapter {
     if (!this.#records.has(actionId)) {
       throw new DeviceActionAdapterError("ACTION_NOT_FOUND", `unknown action_id ${actionId}`);
     }
-    await this.#send("action.cancel", { action_id: actionId, reason });
+    try {
+      await this.#send("action.cancel", { action_id: actionId, reason });
+    } catch (error) {
+      this.#closeAfterSendFailure(error);
+      throw error;
+    }
   }
 
   public async waitForReconciliation(
@@ -414,7 +444,12 @@ export class DeviceWebSocketActionAdapter {
         `action_id ${actionId} must be reconciled from a snapshot before redelivery`,
       );
     }
-    await this.#send("action.request", record.request);
+    try {
+      await this.#send("action.request", record.request);
+    } catch (error) {
+      this.#closeAfterSendFailure(error);
+      throw error;
+    }
   }
 
   #allocateMessageId(): string {
@@ -481,6 +516,7 @@ export class DeviceWebSocketActionAdapter {
     } catch (error) {
       this.#lastProtocolError = error instanceof Error ? error : new Error(String(error));
       this.#ready = false;
+      this.#connection.close(1002, "device protocol violation");
     }
   }
 
@@ -599,6 +635,12 @@ export class DeviceWebSocketActionAdapter {
       && !(record.status === "started" && status === "accepted")
     ) {
       record.status = status;
+      if (status === "accepted" && record.acceptedAtMonotonicMs === null) {
+        record.acceptedAtMonotonicMs = this.#monotonicNow();
+      }
+      if (status === "started" && record.startedAtMonotonicMs === null) {
+        record.startedAtMonotonicMs = this.#monotonicNow();
+      }
     }
   }
 
@@ -679,10 +721,16 @@ export class DeviceWebSocketActionAdapter {
       reason,
       last_applied_state_version: this.#lastSnapshot?.state_version ?? 0,
     }, messageId).catch((error: unknown) => {
-      this.#lastProtocolError = error instanceof Error ? error : new Error(String(error));
       this.#resyncInFlight = false;
       this.#resyncRequestId = null;
+      this.#closeAfterSendFailure(error);
     });
+  }
+
+  #closeAfterSendFailure(error: unknown): void {
+    this.#lastProtocolError = error instanceof Error ? error : new Error(String(error));
+    this.#ready = false;
+    this.#connection.close(1011, "device send failed");
   }
 
   #reconcileUnknownActions(snapshot: WorldSnapshotPayload): void {

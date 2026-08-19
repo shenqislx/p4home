@@ -1,7 +1,7 @@
 # P4 Home 当前工作计划
 
 > Current Focus: [P4 Home 本地 LLM Agent 化架构](../p4-local-agent-architecture.md)
-> Updated: 2026-08-18
+> Updated: 2026-08-19
 > Working Branch: `feature/agent-harness`
 
 ## 工作规则
@@ -32,9 +32,10 @@
 
 只执行 Phase 2。2026-08-17 用户要求重新设计并推进 Phase 2，Phase 1 review 已通过。
 Phase 2 按 2A Role Contract & Router、2B Cat Action Adapter、2C P4 World Service、2D Real
-Transport & Hardware Gate 四个纵切推进。2026-08-18，2A、2B、2C 的各自退出门禁已依次满足；
-下一项为 2D 真实 Device WebSocket 与实机门禁。2C 结果只证明 host 状态机、UI 分层和固件可构建，
-尚未证明真实传输、连续动作或运行期资源指标。
+Transport & Hardware Gate 四个纵切推进。2A、2B、2C 的各自退出门禁已依次满足；2026-08-19，
+2D 的真实 Device WebSocket、P4 `agent_transport`、Cat 产品入口闭环和自包含硬件 harness 已完成
+软件验证。下一项是提交后运行 `phase2d_agent` 实机 profile，并从 artifact 判定 100 次动作、重连、
+两小时 Agent 离线、资源与 8 FPS 门禁；在此之前 Phase 2 仍为 `in_progress`。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 属于 Phase 2，必须在真实 Action 前完成。

@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 #include "esp_app_desc.h"
+#include "agent_transport.h"
 #include "esp_chip_info.h"
 #include "esp_flash.h"
 #include "esp_heap_caps.h"
@@ -175,6 +176,21 @@ void diagnostics_service_log_runtime_heartbeat(void)
              delta_us / 1000);
     ESP_LOGW(TAG, "task_stack task=main high_water=%u bytes",
              (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    agent_transport_snapshot_t agent = {0};
+    agent_transport_get_snapshot(&agent);
+    ESP_LOGW(TAG,
+             "agent_summary enabled=%s connected=%s ever_connected=%s reconnect=%" PRIu32
+             " completed=%" PRIu32 " failed=%" PRIu32 " protocol_errors=%" PRIu32
+             " offline_ms=%" PRIu64 " worker_stack_high_water=%" PRIu32 " bytes",
+             agent.enabled ? "yes" : "no",
+             agent.connected ? "yes" : "no",
+             agent.ever_connected ? "yes" : "no",
+             agent.reconnect_count,
+             agent.completed_actions,
+             agent.failed_actions,
+             agent.protocol_errors,
+             agent.disconnected_duration_ms,
+             agent.worker_stack_high_water_bytes);
     diagnostics_service_log_memory_summary();
 }
 

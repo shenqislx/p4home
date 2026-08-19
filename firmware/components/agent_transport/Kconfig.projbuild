@@ -1,0 +1,38 @@
+menu "P4Home Agent Transport"
+
+config P4HOME_AGENT_TRANSPORT_ENABLED
+    bool "Enable P4 Agent Device WebSocket transport"
+    default n
+
+config P4HOME_AGENT_TRANSPORT_URI
+    string "Agent Device WebSocket URI"
+    default ""
+    depends on P4HOME_AGENT_TRANSPORT_ENABLED
+    help
+        Must be a wss:// URI ending in /v1/device.
+
+config P4HOME_AGENT_DEVICE_ID
+    string "Paired P4 device id"
+    default ""
+    depends on P4HOME_AGENT_TRANSPORT_ENABLED
+
+config P4HOME_AGENT_DEVICE_TOKEN
+    string "Paired P4 device token"
+    default ""
+    depends on P4HOME_AGENT_TRANSPORT_ENABLED
+    help
+        Development provisioning only. Production provisioning should supply
+        the token through agent_transport_init() from protected storage.
+
+config P4HOME_AGENT_SPKI_SHA256
+    string "Agent TLS SPKI SHA-256 pin (64 lowercase hex characters)"
+    default ""
+    depends on P4HOME_AGENT_TRANSPORT_ENABLED
+
+config P4HOME_AGENT_TRANSPORT_TASK_STACK
+    int "Agent transport worker stack bytes"
+    range 6144 16384
+    default 8192
+    depends on P4HOME_AGENT_TRANSPORT_ENABLED
+
+endmenu

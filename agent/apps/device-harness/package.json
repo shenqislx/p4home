@@ -1,0 +1,9 @@
+{
+  "name": "@p4home/device-harness",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "@p4home/runtime": "workspace:*"
+  }
+}

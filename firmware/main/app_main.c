@@ -10,6 +10,7 @@
 #include "sdkconfig.h"
 
 #include "board_support.h"
+#include "agent_transport.h"
 #include "diagnostics_service.h"
 #include "display_service.h"
 #include "panel_data_store.h"
@@ -251,6 +252,7 @@ void app_main(void)
     log_verify_marker_count("ui", "dashboard_card_count", (uint32_t)ui_page_dashboard_card_count());
 
     TickType_t last_heartbeat_tick = xTaskGetTickCount();
+    bool agent_offline_2h_reported = false;
     while (true) {
 #if CONFIG_P4HOME_GATEWAY_RUNTIME_POLL_ENABLE
         if (board_support_gateway_ready()) {
@@ -271,6 +273,17 @@ void app_main(void)
             diagnostics_service_log_runtime_heartbeat();
             diagnostics_service_log_ha_summary();
             panel_data_store_tick_freshness(time_service_now_epoch_ms());
+            agent_transport_snapshot_t agent_snapshot = {0};
+            agent_transport_get_snapshot(&agent_snapshot);
+            if (!agent_offline_2h_reported && agent_snapshot.enabled &&
+                agent_snapshot.ever_connected && !agent_snapshot.connected &&
+                agent_snapshot.disconnected_duration_ms >= 7200000ULL) {
+                bool fallback_healthy = board_support_display_ready() &&
+                                        board_support_network_ready() &&
+                                        board_support_ha_ready();
+                log_verify_marker("agent_transport", "offline_2h_fallback", fallback_healthy);
+                agent_offline_2h_reported = true;
+            }
             last_heartbeat_tick = now;
         }
 

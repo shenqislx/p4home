@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "audio_service.h"
+#include "agent_transport.h"
 #include "display_service.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
@@ -129,6 +130,16 @@ esp_err_t board_support_init(void)
     esp_err_t world_ret = world_service_init(NULL);
     if (world_ret != ESP_OK) {
         ESP_LOGW(TAG, "world service init failed: %s", esp_err_to_name(world_ret));
+    }
+
+    esp_err_t agent_ret = agent_transport_init(NULL);
+    if (agent_ret != ESP_OK) {
+        ESP_LOGW(TAG, "agent transport init failed: %s", esp_err_to_name(agent_ret));
+    } else {
+        agent_ret = agent_transport_start();
+        if (agent_ret != ESP_OK) {
+            ESP_LOGW(TAG, "agent transport start failed: %s", esp_err_to_name(agent_ret));
+        }
     }
 
     esp_err_t ha_ret = ha_client_init();
@@ -293,6 +304,16 @@ void board_support_log_summary(void)
              world_service_room_text(world_snapshot.room),
              world_snapshot.activity == WORLD_ACTIVITY_SLEEP ? "sleep" : "idle",
              world_snapshot.active_action_id[0] != '\0' ? world_snapshot.active_action_id : "none");
+    agent_transport_snapshot_t agent_snapshot = {0};
+    agent_transport_get_snapshot(&agent_snapshot);
+    ESP_LOGI(TAG, "agent_transport enabled=%s connected=%s handshake=%s rx=%" PRIu32
+                  " tx=%" PRIu32 " protocol_errors=%" PRIu32,
+             agent_snapshot.enabled ? "yes" : "no",
+             agent_snapshot.connected ? "yes" : "no",
+             agent_snapshot.handshake_sent ? "yes" : "no",
+             agent_snapshot.received_frames,
+             agent_snapshot.sent_frames,
+             agent_snapshot.protocol_errors);
     ESP_LOGI(TAG, "panel_whitelist count=%u", (unsigned)panel_entity_whitelist_count());
     gateway_service_log_summary();
     display_service_log_summary();

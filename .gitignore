@@ -48,6 +48,7 @@ evidence/agent-phase-2/*
 !evidence/agent-phase-2/role-router-smoke.md
 !evidence/agent-phase-2/phase-2b-deterministic-device.md
 !evidence/agent-phase-2/phase-2c-world-service.md
+!evidence/agent-phase-2/phase-2d-real-transport.md
 !evidence/agent-phase-2/qwen3.8-27b-role-eval-v1.json
 !evidence/agent-phase-2/qwen3.8-27b-role-eval-v2.json
 

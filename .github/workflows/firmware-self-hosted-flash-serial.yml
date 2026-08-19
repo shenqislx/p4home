@@ -3,6 +3,14 @@ name: Firmware Self-Hosted Flash Serial
 on:
   workflow_dispatch:
     inputs:
+      validation_profile:
+        description: Hardware validation profile
+        required: true
+        type: choice
+        options:
+          - generic
+          - phase2d_agent
+        default: generic
       serial_port:
         description: macOS serial device path
         required: true
@@ -11,6 +19,14 @@ on:
         description: Serial capture duration in seconds (10-7200)
         required: true
         default: "120"
+      agent_host:
+        description: Runner LAN host reachable by P4 (phase2d_agent only)
+        required: false
+        default: ""
+      agent_port:
+        description: Temporary Agent TLS port (phase2d_agent only)
+        required: true
+        default: "8443"
 
 permissions:
   contents: read
@@ -34,6 +50,9 @@ jobs:
     env:
       SERIAL_PORT: ${{ inputs.serial_port }}
       MONITOR_SECONDS: ${{ inputs.monitor_seconds }}
+      VALIDATION_PROFILE: ${{ inputs.validation_profile }}
+      AGENT_HOST: ${{ inputs.agent_host }}
+      AGENT_PORT: ${{ inputs.agent_port }}
       IDF_SKIP_CHECK_SUBMODULES: "1"
 
     steps:
@@ -46,15 +65,35 @@ jobs:
           test -c "$SERIAL_PORT"
           python3 - <<'PY'
           import os
+          import re
 
           seconds = int(os.environ["MONITOR_SECONDS"])
           if not 10 <= seconds <= 7200:
               raise SystemExit("monitor_seconds must be between 10 and 7200")
+          profile = os.environ["VALIDATION_PROFILE"]
+          if profile not in {"generic", "phase2d_agent"}:
+              raise SystemExit("unsupported validation_profile")
+          port = int(os.environ["AGENT_PORT"])
+          if not 1 <= port <= 65535:
+              raise SystemExit("agent_port must be between 1 and 65535")
+          if profile == "phase2d_agent":
+              host = os.environ["AGENT_HOST"]
+              if not host or re.fullmatch(r"[A-Za-z0-9.-]+", host) is None:
+                  raise SystemExit("phase2d_agent requires a safe runner LAN agent_host")
+              if seconds != 7200:
+                  raise SystemExit("phase2d_agent requires monitor_seconds=7200")
           PY
           test -f scripts/activate-idf-v5.5.4.sh
           test -s firmware/dependencies.lock
           test -f "$HOME/.espressif/tools/activate_idf_v5.5.4.sh"
           echo "BUILD_DIR=$RUNNER_TEMP/p4home-hardware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          echo "SIZE_REPORT=$RUNNER_TEMP/p4home-size-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json" >> "$GITHUB_ENV"
+          echo "AGENT_TMP_DIR=$RUNNER_TEMP/p4home-agent-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          if [[ "$VALIDATION_PROFILE" == "phase2d_agent" ]]; then
+            echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 300))" >> "$GITHUB_ENV"
+          else
+            echo "CAPTURE_SECONDS=$MONITOR_SECONDS" >> "$GITHUB_ENV"
+          fi
 
       - name: Validate agent harness helpers
         run: python3 -m unittest discover -s tests/harness -p 'test_*.py' -v
@@ -97,6 +136,38 @@ jobs:
           echo "HARDWARE_SDKCONFIG=$HARDWARE_SDKCONFIG" >> "$GITHUB_ENV"
           echo "EXPECTED_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" >> "$GITHUB_ENV"
 
+      - name: Prepare ephemeral Phase 2D Agent profile
+        if: inputs.validation_profile == 'phase2d_agent'
+        run: |
+          set -euo pipefail
+          mkdir -p "$AGENT_TMP_DIR"
+          chmod 700 "$AGENT_TMP_DIR"
+          openssl req -x509 -newkey ec \
+            -pkeyopt ec_paramgen_curve:prime256v1 \
+            -nodes \
+            -keyout "$AGENT_TMP_DIR/agent-key.pem" \
+            -out "$AGENT_TMP_DIR/agent-cert.pem" \
+            -days 1 \
+            -subj "/CN=p4home-phase2d-harness"
+          openssl rand -hex 32 > "$AGENT_TMP_DIR/device-token"
+          openssl pkey -in "$AGENT_TMP_DIR/agent-key.pem" -pubout -outform DER \
+            | openssl dgst -sha256 -hex \
+            | awk '{print $2}' > "$AGENT_TMP_DIR/spki-sha256"
+          chmod 600 "$AGENT_TMP_DIR"/*
+          AGENT_DEVICE_ID="p4-hardware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          AGENT_URI="wss://$AGENT_HOST:$AGENT_PORT/v1/device"
+          python3 scripts/prepare-agent-hardware-sdkconfig.py \
+            --sdkconfig "$HARDWARE_SDKCONFIG" \
+            --uri "$AGENT_URI" \
+            --device-id "$AGENT_DEVICE_ID" \
+            --token-file "$AGENT_TMP_DIR/device-token" \
+            --spki-file "$AGENT_TMP_DIR/spki-sha256"
+          echo "AGENT_DEVICE_ID=$AGENT_DEVICE_ID" >> "$GITHUB_ENV"
+          echo "AGENT_HARNESS_LOG=$AGENT_TMP_DIR/agent-harness.log" >> "$GITHUB_ENV"
+          echo "AGENT_HARNESS_READY_FILE=$AGENT_TMP_DIR/ready" >> "$GITHUB_ENV"
+          echo "AGENT_HARNESS_RESULT_FILE=$AGENT_TMP_DIR/result.json" >> "$GITHUB_ENV"
+          echo "AGENT_HARNESS_STATUS_FILE=$AGENT_TMP_DIR/status" >> "$GITHUB_ENV"
+
       - name: Build firmware
         run: |
           set -euo pipefail
@@ -107,8 +178,55 @@ jobs:
             -D IDF_TARGET=esp32p4 \
             -D SDKCONFIG="$HARDWARE_SDKCONFIG" \
             build
+          idf.py \
+            -C firmware \
+            -B "$BUILD_DIR" \
+            -D IDF_TARGET=esp32p4 \
+            -D SDKCONFIG="$HARDWARE_SDKCONFIG" \
+            size --format json2 --output-file "$SIZE_REPORT"
           grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
           git diff --exit-code -- firmware/dependencies.lock
+
+      - name: Set up Node for Phase 2D harness
+        if: inputs.validation_profile == 'phase2d_agent'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+
+      - name: Start Phase 2D Agent Runtime harness
+        if: inputs.validation_profile == 'phase2d_agent'
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@11.19.0 --activate
+          pnpm -C agent install --frozen-lockfile
+          export P4HOME_AGENT_DEVICE_ID="$AGENT_DEVICE_ID"
+          export P4HOME_AGENT_DEVICE_TOKEN_FILE="$AGENT_TMP_DIR/device-token"
+          export P4HOME_AGENT_TLS_KEY_FILE="$AGENT_TMP_DIR/agent-key.pem"
+          export P4HOME_AGENT_TLS_CERT_FILE="$AGENT_TMP_DIR/agent-cert.pem"
+          export P4HOME_AGENT_PORT="$AGENT_PORT"
+          export P4HOME_HARNESS_READY_FILE="$AGENT_HARNESS_READY_FILE"
+          export P4HOME_HARNESS_RESULT_FILE="$AGENT_HARNESS_RESULT_FILE"
+          export P4HOME_HARNESS_STATUS_FILE="$AGENT_HARNESS_STATUS_FILE"
+          nohup zsh -c '
+            cd agent
+            node --import tsx apps/device-harness/src/cli.ts
+            status=$?
+            echo "$status" > "$P4HOME_HARNESS_STATUS_FILE"
+          ' > "$AGENT_HARNESS_LOG" 2>&1 &
+          echo "$!" > "$AGENT_TMP_DIR/pid"
+          for attempt in {1..300}; do
+            if [[ -s "$AGENT_HARNESS_READY_FILE" ]]; then
+              exit 0
+            fi
+            if [[ -s "$AGENT_HARNESS_STATUS_FILE" ]]; then
+              tail -n 50 "$AGENT_HARNESS_LOG"
+              exit 1
+            fi
+            sleep 0.1
+          done
+          echo "Agent Runtime harness did not become ready" >&2
+          exit 1
 
       - name: Flash firmware and capture serial
         run: |
@@ -123,10 +241,19 @@ jobs:
             flash > firmware/monitor.log 2>&1
           python scripts/capture-esp-serial.py \
             --port "$SERIAL_PORT" \
-            --seconds "$MONITOR_SECONDS" \
+            --seconds "$CAPTURE_SECONDS" \
             --output firmware/monitor.log \
             --append \
             --reset
+
+      - name: Append Phase 2D harness evidence
+        if: always() && inputs.validation_profile == 'phase2d_agent'
+        run: |
+          set -euo pipefail
+          if [[ -s "$AGENT_HARNESS_LOG" ]]; then
+            printf '\n$ phase2d-agent-harness\n' >> firmware/monitor.log
+            tee -a firmware/monitor.log < "$AGENT_HARNESS_LOG" > /dev/null
+          fi
 
       - name: Write hardware validation manifest
         if: always()
@@ -141,8 +268,26 @@ jobs:
           image = pathlib.Path(os.environ["BUILD_DIR"]) / "p4home_firmware.bin"
           dependency_lock = pathlib.Path("firmware/dependencies.lock")
           sdkconfig = pathlib.Path(os.environ["HARDWARE_SDKCONFIG"])
+          size_report_path = pathlib.Path(os.environ["SIZE_REPORT"])
+          harness_result_path = pathlib.Path(
+              os.environ.get("AGENT_HARNESS_RESULT_FILE", "")
+          )
+          harness_status_path = pathlib.Path(
+              os.environ.get("AGENT_HARNESS_STATUS_FILE", "")
+          )
           main_stack_prefix = "CONFIG_ESP_MAIN_TASK_STACK_SIZE="
           main_stack_size = None
+          size_layout = {}
+          if size_report_path.is_file():
+              size_report = json.loads(size_report_path.read_text(encoding="utf-8"))
+              size_layout = {
+                  section["name"]: {
+                      "total": section["total"],
+                      "used": section["used"],
+                      "free": section["free"],
+                  }
+                  for section in size_report.get("layout", [])
+              }
           if sdkconfig.is_file():
               for line in sdkconfig.read_text(encoding="utf-8").splitlines():
                   if line.startswith(main_stack_prefix):
@@ -158,6 +303,8 @@ jobs:
               "job": "flash-and-monitor",
               "serial_port": os.environ["SERIAL_PORT"],
               "monitor_seconds": int(os.environ["MONITOR_SECONDS"]),
+              "capture_seconds": int(os.environ["CAPTURE_SECONDS"]),
+              "validation_profile": os.environ["VALIDATION_PROFILE"],
               "log_file": "monitor.log",
               "app_image": image.name if image.is_file() else None,
               "app_size_bytes": image.stat().st_size if image.is_file() else None,
@@ -167,9 +314,20 @@ jobs:
                   else None
               ),
               "main_task_stack_size_bytes": main_stack_size,
+              "image_memory_layout": size_layout,
               "dependency_lock_sha256": (
                   hashlib.sha256(dependency_lock.read_bytes()).hexdigest()
                   if dependency_lock.is_file()
+                  else None
+              ),
+              "agent_harness_status": (
+                  harness_status_path.read_text(encoding="utf-8").strip()
+                  if harness_status_path.is_file()
+                  else None
+              ),
+              "agent_hardware_result": (
+                  json.loads(harness_result_path.read_text(encoding="utf-8"))
+                  if harness_result_path.is_file()
                   else None
               ),
           }

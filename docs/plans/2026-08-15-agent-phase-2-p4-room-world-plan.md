@@ -153,6 +153,18 @@ ESP-IDF v5.5.4 固件在将动作记录从内部 BSS 迁移到 PSRAM 后构建�
 据此，2C 的 host 与固件编译退出门禁满足，可以开始 2D。当前仍未接入真实 Device WebSocket 或
 执行实机连续动作、断线与性能门禁，不能把 Phase 2 描述为完成或实机通过。
 
+2026-08-19，2D 软件侧已新增 Agent TLS WebSocket server、稳定 per-device Runtime Hub 与 P4
+`agent_transport`，完成 Cat 产品入口经真实网络帧到 `world_service` 生命周期和 snapshot 的闭环。
+未鉴权请求在 upgrade 前拒绝；SPKI pin、Bearer/device id、16 KiB 限制、协议违规断开、握手超时、
+不可恢复错误重连和 HA fallback 均已实现。Node 全量 115/115、Python contract 42/42、hardware
+helper 4/4、world host 1/1 通过；默认与 Agent-enabled ESP-IDF 构建均成功且 app 分区剩余 54%。
+软件与门禁准备证据见
+[Phase 2D Real Transport Software & Hardware-Gate Preparation Evidence](../../evidence/agent-phase-2/phase-2d-real-transport.md)。
+
+自托管 workflow 的 `phase2d_agent` profile 会使用 runner 临时生成的 TLS/设备凭据执行实机 100 次
+Cat 动作、第 50 次后的主动重连与 full snapshot，并在关闭 Agent 后继续采集两小时。该 workflow
+尚未对当前变更执行，故 2D 和 Phase 2 仍为 `in_progress`，不得启动 Phase 3。
+
 ## 8. Phase 2 完成定义
 
 - [ ] 2A–2D 四个纵切的退出门禁全部通过；
