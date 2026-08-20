@@ -337,6 +337,47 @@ test("real WebSocket transport authenticates before upgrade and completes an act
   assert.deepEqual(stalledClose, { code: 1008, reason: "device handshake timeout" });
 });
 
+test("authenticated same-device reconnect replaces a half-open socket", async (t) => {
+  const hub = new DeviceRuntimeHub({
+    server: {
+      host: "127.0.0.1",
+      port: 0,
+      device_tokens: { [DEVICE_ID]: DEVICE_TOKEN },
+      allow_insecure_loopback_test: true,
+      max_connections: 1,
+    },
+    handshake_timeout_ms: 5_000,
+  });
+  const address = await hub.start();
+  t.after(async () => hub.close());
+
+  const connect = async (): Promise<WebSocket> => {
+    const socket = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, {
+      headers: {
+        Authorization: `Bearer ${DEVICE_TOKEN}`,
+        "X-P4-Device-ID": DEVICE_ID,
+      },
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", resolve);
+      socket.once("error", reject);
+    });
+    return socket;
+  };
+
+  const first = await connect();
+  t.after(() => first.terminate());
+  assert.equal(hub.server.connection_count, 1);
+
+  const replacement = await connect();
+  t.after(() => replacement.terminate());
+  await waitUntil(() => first.readyState === WebSocket.CLOSED);
+
+  assert.equal(replacement.readyState, WebSocket.OPEN);
+  assert.equal(hub.server.connection_count, 1);
+  assert.equal(hub.adapter_count, 1);
+});
+
 test("real transport refuses plaintext binding outside loopback", () => {
   assert.throws(
     () => new DeviceWebSocketServer({

@@ -35,7 +35,7 @@ static const char *TAG = "agent_transport";
 #define AGENT_LOCAL_FALLBACK_GRACE_MS 10000U
 
 #ifndef CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK
-#define CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK 8192
+#define CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK 12288
 #endif
 
 typedef struct {
@@ -398,6 +398,17 @@ static cJSON *agent_objects_json(const world_service_snapshot_t *snapshot,
         cJSON_AddItemToArray(objects, object);
     }
     return objects;
+}
+
+static cJSON *agent_capability_objects_json(void)
+{
+    /* Keep the ~1.5 KiB world snapshot out of agent_send_handshake()'s stack
+     * frame. Protocol v2 also sends a full snapshot immediately afterwards;
+     * placing both automatic objects in the same frame exhausted the original
+     * 8 KiB worker stack on real ESP32-P4 hardware. */
+    world_service_snapshot_t snapshot = {0};
+    world_service_get_snapshot(&snapshot);
+    return agent_objects_json(&snapshot, true);
 }
 
 static cJSON *agent_snapshot_payload(const char *reason)
@@ -1100,10 +1111,8 @@ static esp_err_t agent_send_handshake(void)
                              cJSON_CreateString(world_service_tool_text((world_action_tool_t)index)));
     }
     if (agent_uses_object_runtime()) {
-        world_service_snapshot_t snapshot = {0};
-        world_service_get_snapshot(&snapshot);
         cJSON_AddItemToObject(capabilities, "objects",
-                              agent_objects_json(&snapshot, true));
+                              agent_capability_objects_json());
     }
     cJSON *limits = cJSON_AddObjectToObject(capabilities, "limits");
     cJSON_AddNumberToObject(limits, "max_json_frame_bytes", AGENT_TRANSPORT_MAX_JSON_FRAME_BYTES);

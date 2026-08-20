@@ -146,6 +146,12 @@ jobs:
           grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
           echo "HARDWARE_SDKCONFIG=$HARDWARE_SDKCONFIG" >> "$GITHUB_ENV"
           echo "EXPECTED_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" >> "$GITHUB_ENV"
+          if [[ "${{ inputs.validation_profile }}" != "generic" ]]; then
+            EXPECTED_AGENT_TASK_STACK_SIZE="$(sed -n 's/^CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=//p' firmware/sdkconfig.defaults)"
+            test -n "$EXPECTED_AGENT_TASK_STACK_SIZE"
+            grep -qx "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=$EXPECTED_AGENT_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
+            echo "EXPECTED_AGENT_TASK_STACK_SIZE=$EXPECTED_AGENT_TASK_STACK_SIZE" >> "$GITHUB_ENV"
+          fi
 
       - name: Prepare ephemeral Agent profile
         if: inputs.validation_profile != 'generic'
@@ -197,6 +203,9 @@ jobs:
             -D SDKCONFIG="$HARDWARE_SDKCONFIG" \
             size --format json2 --output-file "$SIZE_REPORT"
           grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
+          if [[ "${{ inputs.validation_profile }}" != "generic" ]]; then
+            grep -qx "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=$EXPECTED_AGENT_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
+          fi
           git diff --exit-code -- firmware/dependencies.lock
 
       - name: Set up Node for Agent harness
@@ -290,7 +299,9 @@ jobs:
               os.environ.get("AGENT_HARNESS_STATUS_FILE", "")
           )
           main_stack_prefix = "CONFIG_ESP_MAIN_TASK_STACK_SIZE="
+          agent_stack_prefix = "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK="
           main_stack_size = None
+          agent_stack_size = None
           size_layout = {}
           if size_report_path.is_file():
               size_report = json.loads(size_report_path.read_text(encoding="utf-8"))
@@ -306,7 +317,8 @@ jobs:
               for line in sdkconfig.read_text(encoding="utf-8").splitlines():
                   if line.startswith(main_stack_prefix):
                       main_stack_size = int(line.removeprefix(main_stack_prefix))
-                      break
+                  elif line.startswith(agent_stack_prefix):
+                      agent_stack_size = int(line.removeprefix(agent_stack_prefix))
           manifest = {
               "schema_version": 1,
               "mode": "artifact-only",
@@ -328,6 +340,7 @@ jobs:
                   else None
               ),
               "main_task_stack_size_bytes": main_stack_size,
+              "agent_transport_task_stack_size_bytes": agent_stack_size,
               "image_memory_layout": size_layout,
               "dependency_lock_sha256": (
                   hashlib.sha256(dependency_lock.read_bytes()).hexdigest()

@@ -56,6 +56,11 @@ class Phase3DSimulatorHardwareGateContractTests(unittest.TestCase):
         self.assertNotIn("world_service_complete_active", request_handler)
         self.assertIn("AGENT_OBJECT_ACTION_RENDER_MS 250U", transport)
         self.assertIn("AGENT_LOCAL_FALLBACK_GRACE_MS 10000U", transport)
+        self.assertIn("agent_capability_objects_json", transport)
+        self.assertNotIn(
+            "world_service_snapshot_t snapshot = {0};\n        world_service_get_snapshot(&snapshot);\n        cJSON_AddItemToObject(capabilities",
+            transport,
+        )
         self.assertIn("agent_progress_action_queue();", worker)
         self.assertIn("agent_publish_world_disconnect_if_due();", worker)
         self.assertIn(
@@ -74,6 +79,7 @@ class Phase3DSimulatorHardwareGateContractTests(unittest.TestCase):
         harness = (
             ROOT / "agent/apps/device-harness/src/cli.ts"
         ).read_text(encoding="utf-8")
+        defaults = (ROOT / "firmware/sdkconfig.defaults").read_text(encoding="utf-8")
         self.assertIn("- phase3d_object", workflow)
         self.assertIn('echo "AGENT_PROTOCOL_VERSION=2"', workflow)
         self.assertIn('--protocol-version "$AGENT_PROTOCOL_VERSION"', workflow)
@@ -81,6 +87,12 @@ class Phase3DSimulatorHardwareGateContractTests(unittest.TestCase):
         self.assertIn(
             'protocol_version: profile === "phase3d_object" ? 2 : 1',
             harness,
+        )
+        self.assertIn("CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=12288", defaults)
+        self.assertIn("agent_transport_task_stack_size_bytes", workflow)
+        self.assertGreaterEqual(
+            workflow.count('if [[ "${{ inputs.validation_profile }}" != "generic" ]]; then'),
+            2,
         )
         for marker in (
             "VERIFY:phase3d:object_action_chain:PASS",

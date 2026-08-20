@@ -73,7 +73,7 @@ class AcceptedDeviceWebSocketConnection implements DeviceWebSocketConnection {
 
   public attach(socket: WebSocket): void {
     if (this.#socket !== null && this.#socket.readyState !== WebSocket.CLOSED) {
-      throw new Error("device WebSocket connection is already attached");
+      this.#socket.terminate();
     }
     this.#socket = socket;
     socket.on("message", (data, isBinary) => {
@@ -253,7 +253,7 @@ export class DeviceWebSocketServer {
         rejectUpgrade(socket, 401, "Unauthorized");
         return;
       }
-      if (this.#connections.has(deviceId) || this.#connections.size >= this.#maxConnections) {
+      if (!this.#connections.has(deviceId) && this.#connections.size >= this.#maxConnections) {
         rejectUpgrade(socket, 409, "Conflict");
         return;
       }
@@ -264,6 +264,10 @@ export class DeviceWebSocketServer {
           connection = new AcceptedDeviceWebSocketConnection();
           this.#deviceChannels.set(deviceId, connection);
         }
+        // A board reset can leave the previous TCP socket half-open until the
+        // kernel timeout expires. Valid credentials for the same paired
+        // device identity replace that stale socket; a different device still
+        // consumes a separate max-connections slot.
         connection.attach(webSocket);
         for (const listener of this.#listeners) {
           listener(deviceId, connection);

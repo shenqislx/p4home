@@ -41,7 +41,7 @@ config P4HOME_AGENT_PROTOCOL_VERSION
 config P4HOME_AGENT_TRANSPORT_TASK_STACK
     int "Agent transport worker stack bytes"
     range 6144 16384
-    default 8192
+    default 12288
     depends on P4HOME_AGENT_TRANSPORT_ENABLED
 
 endmenu

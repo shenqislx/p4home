@@ -90,7 +90,8 @@ manifest schema version 1 的必需字段：
 
 workflow 还写入 app image 文件名、字节数与 SHA-256；这些字段用于确认刷写镜像，不能
 代替 `git_sha` 与 run identity 检查。manifest 同时记录
-`main_task_stack_size_bytes`，用于确认私密全量配置没有覆盖仓库的栈安全基线；并记录
+`main_task_stack_size_bytes` 与 `agent_transport_task_stack_size_bytes`，用于确认私密全量配置
+没有覆盖仓库的主任务及 Agent worker 栈安全基线；并记录
 `dependency_lock_sha256`，用于确认 managed component 解析使用了仓库锁文件。构建后若
 `firmware/dependencies.lock` 被解析器改写，workflow 必须失败，不允许隐式组件升级进入硬件验证。
 Agent profile 还会写入无凭据的 `agent_harness_status` 与 `agent_hardware_result`；它们仍需和
