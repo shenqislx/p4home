@@ -63,11 +63,14 @@ class Phase3DSimulatorHardwareGateContractTests(unittest.TestCase):
         )
         self.assertIn("agent_progress_action_queue();", worker)
         self.assertIn("agent_publish_world_disconnect_if_due();", worker)
+        self.assertIn("if (s_agent.world_disconnect_deadline_ms == 0U)", transport)
+        self.assertIn("if (was_connected)", transport)
         self.assertIn(
             "!event->from_cache && agent_object_tool(event->tool)",
             transport,
         )
         self.assertIn("VERIFY:phase3d:device_object_cancel:PASS", transport)
+        self.assertIn("VERIFY:phase3d:device_agent_offline:PASS", transport)
 
     def test_hardware_profile_selects_protocol_v2_and_emits_strong_markers(self) -> None:
         workflow = (
@@ -108,6 +111,13 @@ class Phase3DSimulatorHardwareGateContractTests(unittest.TestCase):
         world = (ROOT / "firmware/components/world_service/world_service.c").read_text(
             encoding="utf-8"
         )
+        disconnect = world[
+            world.index("esp_err_t world_service_set_agent_connected") :
+            world.index("static bool world_apply_desired_locked")
+        ]
+        self.assertIn("world_release_character_occupancy_locked();", disconnect)
+        self.assertIn("s_world.snapshot.target_object_id[0] = '\\0';", disconnect)
+        self.assertIn("world_increment_version_locked();", disconnect)
         fallback = world[
             world.index("esp_err_t world_service_apply_local_fallback") :
             world.index("esp_err_t world_service_set_object_available")

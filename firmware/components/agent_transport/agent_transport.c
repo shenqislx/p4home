@@ -674,7 +674,12 @@ static bool agent_object_tool(world_action_tool_t tool)
 static void agent_schedule_world_disconnect(uint64_t now_ms)
 {
     taskENTER_CRITICAL(&s_agent.lock);
-    s_agent.world_disconnect_deadline_ms = now_ms + AGENT_LOCAL_FALLBACK_GRACE_MS;
+    /* Failed reconnect attempts can emit CLOSED/DISCONNECTED repeatedly. They
+     * must not extend a grace period that belongs to the original authenticated
+     * connection, otherwise local fallback can be postponed forever. */
+    if (s_agent.world_disconnect_deadline_ms == 0U) {
+        s_agent.world_disconnect_deadline_ms = now_ms + AGENT_LOCAL_FALLBACK_GRACE_MS;
+    }
     taskEXIT_CRITICAL(&s_agent.lock);
 }
 
@@ -699,7 +704,19 @@ static void agent_publish_world_disconnect_if_due(void)
     /* A successful handshake can race the worker after it consumes the due
      * deadline. Recheck the transport truth before publishing fallback. */
     if (due && !agent_connected()) {
-        (void)world_service_set_agent_connected(false);
+        world_service_snapshot_t snapshot = {0};
+        char released_target[WORLD_OBJECT_ID_MAX_BYTES + 1U] = {0};
+        world_service_get_snapshot(&snapshot);
+        snprintf(released_target, sizeof(released_target), "%s",
+                 snapshot.target_object_id);
+        esp_err_t result = world_service_set_agent_connected(false);
+        world_service_get_snapshot(&snapshot);
+        if (result == ESP_OK && released_target[0] != '\0' &&
+            snapshot.target_object_id[0] == '\0') {
+            ESP_LOGW(TAG,
+                     "VERIFY:phase3d:device_agent_offline:PASS released_target=%s state_version=%" PRIu32,
+                     released_target, snapshot.state_version);
+        }
     }
 }
 
@@ -1188,8 +1205,10 @@ static void agent_ws_event(void *handler_args, esp_event_base_t base,
     case WEBSOCKET_EVENT_DISCONNECTED:
     case WEBSOCKET_EVENT_CLOSED: {
         uint64_t disconnected_at_ms = agent_now_ms();
+        bool was_connected = false;
         taskENTER_CRITICAL(&s_agent.lock);
-        if (s_agent.connected) {
+        was_connected = s_agent.connected;
+        if (was_connected) {
             s_agent.last_disconnect_at_ms = disconnected_at_ms;
         }
         s_agent.socket_connected = false;
@@ -1204,7 +1223,9 @@ static void agent_ws_event(void *handler_args, esp_event_base_t base,
          * clears an object target before the automatic reconnect can publish
          * its snapshot, making reconnect reconciliation observe a state that
          * never came from either side of the protocol. */
-        agent_schedule_world_disconnect(disconnected_at_ms);
+        if (was_connected) {
+            agent_schedule_world_disconnect(disconnected_at_ms);
+        }
         break;
     }
     case WEBSOCKET_EVENT_DATA:

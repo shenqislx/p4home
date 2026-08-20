@@ -286,6 +286,11 @@ int main(void)
                                  WORLD_OBJECT_ANIMATION_CAT_SIT) == 0);
     CHECK(world_service_set_agent_connected(true) == ESP_OK);
     CHECK(world_service_set_agent_connected(false) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(!snapshot.agent_connected);
+    CHECK(snapshot.target_object_id[0] == '\0');
+    CHECK(snapshot.character_pose == WORLD_CHARACTER_POSE_STANDING);
+    CHECK(!snapshot_object(&snapshot, "living_room.sofa")->occupied);
     world_local_fallback_context_t fallback = {
         .ha_connected = true,
         .online_entities = 1U,

@@ -619,6 +619,19 @@ esp_err_t world_service_set_agent_connected(bool connected)
     }
     changed = s_world.snapshot.agent_connected != connected;
     s_world.snapshot.agent_connected = connected;
+    /* The caller publishes disconnected only after the transport grace period
+     * has expired. At that point the Agent no longer owns character placement,
+     * so release its object anchor in the same observable state transition.
+     * Deferring this to a later UI/HA refresh can leave an offline snapshot
+     * pinned to an occupied object indefinitely when no refresh is queued. */
+    if (!connected && s_world.snapshot.target_object_id[0] != '\0') {
+        world_release_character_occupancy_locked();
+        s_world.snapshot.target_object_id[0] = '\0';
+        s_world.snapshot.character_pose = WORLD_CHARACTER_POSE_STANDING;
+        s_world.snapshot.active_animation = WORLD_OBJECT_ANIMATION_NONE;
+        world_increment_version_locked();
+        changed = true;
+    }
     portEXIT_CRITICAL(&s_world_lock);
     if (changed) {
         world_notify_observer();

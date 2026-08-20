@@ -35,9 +35,10 @@ Phase 2 已完成并通过用户最终 review。Role Contract & Router、Cat Act
 Service、真实传输与实机门禁四个纵切均满足退出条件；Agent/P4 真实 Device WebSocket 已通过实机
 100 次动作、第 50 次后重连 snapshot、两小时 Agent 离线与资源/8 FPS artifact 判定。Phase 2 计划
 已归档。2026-08-20，用户已授权启动 Phase 3；3A Object Registry Contract、3B P4 Object Runtime
-与 3C Cat Object Event & Role Boundary 已完成。3D simulator/host 门禁已通过，当前等待最新提交的
-ESP32-P4 artifact 判定；对象级 Tool 仅加入 Cat RoleProfile，冻结的 Device Protocol v1 / Tool
-Schema v1 未修改。
+与 3C Cat Object Event & Role Boundary 已完成。3D 最终实机 run `32382940058` 已通过动作链、重连、
+取消、Agent 离线释放、HA/UI、资源与 8 FPS artifact 判定。2026-08-20 用户最终 review 通过，
+Phase 3 已完成并归档；对象级 Tool 仅加入 Cat RoleProfile，冻结的 Device Protocol v1 / Tool
+Schema v1 未修改。Phase 4 尚未启动，需用户另行明确授权。
 
 ## 工作规则
 

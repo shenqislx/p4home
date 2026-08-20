@@ -1,8 +1,10 @@
 # Agent Phase 3 — Object-level World Plan
 
-> Status: `in_progress`
+> Status: `completed`
 > Started: 2026-08-20
-> Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
+> Completed: 2026-08-20
+> Reviewed: 2026-08-20
+> Architecture: [P4 Local Agent Architecture](../../../p4-local-agent-architecture.md)
 > Depends on: Phase 2 complete
 
 ## 1. 目标
@@ -61,8 +63,8 @@
 只有 3C 退出门禁通过后开始：
 
 - [x] 在完整像素 simulator 验证对象锚点、朝向、姿态与动画绑定；
-- [ ] 通过真实 Device WebSocket 在 P4 实机完成 `go_to(living_room.sofa) → sit`；
-- [ ] 验证重连 snapshot、取消、占用冲突、Agent 离线、HA/UI 隔离与资源/8 FPS 回归；
+- [x] 通过真实 Device WebSocket 在 P4 实机完成 `go_to(living_room.sofa) → sit`；
+- [x] 验证重连 snapshot、取消、占用冲突、Agent 离线、HA/UI 隔离与资源/8 FPS 回归；
 - artifact 身份、强 marker 与无矛盾证据由 Codex 判定，workflow 绿色本身不代表通过。
 
 ## 7. 当前进度
@@ -72,12 +74,12 @@
 动作-动画精确映射；Node 24.19 strict typecheck、Agent 120/120、Python contract 48/48、C host
 1/1，以及 ESP-IDF 固件对象编译和 ELF 增量链接均通过。3A 初始实现的全量固件构建已通过；本轮
 全量重跑受沙箱进程枚举权限限制，详见
-[Phase 3A Object Registry Contract Evidence](../../evidence/agent-phase-3/phase-3a-object-registry.md)。
+[Phase 3A Object Registry Contract Evidence](../../../../evidence/agent-phase-3/phase-3a-object-registry.md)。
 3B 已完成 P4 权威对象 snapshot、四种对象动作、稳定错误、Device Protocol v2 / Tool Schema v2
 candidate，以及默认 v1、显式选择 v2 的 transport 门禁。3B 复审后，Schema 已补齐注册表映射、
 角色/对象状态不变量、逐动作结果与 retryable 约束。Agent 123/123、Python 54/54、C host 2/2、
 ASan/UBSan 2/2、ESP32-P4 默认与显式 v2 编译及最终 ELF 增量链接均通过；证据见
-[Phase 3B P4 Object Runtime Evidence](../../evidence/agent-phase-3/phase-3b-object-runtime.md)。据此 3B
+[Phase 3B P4 Object Runtime Evidence](../../../../evidence/agent-phase-3/phase-3b-object-runtime.md)。据此 3B
 退出门禁满足。3C 已增加只接受 `test.object_sit_target` 的前置策略，动作由策略固定派生为
 `go_to → sit`；Cat 只能从实时、无坐标 capability projection 确认该序列，Human/Robot 仍无对象
 Tool，用户原文也不能进入 Cat。两步 ToolCall 均有终态审计，第一步非 completed 时第二步不会发往
@@ -85,7 +87,7 @@ Tool，用户原文也不能进入 Cat。两步 ToolCall 均有终态审计，�
 strict typecheck、Agent 139/139 与 Python contract 54/54 通过。3C 复审进一步收紧 canonical capability
 字段/顺序，修复对账窗口取消状态和 Action 审计冲突遗留 pending ToolCall，并把非法 timeout 前移到
 策略/模型之前拒绝；证据见
-[Phase 3C Cat Object Event and Role Boundary Evidence](../../evidence/agent-phase-3/phase-3c-cat-object-boundary.md)。
+[Phase 3C Cat Object Event and Role Boundary Evidence](../../../../evidence/agent-phase-3/phase-3c-cat-object-boundary.md)。
 据此 3C 退出门禁满足，Device Protocol v2 / Tool Schema v2 已冻结，下一步进入 3D Simulator &
 Hardware Gate；v1 契约和默认 transport 选择保持不变。
 
@@ -96,13 +98,18 @@ binding、取消恢复与占用冲突。复审同时发现并修复两条此前�
 房间/对象状态矛盾。现在对象执行由 worker 推进并保留两个 8 FPS 帧；短暂传输中断先保留权威对象
 snapshot 10 秒供自动重连，超过窗口才让 local fallback 释放对象占用和 target。跨阶段复审还修复了
 fake-device 生命周期 `state_version/world.changed` 与 P4 不一致、幂等缓存重放误报强 marker、静态
-object-idle 每帧重复 invalidation。Phase 3D 专用 `phase3d_object` workflow/harness 已就绪，最新实机
-项在 artifact 判定前保持未完成。
+object-idle 每帧重复 invalidation。实机复审进一步发现失败重连会反复重置 10 秒宽限，导致 Agent
+离线 fallback 永不到期；现已改为只有已认证连接真正断开才启动一次宽限，并在到期时原子释放对象
+target/占用。最终 run `32382940058` 的 manifest 身份、动作链、重连 snapshot、取消、设备/UI 离线
+释放、HA READY、时间同步、资源和 240 秒 8 FPS 证据均通过，未见崩溃或栈/看门狗故障。Phase 3
+技术退出门禁已满足。2026-08-20 用户最终 review 通过，Phase 3 已完成并关闭；证据见
+[Phase 3D Simulator & Hardware Gate Evidence](../../../../evidence/agent-phase-3/phase-3d-simulator-hardware-gate.md)。
 
 ## 8. 完成定义
 
-- [ ] 模型不接触坐标即可稳定完成对象动作；
-- [ ] capabilities 与真实执行能力一致；
-- [ ] 对象级失败可被 Agent 正确观察；
-- [ ] 对象级能力只属于 Cat，跨角色越权测试通过；
-- [ ] 用户 review 通过后启动 Phase 4。
+- [x] 模型不接触坐标即可稳定完成对象动作；
+- [x] capabilities 与真实执行能力一致；
+- [x] 对象级失败可被 Agent 正确观察；
+- [x] 对象级能力只属于 Cat，跨角色越权测试通过；
+- [x] 用户最终 review 通过，Phase 3 关闭；
+- [ ] Phase 4 需用户另行明确授权后启动。
