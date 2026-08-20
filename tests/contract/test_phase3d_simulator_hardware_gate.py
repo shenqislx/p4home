@@ -108,6 +108,13 @@ class Phase3DSimulatorHardwareGateContractTests(unittest.TestCase):
         world = (ROOT / "firmware/components/world_service/world_service.c").read_text(
             encoding="utf-8"
         )
+        disconnect = world[
+            world.index("esp_err_t world_service_set_agent_connected") :
+            world.index("static bool world_apply_desired_locked")
+        ]
+        self.assertIn("world_release_character_occupancy_locked();", disconnect)
+        self.assertIn("s_world.snapshot.target_object_id[0] = '\\0';", disconnect)
+        self.assertIn("world_increment_version_locked();", disconnect)
         fallback = world[
             world.index("esp_err_t world_service_apply_local_fallback") :
             world.index("esp_err_t world_service_set_object_available")
