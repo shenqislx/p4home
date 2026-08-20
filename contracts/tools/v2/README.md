@@ -13,4 +13,6 @@ Tool Schema v2 preserves the five v1 room-level tools and adds four Cat-only obj
 
 `target_id` is a stable room-qualified object ID. Availability and supported actions come from the
 live v2 device capabilities; coordinates and animation names are never model-facing. Phase 3B
-defines and validates execution. Role exposure and Cat policy remain disabled until Phase 3C.
+defines and validates execution. Per-tool result schemas reject impossible object/action/pose
+combinations, exact registry state ordering is preserved, and object error retryability is part of
+the contract. Role exposure and Cat policy remain disabled until Phase 3C.

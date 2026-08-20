@@ -20,6 +20,13 @@
         "target_object_id": { "oneOf": [{ "$ref": "#/$defs/objectId" }, { "type": "null" }] },
         "pose": { "enum": ["standing", "sitting"] }
       },
+      "allOf": [
+        { "if": { "properties": { "target_object_id": { "type": "null" } }, "required": ["target_object_id"] }, "then": { "properties": { "pose": { "const": "standing" } } } },
+        { "if": { "properties": { "target_object_id": { "const": "living_room.sofa" } }, "required": ["target_object_id"] }, "then": { "properties": { "room_id": { "const": "living_room" } } } },
+        { "if": { "properties": { "target_object_id": { "const": "study.desk" } }, "required": ["target_object_id"] }, "then": { "properties": { "room_id": { "const": "study" }, "pose": { "const": "standing" } } } },
+        { "if": { "properties": { "target_object_id": { "const": "living_room.window" } }, "required": ["target_object_id"] }, "then": { "properties": { "room_id": { "const": "living_room" }, "pose": { "const": "standing" } } } },
+        { "if": { "properties": { "pose": { "const": "sitting" } }, "required": ["pose"] }, "then": { "properties": { "target_object_id": { "const": "living_room.sofa" } } } }
+      ],
       "additionalProperties": false
     },
     "objectCapability": {
@@ -33,6 +40,35 @@
       },
       "additionalProperties": false
     },
+    "sofaCapability": {
+      "allOf": [
+        { "$ref": "#/$defs/objectCapability" },
+        { "properties": { "object_id": { "const": "living_room.sofa" }, "room_id": { "const": "living_room" }, "supported_actions": { "const": ["go_to", "sit", "look_at", "interact"] } } }
+      ]
+    },
+    "deskCapability": {
+      "allOf": [
+        { "$ref": "#/$defs/objectCapability" },
+        { "properties": { "object_id": { "const": "study.desk" }, "room_id": { "const": "study" }, "supported_actions": { "const": ["go_to", "look_at", "interact"] } } }
+      ]
+    },
+    "windowCapability": {
+      "allOf": [
+        { "$ref": "#/$defs/objectCapability" },
+        { "properties": { "object_id": { "const": "living_room.window" }, "room_id": { "const": "living_room" }, "supported_actions": { "const": ["go_to", "look_at", "interact"] } } }
+      ]
+    },
+    "capabilityArray": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        { "$ref": "#/$defs/sofaCapability" },
+        { "$ref": "#/$defs/deskCapability" },
+        { "$ref": "#/$defs/windowCapability" }
+      ],
+      "items": false
+    },
     "objectState": {
       "type": "object",
       "required": ["object_id", "room_id", "available", "occupied"],
@@ -44,11 +80,34 @@
       },
       "additionalProperties": false
     },
+    "sofaState": {
+      "allOf": [
+        { "$ref": "#/$defs/objectState" },
+        { "properties": { "object_id": { "const": "living_room.sofa" }, "room_id": { "const": "living_room" } } }
+      ]
+    },
+    "deskState": {
+      "allOf": [
+        { "$ref": "#/$defs/objectState" },
+        { "properties": { "object_id": { "const": "study.desk" }, "room_id": { "const": "study" } } }
+      ]
+    },
+    "windowState": {
+      "allOf": [
+        { "$ref": "#/$defs/objectState" },
+        { "properties": { "object_id": { "const": "living_room.window" }, "room_id": { "const": "living_room" } } }
+      ]
+    },
     "objectArray": {
       "type": "array",
       "minItems": 3,
       "maxItems": 3,
-      "items": { "$ref": "#/$defs/objectState" }
+      "prefixItems": [
+        { "$ref": "#/$defs/sofaState" },
+        { "$ref": "#/$defs/deskState" },
+        { "$ref": "#/$defs/windowState" }
+      ],
+      "items": false
     },
     "deviceHello": {
       "type": "object",
@@ -66,9 +125,9 @@
       "required": ["selected_protocol_version", "rooms", "actions", "objects", "limits"],
       "properties": {
         "selected_protocol_version": { "const": 2 },
-        "rooms": { "type": "array", "minItems": 6, "maxItems": 6, "uniqueItems": true, "items": { "$ref": "#/$defs/roomId" } },
-        "actions": { "type": "array", "minItems": 9, "maxItems": 9, "uniqueItems": true, "items": { "$ref": "#/$defs/toolName" } },
-        "objects": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "$ref": "#/$defs/objectCapability" } },
+        "rooms": { "type": "array", "const": ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"] },
+        "actions": { "type": "array", "const": ["character.get_state", "character.go_to_room", "character.set_activity", "character.say", "world.get_snapshot", "character.go_to", "character.sit", "character.look_at", "character.interact"] },
+        "objects": { "$ref": "#/$defs/capabilityArray" },
         "limits": {
           "type": "object",
           "required": ["max_json_frame_bytes", "action_queue_capacity", "say_text_max_chars", "action_timeout_min_ms", "action_timeout_max_ms", "idempotency_retention_ms"],
@@ -165,19 +224,27 @@
     "sitObjectResult": {
       "allOf": [
         { "$ref": "#/$defs/objectActionResult" },
-        { "properties": { "action": { "const": "sit" }, "pose": { "const": "sitting" } } }
+        { "properties": { "object_id": { "const": "living_room.sofa" }, "action": { "const": "sit" }, "pose": { "const": "sitting" } } }
       ]
     },
     "lookAtObjectResult": {
       "allOf": [
         { "$ref": "#/$defs/objectActionResult" },
-        { "properties": { "action": { "const": "look_at" } } }
+        { "properties": { "action": { "const": "look_at" } } },
+        { "oneOf": [
+          { "properties": { "object_id": { "const": "living_room.sofa" } } },
+          { "properties": { "object_id": { "enum": ["study.desk", "living_room.window"] }, "pose": { "const": "standing" } } }
+        ] }
       ]
     },
     "interactObjectResult": {
       "allOf": [
         { "$ref": "#/$defs/objectActionResult" },
-        { "properties": { "action": { "const": "interact" } } }
+        { "properties": { "action": { "const": "interact" } } },
+        { "oneOf": [
+          { "properties": { "object_id": { "const": "living_room.sofa" } } },
+          { "properties": { "object_id": { "enum": ["study.desk", "living_room.window"] }, "pose": { "const": "standing" } } }
+        ] }
       ]
     },
     "actionCompleted": {
@@ -225,6 +292,10 @@
         "retryable": { "type": "boolean" },
         "details": { "type": "object" }
       },
+      "allOf": [
+        { "if": { "properties": { "code": { "enum": ["OBJECT_UNAVAILABLE", "OBJECT_OCCUPIED"] } }, "required": ["code"] }, "then": { "properties": { "retryable": { "const": true } } } },
+        { "if": { "properties": { "code": { "enum": ["UNKNOWN_OBJECT", "UNSUPPORTED_OBJECT_ACTION", "OBJECT_NOT_REACHED"] } }, "required": ["code"] }, "then": { "properties": { "retryable": { "const": false } } } }
+      ],
       "additionalProperties": false
     },
     "actionFailed": {

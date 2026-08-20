@@ -13,6 +13,11 @@ queue, deadline, idempotency, cancellation, resync and security rules while addi
 - stable `UNKNOWN_OBJECT`, `UNSUPPORTED_OBJECT_ACTION`, `OBJECT_UNAVAILABLE`,
   `OBJECT_OCCUPIED` and `OBJECT_NOT_REACHED` errors.
 
+The schema fixes object order, room ownership and supported actions to World Object Registry v1.
+Character target/room/pose combinations are validated, and the runtime boundary additionally
+rejects snapshots whose target is unavailable or whose occupancy contradicts the character pose.
+Transient object errors are retryable; permanent object contract errors are not.
+
 Coordinates and animation bindings remain device-internal execution metadata and are forbidden in
 protocol payloads. A deployment selects v2 explicitly; the existing v1 transport mode continues to
 publish exactly the frozen five room-level actions and v1 snapshot shape.

@@ -17,24 +17,29 @@ Agent 或 UI 不提供目标坐标。
 snapshot 只发布稳定对象 ID、房间、支持动作、实时可用性/占用与角色姿态，不包含 anchor、坐标、
 朝向或动画名。`agent_transport` 默认仍选择 v1；只有显式配置 v2 才发布对象 capabilities、解析对象
 动作和发送对象 snapshot。对象请求拒绝 `origin=user`，现有 RoleProfile 也尚未获得对象 Tool，角色
-接入留在 3C。
+接入留在 3C。复审后，原始 JSON Schema 也会独立约束注册表顺序、房间归属、支持动作、目标/姿态、
+对象动作结果和错误 retryable 语义；不会只依赖 TypeScript 辅助校验器阻止漂移。
 
 ## 确定性场景
 
 独立 host runtime 覆盖：未知对象、不支持 `sit` 的 desk、不可用 window、被占用 window、未到达
 对象、四种成功动作、动作-动画精确映射、坐下占用、移动释放占用、执行中取消、deadline、重复
-action id、action id 参数冲突，以及对象在运行中变为不可用/被占用后的权威状态回收。
+action id、action id 参数冲突，以及对象在排队后或动作启动后变为不可用/被占用时的三阶段重验与
+权威状态回收。host 二进制同时通过 AddressSanitizer 与 UndefinedBehaviorSanitizer。
 
 ## 验证结果
 
 | 检查 | 结果 |
 |---|---:|
 | Node 24.19 TypeScript strict typecheck | 通过 |
-| Agent 全量确定性测试 | 122/122 |
-| Device Protocol v2 / Tool Schema v2 AJV gate | 6 valid / 5 invalid / 9 tools |
-| Python contract tests | 53/53 |
+| Agent 全量确定性测试 | 123/123 |
+| Device Protocol v2 AJV gate | 6 valid / 9 invalid messages |
+| Tool Schema v2 AJV gate | 4 valid / 7 invalid results / 9 tools |
+| Python contract tests | 54/54 |
 | `-Wall -Wextra -Werror` host tests | 2/2 |
+| ASan + UBSan host tests | 2/2 |
 | ESP-IDF world_service + agent_transport RISC-V 对象编译 | 通过 |
+| 显式 Device Protocol v2 agent_transport RISC-V 编译 | 通过 |
 | ESP-IDF 最终 ELF 增量链接 | 通过 |
 
 当前沙箱仍禁止 ESP-IDF component manager 通过 `psutil` 枚举系统进程，因此没有重复运行全量配置；

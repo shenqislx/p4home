@@ -1,0 +1,43 @@
+[
+  {
+    "schema_version": 2,
+    "tool_call_id": "tool-state-001",
+    "name": "character.get_state",
+    "status": "success",
+    "result": { "room_id": "study", "activity": "idle", "speaking": false, "active_action_id": null, "target_object_id": "study.desk", "pose": "standing" },
+    "error": null
+  },
+  {
+    "schema_version": 2,
+    "tool_call_id": "tool-snapshot-001",
+    "name": "world.get_snapshot",
+    "status": "success",
+    "result": {
+      "state_version": 7,
+      "observed_at_ms": 1787616000007,
+      "character": { "room_id": "living_room", "activity": "idle", "speaking": false, "active_action_id": null, "target_object_id": "living_room.sofa", "pose": "sitting" },
+      "objects": [
+        { "object_id": "living_room.sofa", "room_id": "living_room", "available": true, "occupied": true },
+        { "object_id": "study.desk", "room_id": "study", "available": true, "occupied": false },
+        { "object_id": "living_room.window", "room_id": "living_room", "available": true, "occupied": false }
+      ]
+    },
+    "error": null
+  },
+  {
+    "schema_version": 2,
+    "tool_call_id": "tool-sit-001",
+    "name": "character.sit",
+    "status": "success",
+    "result": { "object_id": "living_room.sofa", "action": "sit", "pose": "sitting" },
+    "error": null
+  },
+  {
+    "schema_version": 2,
+    "tool_call_id": "tool-unavailable-001",
+    "name": "character.go_to",
+    "status": "error",
+    "result": null,
+    "error": { "code": "OBJECT_UNAVAILABLE", "message": "object unavailable", "retryable": true }
+  }
+]

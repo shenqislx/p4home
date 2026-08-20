@@ -65,6 +65,11 @@ interface InvalidFixture {
   readonly message: unknown;
 }
 
+interface InvalidToolResultFixture {
+  readonly name: string;
+  readonly result: unknown;
+}
+
 export interface ObjectRuntimeDeviceMessage {
   readonly protocol_version: 2;
   readonly message_id: string;
@@ -77,12 +82,23 @@ export interface ObjectRuntimeDeviceMessage {
   readonly payload: Record<string, unknown>;
 }
 
+export interface ObjectRuntimeToolResult {
+  readonly schema_version: 2;
+  readonly tool_call_id: string;
+  readonly name: string;
+  readonly status: "success" | "error";
+  readonly result: Record<string, unknown> | null;
+  readonly error: Record<string, unknown> | null;
+}
+
 export interface ObjectRuntimeContractReport {
   readonly protocolVersion: 2;
   readonly toolSchemaVersion: 2;
   readonly messageTypes: 14;
   readonly validMessages: number;
   readonly invalidMessages: number;
+  readonly validToolResults: number;
+  readonly invalidToolResults: number;
   readonly tools: 9;
   readonly objectActions: 4;
 }
@@ -122,6 +138,7 @@ function createAjv(): Ajv2020 {
 }
 
 let objectRuntimeMessageValidator: ValidateFunction | undefined;
+let objectRuntimeToolResultValidator: ValidateFunction | undefined;
 
 function getObjectRuntimeMessageValidator(): ValidateFunction {
   if (objectRuntimeMessageValidator !== undefined) {
@@ -135,6 +152,15 @@ function getObjectRuntimeMessageValidator(): ValidateFunction {
     readJson<AnySchema>(`${DEVICE_V2_ROOT}/message.schema.json`),
   );
   return objectRuntimeMessageValidator;
+}
+
+function getObjectRuntimeToolResultValidator(): ValidateFunction {
+  if (objectRuntimeToolResultValidator === undefined) {
+    objectRuntimeToolResultValidator = createAjv().compile(
+      readJson<AnySchema>(`${TOOLS_V2_ROOT}/tool-result.schema.json`),
+    );
+  }
+  return objectRuntimeToolResultValidator;
 }
 
 function assertObjectList(
@@ -157,16 +183,57 @@ function assertObjectList(
   }
 }
 
+function assertCharacterSemantics(character: unknown): void {
+  const registry = readJson<ObjectRegistry>(`${WORLD_ROOT}/object-registry.json`);
+  const actual = character as Record<string, unknown>;
+  const targetId = actual.target_object_id;
+  if (targetId === null) {
+    if (actual.pose !== "standing") {
+      throw new ObjectRuntimeContractError("a character without a target must be standing");
+    }
+    return;
+  }
+  const target = registry.objects.find((object) => object.object_id === targetId);
+  if (target === undefined || actual.room_id !== target.room_id) {
+    throw new ObjectRuntimeContractError("character target and room drifted from the registry");
+  }
+  if (actual.pose === "sitting" && !target.supported_actions.includes("sit")) {
+    throw new ObjectRuntimeContractError("character is sitting at an object without sit support");
+  }
+}
+
+function assertRuntimeSnapshot(payload: Record<string, unknown>): void {
+  assertObjectList(payload.objects, false);
+  assertCharacterSemantics(payload.character);
+  const character = payload.character as Record<string, unknown>;
+  const targetId = character.target_object_id;
+  if (targetId === null) {
+    return;
+  }
+  const objects = payload.objects as readonly Record<string, unknown>[];
+  const target = objects.find((object) => object.object_id === targetId);
+  const sitting = character.pose === "sitting";
+  if (target?.available !== true) {
+    throw new ObjectRuntimeContractError("character target must remain available");
+  }
+  if (target.occupied !== sitting) {
+    throw new ObjectRuntimeContractError(
+      "target occupancy must match the authoritative character pose",
+    );
+  }
+}
+
 function assertMessageSemantics(message: ObjectRuntimeDeviceMessage): void {
   const payload = message.payload;
   if (message.type === "device.capabilities") {
     assertObjectList(payload.objects, true);
   } else if (message.type === "world.snapshot" || message.type === "world.changed") {
-    assertObjectList(payload.objects, false);
-  } else if (message.type === "action.completed" &&
-             payload.tool === "world.get_snapshot") {
+    assertRuntimeSnapshot(payload);
+  } else if (message.type === "action.completed" && payload.tool === "world.get_snapshot") {
     const result = payload.result as Record<string, unknown> | undefined;
-    assertObjectList(result?.objects, false);
+    assertRuntimeSnapshot(result ?? {});
+  } else if (message.type === "action.completed" && payload.tool === "character.get_state") {
+    assertCharacterSemantics(payload.result);
   }
 }
 
@@ -181,6 +248,24 @@ export function validateObjectRuntimeDeviceMessage<T extends ObjectRuntimeDevice
   }
   const cloned = structuredClone(message) as T;
   assertMessageSemantics(cloned);
+  return cloned;
+}
+
+export function validateObjectRuntimeToolResult<T extends ObjectRuntimeToolResult>(
+  result: unknown,
+): T {
+  const validate = getObjectRuntimeToolResultValidator();
+  if (!validate(result)) {
+    throw new ObjectRuntimeContractError(
+      `Tool Schema v2 result: ${formatErrors(validate.errors)}`,
+    );
+  }
+  const cloned = structuredClone(result) as T;
+  if (cloned.status === "success" && cloned.name === "world.get_snapshot") {
+    assertRuntimeSnapshot(cloned.result ?? {});
+  } else if (cloned.status === "success" && cloned.name === "character.get_state") {
+    assertCharacterSemantics(cloned.result);
+  }
   return cloned;
 }
 
@@ -207,6 +292,12 @@ export function validateObjectRuntimeContracts(): ObjectRuntimeContractReport {
   const invalidMessages = readJson<InvalidFixture[]>(
     `${DEVICE_V2_ROOT}/examples/invalid/object-runtime.json`,
   );
+  const validToolResults = readJson<unknown[]>(
+    `${TOOLS_V2_ROOT}/examples/valid/results.json`,
+  );
+  const invalidToolResults = readJson<InvalidToolResultFixture[]>(
+    `${TOOLS_V2_ROOT}/examples/invalid/results.json`,
+  );
   for (const [index, message] of validMessages.entries()) {
     try {
       validateObjectRuntimeDeviceMessage(message);
@@ -228,6 +319,30 @@ export function validateObjectRuntimeContracts(): ObjectRuntimeContractReport {
     if (fixture.name.trim().length === 0 || !rejected) {
       throw new ObjectRuntimeContractError(
         `invalid v2 fixture unexpectedly passed: ${fixture.name}`,
+      );
+    }
+  }
+  for (const [index, result] of validToolResults.entries()) {
+    try {
+      validateObjectRuntimeToolResult(result);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new ObjectRuntimeContractError(`valid v2 tool result ${index} failed: ${detail}`);
+    }
+  }
+  for (const fixture of invalidToolResults) {
+    let rejected = false;
+    try {
+      validateObjectRuntimeToolResult(fixture.result);
+    } catch (error) {
+      if (!(error instanceof ObjectRuntimeContractError)) {
+        throw error;
+      }
+      rejected = true;
+    }
+    if (fixture.name.trim().length === 0 || !rejected) {
+      throw new ObjectRuntimeContractError(
+        `invalid v2 tool result unexpectedly passed: ${fixture.name}`,
       );
     }
   }
@@ -262,7 +377,7 @@ export function validateObjectRuntimeContracts(): ObjectRuntimeContractReport {
       }
     }
   }
-  ajv.compile(readJson<AnySchema>(`${TOOLS_V2_ROOT}/tool-result.schema.json`));
+  getObjectRuntimeToolResultValidator();
 
   const capabilities = (validMessages.find((message) =>
     (message as { type?: unknown }).type === "device.capabilities") as {
@@ -292,6 +407,8 @@ export function validateObjectRuntimeContracts(): ObjectRuntimeContractReport {
     messageTypes: 14,
     validMessages: validMessages.length,
     invalidMessages: invalidMessages.length,
+    validToolResults: validToolResults.length,
+    invalidToolResults: invalidToolResults.length,
     tools: 9,
     objectActions: 4,
   };

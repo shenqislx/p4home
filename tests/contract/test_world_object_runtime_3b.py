@@ -96,6 +96,45 @@ class WorldObjectRuntimePhase3BContractTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, model_contract)
 
+    def test_v2_schemas_encode_registry_order_and_runtime_invariants(self) -> None:
+        payloads = json.loads(
+            (
+                ROOT
+                / "contracts/device-protocol/v2/messages/payloads.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        tool_results = json.loads(
+            (ROOT / "contracts/tools/v2/tool-result.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        expected_state_refs = [
+            {"$ref": "#/$defs/sofaState"},
+            {"$ref": "#/$defs/deskState"},
+            {"$ref": "#/$defs/windowState"},
+        ]
+        self.assertEqual(
+            expected_state_refs, payloads["$defs"]["objectArray"]["prefixItems"]
+        )
+        self.assertEqual(
+            expected_state_refs,
+            tool_results["$defs"]["objectArray"]["prefixItems"],
+        )
+        self.assertFalse(payloads["$defs"]["objectArray"]["items"])
+        self.assertFalse(tool_results["$defs"]["objectArray"]["items"])
+        self.assertEqual(
+            "living_room.sofa",
+            payloads["$defs"]["sitObjectResult"]["allOf"][1]["properties"][
+                "object_id"
+            ]["const"],
+        )
+        self.assertEqual(
+            "living_room.sofa",
+            tool_results["$defs"]["sitObjectResult"]["allOf"][1][
+                "properties"
+            ]["object_id"]["const"],
+        )
+
     def test_world_runtime_exposes_authoritative_object_state_and_errors(self) -> None:
         header = WORLD_HEADER.read_text(encoding="utf-8")
         source = WORLD_SOURCE.read_text(encoding="utf-8")

@@ -208,6 +208,34 @@ int main(void)
     CHECK(event.status == WORLD_ACTION_STATUS_FAILED);
     CHECK(event.error == WORLD_ACTION_ERROR_DEADLINE_EXCEEDED);
 
+    world_action_request_t queued_unavailable = object_request(
+        "object-queued-unavailable", WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
+        "living_room.window");
+    CHECK(world_service_submit(&queued_unavailable, &event) == ESP_OK);
+    CHECK(event.status == WORLD_ACTION_STATUS_ACCEPTED);
+    CHECK(world_service_set_object_available("living_room.window", false) == ESP_OK);
+    CHECK(world_service_start_next(&event) == ESP_OK);
+    CHECK(event.status == WORLD_ACTION_STATUS_FAILED);
+    CHECK(event.error == WORLD_ACTION_ERROR_OBJECT_UNAVAILABLE);
+    CHECK(event.retryable);
+    CHECK(world_service_set_object_available("living_room.window", true) == ESP_OK);
+
+    world_action_request_t active_occupied = object_request(
+        "object-active-occupied", WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
+        "living_room.window");
+    CHECK(world_service_submit(&active_occupied, &event) == ESP_OK);
+    CHECK(world_service_start_next(&event) == ESP_OK);
+    CHECK(event.status == WORLD_ACTION_STATUS_STARTED);
+    CHECK(world_service_set_object_occupied("living_room.window", true) == ESP_OK);
+    CHECK(world_service_complete_active(&event) == ESP_OK);
+    CHECK(event.status == WORLD_ACTION_STATUS_FAILED);
+    CHECK(event.error == WORLD_ACTION_ERROR_OBJECT_OCCUPIED);
+    CHECK(event.retryable);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.active_animation == WORLD_OBJECT_ANIMATION_NONE);
+    CHECK(strcmp(snapshot.target_object_id, "study.desk") == 0);
+    CHECK(world_service_set_object_occupied("living_room.window", false) == ESP_OK);
+
     CHECK(world_service_set_object_occupied("study.desk", true) == ESP_OK);
     world_service_get_snapshot(&snapshot);
     CHECK(snapshot.target_object_id[0] == '\0');
@@ -224,6 +252,27 @@ int main(void)
     CHECK(snapshot.character_pose == WORLD_CHARACTER_POSE_STANDING);
     CHECK(!snapshot_object(&snapshot, "study.desk")->available);
     CHECK(world_service_set_object_available("study.desk", true) == ESP_OK);
+
+    world_action_request_t go_sofa_again = object_request(
+        "object-go-sofa-again", WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
+        "living_room.sofa");
+    CHECK(complete_object_action(&go_sofa_again, &completed,
+                                 WORLD_OBJECT_ANIMATION_CAT_WALK) == 0);
+    world_action_request_t active_sit_unavailable = object_request(
+        "object-active-sit-unavailable", WORLD_ACTION_CHARACTER_SIT,
+        "living_room.sofa");
+    CHECK(world_service_submit(&active_sit_unavailable, &event) == ESP_OK);
+    CHECK(world_service_start_next(&event) == ESP_OK);
+    CHECK(event.status == WORLD_ACTION_STATUS_STARTED);
+    CHECK(world_service_set_object_available("living_room.sofa", false) == ESP_OK);
+    CHECK(world_service_complete_active(&event) == ESP_OK);
+    CHECK(event.status == WORLD_ACTION_STATUS_FAILED);
+    CHECK(event.error == WORLD_ACTION_ERROR_OBJECT_UNAVAILABLE);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.target_object_id[0] == '\0');
+    CHECK(snapshot.character_pose == WORLD_CHARACTER_POSE_STANDING);
+    CHECK(!snapshot_object(&snapshot, "living_room.sofa")->occupied);
+    CHECK(world_service_set_object_available("living_room.sofa", true) == ESP_OK);
 
     CHECK(strcmp(world_service_tool_text(WORLD_ACTION_CHARACTER_GO_TO_OBJECT),
                  "character.go_to") == 0);

@@ -74,8 +74,9 @@
 全量重跑受沙箱进程枚举权限限制，详见
 [Phase 3A Object Registry Contract Evidence](../../evidence/agent-phase-3/phase-3a-object-registry.md)。
 3B 已完成 P4 权威对象 snapshot、四种对象动作、稳定错误、Device Protocol v2 / Tool Schema v2
-candidate，以及默认 v1、显式选择 v2 的 transport 门禁。Agent 122/122、Python 53/53、C host
-2/2、ESP32-P4 变更组件编译与最终 ELF 增量链接均通过；证据见
+candidate，以及默认 v1、显式选择 v2 的 transport 门禁。3B 复审后，Schema 已补齐注册表映射、
+角色/对象状态不变量、逐动作结果与 retryable 约束。Agent 123/123、Python 54/54、C host 2/2、
+ASan/UBSan 2/2、ESP32-P4 默认与显式 v2 编译及最终 ELF 增量链接均通过；证据见
 [Phase 3B P4 Object Runtime Evidence](../../evidence/agent-phase-3/phase-3b-object-runtime.md)。据此 3B
 退出门禁满足，下一步进入 3C Cat Object Event & Role Boundary；对象 Tool 尚未加入任何 RoleProfile，
 v1 契约保持冻结，v2 在 3C 完成端到端审计前仍为 candidate。

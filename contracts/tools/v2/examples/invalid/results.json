@@ -1,0 +1,97 @@
+[
+  {
+    "name": "sit result names an unsupported object",
+    "result": {
+      "schema_version": 2,
+      "tool_call_id": "invalid-sit-desk",
+      "name": "character.sit",
+      "status": "success",
+      "result": { "object_id": "study.desk", "action": "sit", "pose": "sitting" },
+      "error": null
+    }
+  },
+  {
+    "name": "character target room mismatches registry",
+    "result": {
+      "schema_version": 2,
+      "tool_call_id": "invalid-target-room",
+      "name": "character.get_state",
+      "status": "success",
+      "result": { "room_id": "living_room", "activity": "idle", "speaking": false, "active_action_id": null, "target_object_id": "study.desk", "pose": "standing" },
+      "error": null
+    }
+  },
+  {
+    "name": "snapshot retains an unavailable target",
+    "result": {
+      "schema_version": 2,
+      "tool_call_id": "invalid-unavailable-target",
+      "name": "world.get_snapshot",
+      "status": "success",
+      "result": {
+        "state_version": 8,
+        "observed_at_ms": 1787616000008,
+        "character": { "room_id": "living_room", "activity": "idle", "speaking": false, "active_action_id": null, "target_object_id": "living_room.sofa", "pose": "standing" },
+        "objects": [
+          { "object_id": "living_room.sofa", "room_id": "living_room", "available": false, "occupied": false },
+          { "object_id": "study.desk", "room_id": "study", "available": true, "occupied": false },
+          { "object_id": "living_room.window", "room_id": "living_room", "available": true, "occupied": false }
+        ]
+      },
+      "error": null
+    }
+  },
+  {
+    "name": "standing target is reported occupied",
+    "result": {
+      "schema_version": 2,
+      "tool_call_id": "invalid-standing-occupied",
+      "name": "world.get_snapshot",
+      "status": "success",
+      "result": {
+        "state_version": 9,
+        "observed_at_ms": 1787616000009,
+        "character": { "room_id": "living_room", "activity": "idle", "speaking": false, "active_action_id": null, "target_object_id": "living_room.sofa", "pose": "standing" },
+        "objects": [
+          { "object_id": "living_room.sofa", "room_id": "living_room", "available": true, "occupied": true },
+          { "object_id": "study.desk", "room_id": "study", "available": true, "occupied": false },
+          { "object_id": "living_room.window", "room_id": "living_room", "available": true, "occupied": false }
+        ]
+      },
+      "error": null
+    }
+  },
+  {
+    "name": "permanent object error is marked retryable",
+    "result": {
+      "schema_version": 2,
+      "tool_call_id": "invalid-permanent-retry",
+      "name": "character.go_to",
+      "status": "error",
+      "result": null,
+      "error": { "code": "UNKNOWN_OBJECT", "message": "unknown object", "retryable": true }
+    }
+  },
+  {
+    "name": "transient object error is marked non-retryable",
+    "result": {
+      "schema_version": 2,
+      "tool_call_id": "invalid-transient-retry",
+      "name": "character.go_to",
+      "status": "error",
+      "result": null,
+      "error": { "code": "OBJECT_OCCUPIED", "message": "object occupied", "retryable": false }
+    }
+  },
+  {
+    "name": "non-seat interaction reports a sitting pose",
+    "result": {
+      "schema_version": 2,
+      "tool_call_id": "invalid-desk-sitting",
+      "name": "character.interact",
+      "status": "success",
+      "result": { "object_id": "study.desk", "action": "interact", "pose": "sitting" },
+      "error": null
+    }
+  }
+]
