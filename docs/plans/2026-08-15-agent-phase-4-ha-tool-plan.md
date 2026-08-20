@@ -59,7 +59,8 @@ Interaction 可以产生相互隔离的 Human 与 Robot Run，并由确定性 Re
 
 4A 实现与本地退出门禁已完成，证据见
 [Phase 4A HA Contract & Credential Boundary](../../evidence/agent-phase-4/phase-4a-ha-contract-credential.md)。
-当前停在 4A review gate；在用户明确通过前不得开始 4B。
+2026-08-21 已完成代码 review 并修复首事件/快照竞态、旧状态残留、REST 重定向、公开 policy
+泄漏、投影类型混淆和文件有界读取等问题。当前仍停在 4A review gate；在用户明确通过前不得开始 4B。
 
 ## 5. 纵切 4B — Read-only Robot HA Tool
 

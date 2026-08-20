@@ -58,45 +58,48 @@ async function readBoundedJson(response: Response): Promise<unknown> {
 function safeAttribute(
   name: RobotHaProjectedAttribute,
   value: unknown,
-): string | number | boolean | null | undefined {
-  if (value === null || typeof value === "boolean") {
-    return value;
+): string | number | null | undefined {
+  if (value === null) {
+    return null;
   }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) {
-      return undefined;
-    }
-    if (name === "brightness" && (!Number.isInteger(value) || value < 0 || value > 255)) {
-      return undefined;
-    }
-    if (name === "color_temp_kelvin" && (value < 1_000 || value > 20_000)) {
-      return undefined;
-    }
-    if (
-      (name === "current_temperature" || name === "temperature")
-      && (value < -100 || value > 100)
-    ) {
-      return undefined;
-    }
-    return value;
+  switch (name) {
+    case "brightness":
+      return typeof value === "number"
+        && Number.isInteger(value)
+        && value >= 0
+        && value <= 255
+        ? value
+        : undefined;
+    case "color_temp_kelvin":
+      return typeof value === "number"
+        && Number.isFinite(value)
+        && value >= 1_000
+        && value <= 20_000
+        ? value
+        : undefined;
+    case "current_temperature":
+    case "temperature":
+      return typeof value === "number"
+        && Number.isFinite(value)
+        && value >= -100
+        && value <= 100
+        ? value
+        : undefined;
+    case "hvac_action":
+      return typeof value === "string"
+        && ["off", "heating", "cooling", "drying", "idle", "fan"].includes(value)
+        ? value
+        : undefined;
+    case "device_class":
+      return typeof value === "string" && /^[a-z0-9_]{1,32}$/.test(value)
+        ? value
+        : undefined;
+    case "unit_of_measurement":
+      return typeof value === "string"
+        && ["°C", "°F", "%", "ppm", "lx", "W", "kW", "V", "A", "Hz"].includes(value)
+        ? value
+        : undefined;
   }
-  if (typeof value !== "string" || value.length > 64 || /[\u0000-\u001f\u007f]/.test(value)) {
-    return undefined;
-  }
-  if (name === "hvac_action") {
-    return ["off", "heating", "cooling", "drying", "idle", "fan"].includes(value)
-      ? value
-      : undefined;
-  }
-  if (name === "device_class") {
-    return /^[a-z0-9_]{1,32}$/.test(value) ? value : undefined;
-  }
-  if (name === "unit_of_measurement") {
-    return ["°C", "°F", "%", "ppm", "lx", "W", "kW", "V", "A", "Hz"].includes(value)
-      ? value
-      : undefined;
-  }
-  return undefined;
 }
 
 export function projectRobotHaState(
@@ -138,9 +141,10 @@ export function projectRobotHaState(
     const sensorState = /^-?\d+(?:\.\d+)?$/.test(rawState)
       || rawState === "unavailable"
       || rawState === "unknown";
+    const sceneTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
     const sceneState = rawState === "unavailable"
       || rawState === "unknown"
-      || (rawState.length <= 40 && Number.isFinite(Date.parse(rawState)));
+      || (sceneTimestamp.test(rawState) && Number.isFinite(Date.parse(rawState)));
     const accepted = entity.domain === "light"
       || entity.domain === "switch"
       || entity.domain === "binary_sensor"
@@ -157,7 +161,7 @@ export function projectRobotHaState(
     && !Array.isArray(raw.attributes)
     ? raw.attributes as Record<string, unknown>
     : {};
-  const attributes: Partial<Record<RobotHaProjectedAttribute, string | number | boolean | null>> = {};
+  const attributes: Partial<Record<RobotHaProjectedAttribute, string | number | null>> = {};
   for (const name of entity.projected_attributes) {
     const projected = safeAttribute(name, rawAttributes[name]);
     if (projected !== undefined) {
@@ -192,6 +196,7 @@ export class RestRobotHaEntityStateReader implements RobotHaEntityStateReader {
           `${config.rest_base_url}/${encodeURIComponent(entity.entity_id)}`,
           {
             headers: { Authorization: `Bearer ${config.access_token}` },
+            redirect: "error",
             signal,
           },
         );

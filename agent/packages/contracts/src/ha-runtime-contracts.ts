@@ -146,7 +146,7 @@ function assertCanonicalPolicy(policy: RobotHaPolicy): void {
     }
     aliases.add(entity.alias);
     entityIds.add(entity.entity_id);
-    if (entity.alias.localeCompare(previousAlias) <= 0) {
+    if (entity.alias <= previousAlias) {
       throw new HaRuntimeContractError("Robot HA policy entities must use canonical alias order");
     }
     previousAlias = entity.alias;
@@ -197,28 +197,26 @@ export function projectRobotHaCapabilities(policy: RobotHaPolicy): readonly Robo
 }
 
 function assertToolCatalog(catalog: HaToolCatalog): void {
-  const expected = [
-    ["home.get_entity", false],
-    ["home.turn_on", true],
-    ["home.turn_off", true],
-    ["home.activate_scene", true],
-  ] as const;
-  if (
-    catalog.schema_version !== 1
-    || catalog.namespace !== "home"
-    || catalog.tools.length !== expected.length
-  ) {
-    throw new HaRuntimeContractError("Robot HA Tool Catalog v1 metadata is invalid");
-  }
-  for (const [index, [name, sideEffect]] of expected.entries()) {
-    const tool = catalog.tools[index];
-    if (
-      tool?.name !== name
-      || tool.side_effect !== sideEffect
-      || JSON.stringify(tool.parameters).includes("entity_id")
-    ) {
-      throw new HaRuntimeContractError(`Robot HA tool drifted at ${name}`);
-    }
+  const aliasParameters = {
+    type: "object",
+    required: ["alias"],
+    properties: {
+      alias: { type: "string", pattern: "^[a-z][a-z0-9_]{0,63}$" },
+    },
+    additionalProperties: false,
+  };
+  const expectedCatalog = {
+    schema_version: 1,
+    namespace: "home",
+    tools: [
+      { name: "home.get_entity", side_effect: false, parameters: aliasParameters },
+      { name: "home.turn_on", side_effect: true, parameters: aliasParameters },
+      { name: "home.turn_off", side_effect: true, parameters: aliasParameters },
+      { name: "home.activate_scene", side_effect: true, parameters: aliasParameters },
+    ],
+  };
+  if (JSON.stringify(catalog) !== JSON.stringify(expectedCatalog)) {
+    throw new HaRuntimeContractError("Robot HA Tool Catalog v1 shape is invalid");
   }
   const serialized = JSON.stringify(catalog);
   for (const forbidden of ["call_service", "service_data", "\"domain\""]) {

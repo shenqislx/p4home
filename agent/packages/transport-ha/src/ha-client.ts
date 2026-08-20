@@ -1,6 +1,6 @@
 import {
+  projectRobotHaCapabilities,
   validateRobotHaPolicy,
-  type RobotHaPolicy,
   type RobotHaPolicyEntity,
 } from "@p4home/contracts";
 
@@ -79,6 +79,7 @@ export class RobotHaClient implements RobotHaClientView {
   readonly #maxFrameBytes: number;
   readonly #entityById = new Map<string, RobotHaPolicyEntity>();
   readonly #states = new Map<string, RobotHaProjectedState>();
+  readonly #snapshotEvents = new Map<string, RobotHaProjectedState>();
   readonly #pending = new Map<number, PendingRequest>();
   readonly #stateListeners = new Set<(state: RobotHaProjectedState) => void>();
   readonly #metrics: MutableMetrics = {
@@ -149,8 +150,8 @@ export class RobotHaClient implements RobotHaClientView {
     return this.#state;
   }
 
-  public get policy(): RobotHaPolicy {
-    return structuredClone(this.#config.policy);
+  public get capabilities() {
+    return projectRobotHaCapabilities(this.#config.policy);
   }
 
   public get metrics(): RobotHaMetrics {
@@ -192,6 +193,8 @@ export class RobotHaClient implements RobotHaClientView {
     this.#clearSocketListeners();
     this.#snapshotController?.abort();
     this.#snapshotController = new AbortController();
+    this.#invalidateStates();
+    this.#snapshotEvents.clear();
     this.#subscriptionId = null;
     this.#authSent = false;
     this.#state = "connecting";
@@ -250,10 +253,20 @@ export class RobotHaClient implements RobotHaClientView {
     this.#clearHandshakeTimer();
     this.#snapshotController?.abort();
     this.#snapshotController = null;
+    this.#snapshotEvents.clear();
+    this.#invalidateStates();
     const error = new RobotHaTransportError("CLOSED", "Robot HA client was closed");
     this.#rejectPending(error);
     this.#rejectConnect(error);
-    this.#socket?.close(1000, "client close");
+    try {
+      this.#socket?.close(1000, "client close");
+    } catch {
+      try {
+        this.#socket?.terminate();
+      } catch {
+        // The local lifecycle is already closed.
+      }
+    }
   }
 
   #now(): number {
@@ -268,8 +281,8 @@ export class RobotHaClient implements RobotHaClientView {
     if (this.#auditSink === undefined) {
       return;
     }
-    const event: RobotHaAuditEvent = { type, occurred_at_ms: this.#now(), data };
     try {
+      const event: RobotHaAuditEvent = { type, occurred_at_ms: this.#now(), data };
       void Promise.resolve(this.#auditSink(event)).catch(() => undefined);
     } catch {
       // Audit export is best-effort here. Phase 4B persists run-correlated facts separately.
@@ -374,6 +387,9 @@ export class RobotHaClient implements RobotHaClientView {
         { type: "subscribe_events", event_type: "state_changed" },
         "result",
       );
+      // Reserve the known correlation id before awaiting the acknowledgement. A server can
+      // deliver the result and first event in the same network turn.
+      this.#subscriptionId = id;
       const result = await response;
       if (result.success !== true) {
         throw new RobotHaTransportError("PROTOCOL_ERROR", "state_changed subscription was rejected");
@@ -381,7 +397,6 @@ export class RobotHaClient implements RobotHaClientView {
       if (socket !== this.#socket || this.#state !== "subscribing") {
         return;
       }
-      this.#subscriptionId = id;
       this.#emitAudit("ha.subscription.ready", { subscription_id: id });
       const controller = this.#snapshotController;
       if (controller === null) {
@@ -408,6 +423,13 @@ export class RobotHaClient implements RobotHaClientView {
         const state = projectRobotHaState(entity, rawStates.get(entity.entity_id));
         snapshot.set(state.alias, state);
       }
+      for (const eventState of this.#snapshotEvents.values()) {
+        const snapshotState = snapshot.get(eventState.alias);
+        if (snapshotState === undefined || this.#isEventStateNewer(eventState, snapshotState)) {
+          snapshot.set(eventState.alias, eventState);
+        }
+      }
+      this.#snapshotEvents.clear();
       this.#states.clear();
       for (const state of snapshot.values()) {
         this.#storeState(state, false);
@@ -450,7 +472,11 @@ export class RobotHaClient implements RobotHaClientView {
     if (this.#pending.size >= this.#maxPending) {
       throw new RobotHaTransportError("PENDING_CAPACITY", "Robot HA pending request capacity is full");
     }
-    const id = this.#nextRequestId++;
+    const id = this.#nextRequestId;
+    if (!Number.isSafeInteger(id) || id < 1) {
+      throw new RobotHaTransportError("PROTOCOL_ERROR", "Robot HA request id capacity is exhausted");
+    }
+    this.#nextRequestId += 1;
     const response = new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
@@ -459,7 +485,7 @@ export class RobotHaClient implements RobotHaClientView {
       this.#pending.set(id, { expected, resolve, reject, timer });
     });
     try {
-      socket.send(JSON.stringify({ id, ...command }));
+      socket.send(JSON.stringify({ ...command, id }));
     } catch {
       const pending = this.#pending.get(id);
       if (pending !== undefined) {
@@ -529,6 +555,10 @@ export class RobotHaClient implements RobotHaClientView {
       const state = projectRobotHaState(entity, record.new_state ?? null);
       this.#metrics.state_events += 1;
       this.#metrics.last_event_at_ms = this.#now();
+      if (this.#state === "subscribing") {
+        this.#snapshotEvents.set(state.alias, structuredClone(state));
+        return;
+      }
       this.#storeState(state, true);
     } catch {
       this.#recordProtocolError("allowlisted Home Assistant state projection failed");
@@ -544,7 +574,11 @@ export class RobotHaClient implements RobotHaClientView {
         available: state.available,
       });
       for (const listener of this.#stateListeners) {
-        listener(structuredClone(state));
+        try {
+          listener(structuredClone(state));
+        } catch {
+          // A local observer cannot change transport state or suppress other observers.
+        }
       }
     }
   }
@@ -556,6 +590,8 @@ export class RobotHaClient implements RobotHaClientView {
     this.#clearHandshakeTimer();
     this.#snapshotController?.abort();
     this.#snapshotController = null;
+    this.#snapshotEvents.clear();
+    this.#invalidateStates();
     this.#rejectPending(new RobotHaTransportError("DISCONNECTED", "Robot HA socket disconnected"));
     if (this.#state !== "closed" && this.#state !== "error") {
       this.#state = "disconnected";
@@ -569,7 +605,12 @@ export class RobotHaClient implements RobotHaClientView {
   }
 
   #handleSocketError(socket: RobotHaSocket): void {
-    if (socket !== this.#socket || this.#state === "ready") {
+    if (
+      socket !== this.#socket
+      || this.#state === "ready"
+      || this.#state === "error"
+      || this.#state === "closed"
+    ) {
       return;
     }
     this.#failConnection(
@@ -599,9 +640,21 @@ export class RobotHaClient implements RobotHaClientView {
     this.#clearHandshakeTimer();
     this.#snapshotController?.abort();
     this.#snapshotController = null;
+    this.#snapshotEvents.clear();
+    this.#invalidateStates();
     this.#rejectPending(error);
     this.#rejectConnect(error);
-    socket.close(closeCode, error.code);
+    try {
+      socket.close(closeCode, error.code);
+    } catch {
+      // Termination below is the authoritative fail-closed cleanup.
+    } finally {
+      try {
+        socket.terminate();
+      } catch {
+        // The attempt is already terminal even if an injected adapter misbehaves.
+      }
+    }
   }
 
   #rejectPending(error: RobotHaTransportError): void {
@@ -627,8 +680,27 @@ export class RobotHaClient implements RobotHaClientView {
 
   #clearSocketListeners(): void {
     for (const unsubscribe of this.#socketUnsubscribers) {
-      unsubscribe();
+      try {
+        unsubscribe();
+      } catch {
+        // An adapter cleanup failure cannot block a new bounded connection attempt.
+      }
     }
     this.#socketUnsubscribers = [];
+  }
+
+  #invalidateStates(): void {
+    this.#states.clear();
+  }
+
+  #isEventStateNewer(
+    eventState: RobotHaProjectedState,
+    snapshotState: RobotHaProjectedState,
+  ): boolean {
+    if (eventState.updated_at_ms === null) {
+      return true;
+    }
+    return snapshotState.updated_at_ms === null
+      || eventState.updated_at_ms >= snapshotState.updated_at_ms;
   }
 }

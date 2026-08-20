@@ -14,6 +14,7 @@ import {
   RestRobotHaEntityStateReader,
   RobotHaTransportError,
   loadRobotHaRuntimeConfig,
+  projectRobotHaState,
   type RobotHaAuditEvent,
   type RobotHaEntityStateReader,
   type RobotHaRuntimeConfig,
@@ -188,6 +189,16 @@ test("credential loader rejects loose files, symlinks, embedded credentials, and
   });
   assert.equal(explicitPlaintext.websocket_url, "ws://ha.example.test:8123/api/websocket");
   assert.equal(explicitPlaintext.transport_security, "explicit_insecure_ws");
+
+  await writeFile(tokenPath, "é".repeat(40), { mode: 0o600 });
+  await assert.rejects(
+    loadRobotHaRuntimeConfig({
+      url: "https://ha.example.test",
+      token_file: tokenPath,
+      policy_file: policyPath,
+    }),
+    (error: unknown) => error instanceof RobotHaConfigError && error.code === "TOKEN_FILE_INVALID",
+  );
 });
 
 test("client constructor revalidates runtime URLs when the file loader is bypassed", () => {
@@ -219,13 +230,18 @@ test("client constructor revalidates runtime URLs when the file loader is bypass
 
 test("REST snapshot reader keeps credentials internal and bounds each entity response", async () => {
   const originalFetch = globalThis.fetch;
-  const requests: { readonly url: string; readonly authorization: string | null }[] = [];
+  const requests: {
+    readonly url: string;
+    readonly authorization: string | null;
+    readonly redirect: RequestRedirect | undefined;
+  }[] = [];
   try {
     globalThis.fetch = async (input, init) => {
       const headers = new Headers(init?.headers);
       requests.push({
         url: String(input),
         authorization: headers.get("authorization"),
+        redirect: init?.redirect,
       });
       return new Response(JSON.stringify(rawState(
         "light.example_living_room_main",
@@ -238,6 +254,7 @@ test("REST snapshot reader keeps credentials internal and bounds each entity res
     assert.deepEqual(requests, [{
       url: "https://ha.example.test/api/states/light.example_living_room_main",
       authorization: `Bearer ${TOKEN}`,
+      redirect: "error",
     }]);
     assert.equal(requests[0]!.url.includes(TOKEN), false);
 
@@ -273,6 +290,8 @@ test("HA client authenticates in-band, subscribes, and loads only allowlisted pr
   assert.equal(reader.reads, 1);
   assert.equal(client.metrics.cached_entities, 2);
   assert.equal(client.metrics.pending_requests, 0);
+  assert.equal(JSON.stringify(client.capabilities).includes("entity_id"), false);
+  assert.equal(JSON.stringify(client.capabilities).includes("example_living_room_main"), false);
   assert.deepEqual(client.getState("living_room_main_light"), {
     alias: "living_room_main_light",
     domain: "light",
@@ -387,6 +406,9 @@ test("disconnect rejects pending work and reconnect reloads a snapshot without r
     (error: unknown) => error instanceof RobotHaTransportError && error.code === "DISCONNECTED",
   );
   assert.equal(client.state, "disconnected");
+  assert.equal(client.metrics.cached_entities, 0);
+  assert.equal(client.getState("living_room_main_light"), null);
+  assert.equal(client.listStates().every((state) => !state.available), true);
   reader.version = 2;
   const secondConnection = await authenticate(client, factory);
   assert.equal(secondConnection.subscriptionId > firstSubscription, true);
@@ -399,6 +421,62 @@ test("disconnect rejects pending work and reconnect reloads a snapshot without r
   }
 });
 
+test("state events received during snapshot loading cannot be overwritten by an older snapshot", async (t) => {
+  const factory = new FakeRobotHaSocketFactory();
+  let resolveSnapshot: ((states: ReadonlyMap<string, unknown>) => void) | undefined;
+  const snapshot = new Promise<ReadonlyMap<string, unknown>>((resolve) => {
+    resolveSnapshot = resolve;
+  });
+  const client = new RobotHaClient({
+    config: runtimeConfig(),
+    socket_factory: factory.create,
+    state_reader: { async read() { return snapshot; } },
+  });
+  t.after(() => client.close());
+
+  const connecting = client.connect();
+  const socket = factory.sockets[0]!;
+  socket.serverOpen();
+  socket.serverSend({ type: "auth_required" });
+  socket.serverSend({ type: "auth_ok" });
+  const subscriptionId = Number(lastFrames(socket).at(-1)?.id);
+  socket.serverSend({ id: subscriptionId, type: "result", success: true, result: null });
+  socket.serverSend({
+    id: subscriptionId,
+    type: "event",
+    event: {
+      event_type: "state_changed",
+      data: {
+        entity_id: "light.example_living_room_main",
+        new_state: {
+          ...rawState("light.example_living_room_main", "on", { brightness: 200 }),
+          last_updated: "2026-08-20T12:01:00.000Z",
+        },
+      },
+    },
+  });
+  resolveSnapshot?.(new Map([
+    [
+      "light.example_living_room_main",
+      rawState("light.example_living_room_main", "off", { brightness: 0 }),
+    ],
+    [
+      "sensor.example_study_temperature",
+      rawState("sensor.example_study_temperature", "24.5", {
+        unit_of_measurement: "°C",
+        device_class: "temperature",
+      }),
+    ],
+  ]));
+  await connecting;
+
+  assert.equal(client.state, "ready");
+  assert.equal(client.getState("living_room_main_light")?.state, "on");
+  assert.equal(client.getState("living_room_main_light")?.attributes.brightness, 200);
+  assert.equal(client.metrics.state_events, 1);
+  assert.equal(client.metrics.cached_entities, 2);
+});
+
 test("state event floods stay bounded and non-allowlisted entities are filtered", async (t) => {
   const factory = new FakeRobotHaSocketFactory();
   const audit: RobotHaAuditEvent[] = [];
@@ -409,6 +487,9 @@ test("state event floods stay bounded and non-allowlisted entities are filtered"
     audit_sink: (event) => { audit.push(event); },
   });
   t.after(() => client.close());
+  let successfulObserverCalls = 0;
+  client.onState(() => { throw new Error("local observer failed"); });
+  client.onState(() => { successfulObserverCalls += 1; });
   const { socket, subscriptionId } = await authenticate(client, factory);
   for (let index = 0; index < 1_000; index += 1) {
     socket.serverSend({
@@ -439,6 +520,8 @@ test("state event floods stay bounded and non-allowlisted entities are filtered"
   });
   assert.equal(client.metrics.filtered_events, 1_000);
   assert.equal(client.metrics.state_events, 1);
+  assert.equal(client.metrics.protocol_errors, 0);
+  assert.equal(successfulObserverCalls, 1);
   assert.equal(client.metrics.cached_entities, 2);
   assert.deepEqual(client.getState("living_room_main_light")?.attributes, { brightness: 200 });
   assert.equal(JSON.stringify(audit).includes("call_service lock.unlock"), false);
@@ -460,6 +543,35 @@ test("state event floods stay bounded and non-allowlisted entities are filtered"
   });
   assert.equal(client.getState("study_temperature")?.state, null);
   assert.equal(client.getState("study_temperature")?.available, false);
+  assert.equal(successfulObserverCalls, 2);
+});
+
+test("state projection rejects attribute type confusion and permissive scene dates", () => {
+  const light = projectRobotHaState(POLICY.entities[0]!, rawState(
+    "light.example_living_room_main",
+    "on",
+    { brightness: true, color_temp_kelvin: "3000" },
+  ));
+  assert.deepEqual(light.attributes, {});
+
+  const sceneEntity = {
+    alias: "evening_scene",
+    entity_id: "scene.example_evening",
+    domain: "scene",
+    read: true,
+    write_actions: ["activate_scene"],
+    projected_attributes: [],
+  } as const;
+  const permissiveDate = projectRobotHaState(
+    sceneEntity,
+    rawState(sceneEntity.entity_id, "04 DecFoo 1995"),
+  );
+  assert.equal(permissiveDate.state, null);
+  const isoDate = projectRobotHaState(
+    sceneEntity,
+    rawState(sceneEntity.entity_id, "2026-08-21T01:02:03.456+00:00"),
+  );
+  assert.equal(isoDate.state, "2026-08-21T01:02:03.456+00:00");
 });
 
 test("binary frames fail closed without changing role authorization", async (t) => {

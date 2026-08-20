@@ -1,6 +1,6 @@
 import type {
+  RobotHaCapability,
   RobotHaDomain,
-  RobotHaPolicy,
   RobotHaPolicyEntity,
   RobotHaProjectedAttribute,
 } from "@p4home/contracts";
@@ -42,7 +42,7 @@ export interface RobotHaProjectedState {
   readonly domain: RobotHaDomain;
   readonly state: string | null;
   readonly available: boolean;
-  readonly attributes: Readonly<Partial<Record<RobotHaProjectedAttribute, string | number | boolean | null>>>;
+  readonly attributes: Readonly<Partial<Record<RobotHaProjectedAttribute, string | number | null>>>;
   readonly updated_at_ms: number | null;
 }
 
@@ -110,7 +110,7 @@ export interface RobotHaClientOptions {
 
 export interface RobotHaClientView {
   readonly state: RobotHaConnectionState;
-  readonly policy: RobotHaPolicy;
+  readonly capabilities: readonly RobotHaCapability[];
   readonly metrics: RobotHaMetrics;
   getState(alias: string): RobotHaProjectedState | null;
   listStates(): readonly RobotHaProjectedState[];

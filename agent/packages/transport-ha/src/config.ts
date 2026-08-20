@@ -68,7 +68,24 @@ async function readBoundedFile(
         throw new RobotHaConfigError(code, "token file must be owned by the current user with mode 0600 or stricter");
       }
     }
-    return await handle.readFile("utf8");
+    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    let offset = 0;
+    while (offset < buffer.byteLength) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        offset,
+        buffer.byteLength - offset,
+        offset,
+      );
+      if (bytesRead === 0) {
+        break;
+      }
+      offset += bytesRead;
+    }
+    if (offset > maxBytes) {
+      throw new RobotHaConfigError(code, "file type or size is invalid");
+    }
+    return buffer.subarray(0, offset).toString("utf8");
   } finally {
     await handle.close();
   }
@@ -159,7 +176,7 @@ export function assertRobotHaRuntimeConfigBoundary(config: RobotHaRuntimeConfig)
   if (
     config.access_token.length < 32
     || config.access_token.length > TOKEN_FILE_MAX_BYTES
-    || /\s/.test(config.access_token)
+    || !/^[\x21-\x7e]+$/.test(config.access_token)
   ) {
     throw new RobotHaConfigError("TOKEN_FILE_INVALID", "token content is invalid");
   }
@@ -179,7 +196,7 @@ export async function loadRobotHaRuntimeConfig(
   if (
     accessToken.length < 32
     || accessToken.length > TOKEN_FILE_MAX_BYTES
-    || /\s/.test(accessToken)
+    || !/^[\x21-\x7e]+$/.test(accessToken)
   ) {
     throw new RobotHaConfigError("TOKEN_FILE_INVALID", "token content is invalid");
   }

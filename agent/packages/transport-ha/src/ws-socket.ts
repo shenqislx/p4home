@@ -38,7 +38,12 @@ class WsRobotHaSocket implements RobotHaSocket {
 
   public onMessage(listener: (frame: string, binary: boolean) => void): () => void {
     const wrapped = (data: WebSocket.RawData, binary: boolean): void => {
-      listener(typeof data === "string" ? data : data.toString("utf8"), binary);
+      const buffer = Array.isArray(data)
+        ? Buffer.concat(data)
+        : Buffer.isBuffer(data)
+          ? data
+          : Buffer.from(data);
+      listener(buffer.toString("utf8"), binary);
     };
     this.#socket.on("message", wrapped);
     return () => this.#socket.off("message", wrapped);

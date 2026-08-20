@@ -40,8 +40,8 @@ Robot HA Tool 尚未启动。
 | 门禁 | 结果 |
 |---|---:|
 | Node 24.19 strict typecheck | 通过 |
-| Agent tests | 156/156 |
-| Phase 4A contract/transport targeted tests | 15/15 |
+| Agent tests | 158/158 |
+| Phase 4A contract/transport targeted tests | 17/17 |
 | Device/Tool Contract v1 validator | 通过 |
 | Object Runtime v2 validator | 通过 |
 | HA Runtime v1 validator | 1 有效、7 无效 policy；4 tools；6 domains |
@@ -61,3 +61,21 @@ adapter 的 in-band auth 与整数 request id。回环测试仅监听 `127.0.0.1
 - 把 HA observation 与 Interaction/Run/ToolCall 持久化关联。
 
 以上事项均不属于本次 4A 授权范围。
+
+## 2026-08-21 Review 修复
+
+4A review 发现并关闭以下问题，均已增加回归覆盖：
+
+| 级别 | 问题 | 修复 |
+|---|---|---|
+| 阻断 | 订阅确认与首个事件同一网络轮次到达时，事件可能被判为未知；快照期间的新事件也可能被旧快照覆盖 | 提前保留已知 subscription id，按 alias 有界缓冲事件，并按 `last_updated` 与快照合并 |
+| 阻断 | 断线、鉴权失败或协议失败后仍保留 `available=true` 的旧状态 | 所有非 ready 生命周期立即清空状态和快照事件缓存 |
+| 阻断 | 公开 `policy` getter 可返回真实 `entity_id` | 公开视图只返回去实体化 `capabilities`，真实 policy 仅留在 transport 内部 |
+| 高 | REST 默认跟随重定向，Bearer token 的目标边界不够明确 | 固定 `redirect: error`，逐实体请求不跟随任何跳转 |
+| 高 | attribute 投影会接受错误类型，scene 状态依赖宽松 `Date.parse` | 按字段固定类型/范围，scene 只接受严格 ISO 时间或固定不可用状态 |
+| 高 | 文件先 `stat` 后 `readFile`，并发增长可绕过读取上限 | 从已打开 file handle 最多读取 `limit + 1` 字节；token 只接受可见 ASCII |
+| 中 | 失败 socket 可能停留在关闭握手，observer/adapter 异常可能污染 transport 生命周期 | 错误路径强制 terminate；本地 observer、audit 和 cleanup 异常隔离 |
+| 中 | alias 排序依赖系统 locale，Tool catalog 只校验部分字段 | 改为 ASCII 确定性排序，并对冻结 Tool catalog 做完整形状比较 |
+
+Review 后重新执行 Node 24.19 typecheck、158 项 Agent tests、三套 Runtime validator、58 项 Python
+跨阶段 contract tests 与 `git diff --check`，均通过。仍未使用真实 HA 凭证、连接或动作。
