@@ -21,6 +21,7 @@
 #include "mbedtls/sha256.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
+#include "world_object_registry.h"
 #include "world_service.h"
 
 static const char *TAG = "agent_transport";
@@ -52,6 +53,7 @@ typedef struct {
     char uri[AGENT_TRANSPORT_URI_MAX_BYTES];
     char device_id[AGENT_TRANSPORT_DEVICE_ID_MAX_BYTES + 1U];
     char token[AGENT_TRANSPORT_TOKEN_MAX_BYTES];
+    uint8_t protocol_version;
     char headers[AGENT_TRANSPORT_TOKEN_MAX_BYTES + AGENT_TRANSPORT_DEVICE_ID_MAX_BYTES + 64U];
     uint8_t spki_sha256[AGENT_TRANSPORT_SPKI_SHA256_BYTES];
     char boot_id[40];
@@ -316,6 +318,11 @@ static const char *agent_activity_id(world_activity_t activity)
     return activity == WORLD_ACTIVITY_SLEEP ? "sleep" : "idle";
 }
 
+static bool agent_uses_object_runtime(void)
+{
+    return s_agent.protocol_version == AGENT_TRANSPORT_PROTOCOL_V2;
+}
+
 static cJSON *agent_character_json(const world_service_snapshot_t *snapshot)
 {
     cJSON *character = cJSON_CreateObject();
@@ -330,7 +337,61 @@ static cJSON *agent_character_json(const world_service_snapshot_t *snapshot)
     } else {
         cJSON_AddStringToObject(character, "active_action_id", snapshot->active_action_id);
     }
+    if (agent_uses_object_runtime()) {
+        if (snapshot->target_object_id[0] == '\0') {
+            cJSON_AddNullToObject(character, "target_object_id");
+        } else {
+            cJSON_AddStringToObject(character, "target_object_id",
+                                    snapshot->target_object_id);
+        }
+        cJSON_AddStringToObject(character, "pose",
+                               world_service_pose_text(snapshot->character_pose));
+    }
     return character;
+}
+
+static cJSON *agent_objects_json(const world_service_snapshot_t *snapshot,
+                                 bool capabilities)
+{
+    cJSON *objects = cJSON_CreateArray();
+    if (objects == NULL) {
+        return NULL;
+    }
+    for (size_t index = 0U; index < snapshot->object_count; ++index) {
+        const world_object_state_t *state = &snapshot->objects[index];
+        const world_object_definition_t *definition =
+            world_object_registry_find(state->object_id);
+        if (definition == NULL) {
+            cJSON_Delete(objects);
+            return NULL;
+        }
+        cJSON *object = cJSON_CreateObject();
+        if (object == NULL) {
+            cJSON_Delete(objects);
+            return NULL;
+        }
+        cJSON_AddStringToObject(object, "object_id", state->object_id);
+        cJSON_AddStringToObject(object, "room_id", agent_room_id(state->room));
+        if (capabilities) {
+            cJSON *actions = cJSON_AddArrayToObject(object, "supported_actions");
+            for (int action = WORLD_OBJECT_ACTION_GO_TO;
+                 action < WORLD_OBJECT_ACTION_COUNT; ++action) {
+                if (world_object_supports_action(definition,
+                                                 (world_object_action_t)action)) {
+                    cJSON_AddItemToArray(
+                        actions,
+                        cJSON_CreateString(world_object_action_text(
+                            (world_object_action_t)action)));
+                }
+            }
+        }
+        cJSON_AddBoolToObject(object, "available", state->available);
+        if (!capabilities) {
+            cJSON_AddBoolToObject(object, "occupied", state->occupied);
+        }
+        cJSON_AddItemToArray(objects, object);
+    }
+    return objects;
 }
 
 static cJSON *agent_snapshot_payload(const char *reason)
@@ -349,6 +410,9 @@ static cJSON *agent_snapshot_payload(const char *reason)
     cJSON_AddNumberToObject(payload, "state_version", snapshot.state_version);
     cJSON_AddNumberToObject(payload, "observed_at_ms", (double)snapshot.observed_at_ms);
     cJSON_AddItemToObject(payload, "character", agent_character_json(&snapshot));
+    if (agent_uses_object_runtime()) {
+        cJSON_AddItemToObject(payload, "objects", agent_objects_json(&snapshot, false));
+    }
     return payload;
 }
 
@@ -363,6 +427,9 @@ static cJSON *agent_changed_payload(void)
     cJSON_AddNumberToObject(payload, "state_version", snapshot.state_version);
     cJSON_AddNumberToObject(payload, "observed_at_ms", (double)snapshot.observed_at_ms);
     cJSON_AddItemToObject(payload, "character", agent_character_json(&snapshot));
+    if (agent_uses_object_runtime()) {
+        cJSON_AddItemToObject(payload, "objects", agent_objects_json(&snapshot, false));
+    }
     return payload;
 }
 
@@ -391,7 +458,7 @@ static esp_err_t agent_send_payload(const char *type, cJSON *payload, const char
         cJSON_Delete(payload);
         return ESP_ERR_NO_MEM;
     }
-    cJSON_AddNumberToObject(root, "protocol_version", 1);
+    cJSON_AddNumberToObject(root, "protocol_version", s_agent.protocol_version);
     cJSON_AddStringToObject(root, "message_id", message_id);
     if (correlation_id == NULL) {
         cJSON_AddNullToObject(root, "correlation_id");
@@ -459,6 +526,11 @@ static const char *agent_action_error_code(world_action_error_t error)
     case WORLD_ACTION_ERROR_CANCELLED: return "CANCELLED";
     case WORLD_ACTION_ERROR_ACTION_ID_CONFLICT: return "ACTION_ID_CONFLICT";
     case WORLD_ACTION_ERROR_DEVICE_BUSY: return "DEVICE_BUSY";
+    case WORLD_ACTION_ERROR_UNKNOWN_OBJECT: return "UNKNOWN_OBJECT";
+    case WORLD_ACTION_ERROR_UNSUPPORTED_OBJECT_ACTION: return "UNSUPPORTED_OBJECT_ACTION";
+    case WORLD_ACTION_ERROR_OBJECT_UNAVAILABLE: return "OBJECT_UNAVAILABLE";
+    case WORLD_ACTION_ERROR_OBJECT_OCCUPIED: return "OBJECT_OCCUPIED";
+    case WORLD_ACTION_ERROR_OBJECT_NOT_REACHED: return "OBJECT_NOT_REACHED";
     default: return "INTERNAL";
     }
 }
@@ -488,6 +560,20 @@ static cJSON *agent_action_result(const world_action_event_t *event)
                                 (double)event->result.snapshot.observed_at_ms);
         cJSON_AddItemToObject(result, "character",
                               agent_character_json(&event->result.snapshot));
+        if (agent_uses_object_runtime()) {
+            cJSON_AddItemToObject(result, "objects",
+                                  agent_objects_json(&event->result.snapshot, false));
+        }
+        break;
+    case WORLD_ACTION_CHARACTER_GO_TO_OBJECT:
+    case WORLD_ACTION_CHARACTER_SIT:
+    case WORLD_ACTION_CHARACTER_LOOK_AT:
+    case WORLD_ACTION_CHARACTER_INTERACT:
+        cJSON_AddStringToObject(result, "object_id", event->result.object.object_id);
+        cJSON_AddStringToObject(result, "action",
+                               world_object_action_text(event->result.object.action));
+        cJSON_AddStringToObject(result, "pose",
+                               world_service_pose_text(event->result.object.pose));
         break;
     default:
         break;
@@ -647,6 +733,26 @@ static bool agent_parse_action_request(const cJSON *payload, world_action_reques
         request->arguments.text = text->valuestring;
         return true;
     }
+    if (agent_uses_object_runtime()) {
+        const cJSON *target = cJSON_GetObjectItemCaseSensitive(arguments, "target_id");
+        if (argument_count != 1U || !cJSON_IsString(target) ||
+            strcmp(origin->valuestring, "user") == 0) {
+            return false;
+        }
+        if (strcmp(tool->valuestring, "character.go_to") == 0) {
+            request->tool = WORLD_ACTION_CHARACTER_GO_TO_OBJECT;
+        } else if (strcmp(tool->valuestring, "character.sit") == 0) {
+            request->tool = WORLD_ACTION_CHARACTER_SIT;
+        } else if (strcmp(tool->valuestring, "character.look_at") == 0) {
+            request->tool = WORLD_ACTION_CHARACTER_LOOK_AT;
+        } else if (strcmp(tool->valuestring, "character.interact") == 0) {
+            request->tool = WORLD_ACTION_CHARACTER_INTERACT;
+        } else {
+            return false;
+        }
+        request->arguments.target_id = target->valuestring;
+        return true;
+    }
     return false;
 }
 
@@ -665,7 +771,8 @@ static void agent_handle_action_request(const cJSON *payload, const char *messag
     world_action_event_t accepted = {0};
     esp_err_t result = world_service_submit(&request, &accepted);
     if (result != ESP_OK) {
-        (void)agent_send_protocol_error("INTERNAL", "world service rejected action",
+        const char *code = result == ESP_ERR_INVALID_ARG ? "INVALID_MESSAGE" : "INTERNAL";
+        (void)agent_send_protocol_error(code, "world service rejected action",
                                         message_id);
         xSemaphoreGive(s_agent.action_mutex);
         return;
@@ -775,7 +882,8 @@ static void agent_handle_frame(const char *frame, size_t frame_length)
     const cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
     const cJSON *payload = cJSON_GetObjectItemCaseSensitive(root, "payload");
     uint32_t sequence = 0U;
-    bool valid = agent_json_integer(version, 1U, 1U, NULL) &&
+    bool valid = agent_json_integer(version, s_agent.protocol_version,
+                                    s_agent.protocol_version, NULL) &&
                  cJSON_IsString(message_id) && agent_valid_id(message_id->valuestring) &&
                  (cJSON_IsNull(correlation) ||
                   (cJSON_IsString(correlation) && agent_valid_id(correlation->valuestring))) &&
@@ -895,21 +1003,33 @@ static esp_err_t agent_send_handshake(void)
                             description != NULL ? description->version : "unknown");
     cJSON *versions = cJSON_AddArrayToObject(hello, "protocol_versions");
     cJSON_AddItemToArray(versions, cJSON_CreateNumber(1));
+    if (agent_uses_object_runtime()) {
+        cJSON_AddItemToArray(versions, cJSON_CreateNumber(2));
+    }
     cJSON_AddStringToObject(hello, "connection_reason",
                             s_agent.first_connection ? "boot" : "reconnect");
     ESP_RETURN_ON_ERROR(agent_send_payload("device.hello", hello, NULL), TAG,
                         "failed to send device hello");
 
     cJSON *capabilities = cJSON_CreateObject();
-    cJSON_AddNumberToObject(capabilities, "selected_protocol_version", 1);
+    cJSON_AddNumberToObject(capabilities, "selected_protocol_version",
+                            s_agent.protocol_version);
     cJSON *rooms = cJSON_AddArrayToObject(capabilities, "rooms");
     for (int index = 0; index < WORLD_ROOM_COUNT; ++index) {
         cJSON_AddItemToArray(rooms, cJSON_CreateString(agent_room_id((world_room_id_t)index)));
     }
     cJSON *actions = cJSON_AddArrayToObject(capabilities, "actions");
-    for (int index = WORLD_ACTION_CHARACTER_GET_STATE; index <= WORLD_ACTION_GET_SNAPSHOT; ++index) {
+    int last_action = agent_uses_object_runtime() ? WORLD_ACTION_OBJECT_LAST
+                                                  : WORLD_ACTION_V1_LAST;
+    for (int index = WORLD_ACTION_V1_FIRST; index <= last_action; ++index) {
         cJSON_AddItemToArray(actions,
                              cJSON_CreateString(world_service_tool_text((world_action_tool_t)index)));
+    }
+    if (agent_uses_object_runtime()) {
+        world_service_snapshot_t snapshot = {0};
+        world_service_get_snapshot(&snapshot);
+        cJSON_AddItemToObject(capabilities, "objects",
+                              agent_objects_json(&snapshot, true));
     }
     cJSON *limits = cJSON_AddObjectToObject(capabilities, "limits");
     cJSON_AddNumberToObject(limits, "max_json_frame_bytes", AGENT_TRANSPORT_MAX_JSON_FRAME_BYTES);
@@ -1112,11 +1232,14 @@ esp_err_t agent_transport_init(const agent_transport_config_t *config)
         build_config.uri = CONFIG_P4HOME_AGENT_TRANSPORT_URI;
         build_config.device_id = CONFIG_P4HOME_AGENT_DEVICE_ID;
         build_config.device_token = CONFIG_P4HOME_AGENT_DEVICE_TOKEN;
+        build_config.protocol_version = CONFIG_P4HOME_AGENT_PROTOCOL_VERSION;
         memcpy(build_config.paired_spki_sha256, build_pin, sizeof(build_pin));
         config = &build_config;
 #else
+        s_agent.protocol_version = AGENT_TRANSPORT_PROTOCOL_V1;
         s_agent.initialized = true;
         s_agent.metrics.initialized = true;
+        s_agent.metrics.protocol_version = AGENT_TRANSPORT_PROTOCOL_V1;
         ESP_LOGI(TAG, "Agent transport disabled; HA and local fallback remain active");
         return ESP_OK;
 #endif
@@ -1125,10 +1248,18 @@ esp_err_t agent_transport_init(const agent_transport_config_t *config)
         !agent_valid_token(config->device_token)) {
         return ESP_ERR_INVALID_ARG;
     }
+    uint8_t protocol_version = config->protocol_version == 0U
+                                   ? AGENT_TRANSPORT_PROTOCOL_V1
+                                   : config->protocol_version;
+    if (protocol_version < AGENT_TRANSPORT_PROTOCOL_V1 ||
+        protocol_version > AGENT_TRANSPORT_PROTOCOL_V2) {
+        return ESP_ERR_INVALID_ARG;
+    }
     snprintf(s_agent.uri, sizeof(s_agent.uri), "%s", config->uri);
     snprintf(s_agent.device_id, sizeof(s_agent.device_id), "%s", config->device_id);
     snprintf(s_agent.token, sizeof(s_agent.token), "%s", config->device_token);
     memcpy(s_agent.spki_sha256, config->paired_spki_sha256, sizeof(s_agent.spki_sha256));
+    s_agent.protocol_version = protocol_version;
     uint8_t zero_pin[AGENT_TRANSPORT_SPKI_SHA256_BYTES] = {0};
     if (agent_constant_time_equal(s_agent.spki_sha256, zero_pin, sizeof(zero_pin))) {
         return ESP_ERR_INVALID_ARG;
@@ -1153,6 +1284,7 @@ esp_err_t agent_transport_init(const agent_transport_config_t *config)
     s_agent.enabled = true;
     s_agent.metrics.initialized = true;
     s_agent.metrics.enabled = true;
+    s_agent.metrics.protocol_version = protocol_version;
     ESP_LOGI(TAG, "Agent transport configured device_id=%s uri=%s token=(redacted)",
              s_agent.device_id, s_agent.uri);
     return ESP_OK;

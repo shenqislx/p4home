@@ -34,8 +34,9 @@ Cat 作为事件驱动电子宠物使用最小 P4 World 能力。它们默认共
 Phase 2 已完成并通过用户最终 review。Role Contract & Router、Cat Action Adapter、P4 World
 Service、真实传输与实机门禁四个纵切均满足退出条件；Agent/P4 真实 Device WebSocket 已通过实机
 100 次动作、第 50 次后重连 snapshot、两小时 Agent 离线与资源/8 FPS artifact 判定。Phase 2 计划
-已归档。2026-08-20，用户已授权启动 Phase 3；3A Object Registry Contract 已完成，下一项为 3B
-P4 Object Runtime。对象级执行 Tool 尚未开放，冻结的 Device Protocol v1 / Tool Schema v1 未修改。
+已归档。2026-08-20，用户已授权启动 Phase 3；3A Object Registry Contract 与 3B P4 Object
+Runtime 已完成，下一项为 3C Cat Object Event & Role Boundary。对象级 Tool 尚未加入 RoleProfile，
+冻结的 Device Protocol v1 / Tool Schema v1 未修改。
 
 ## 工作规则
 

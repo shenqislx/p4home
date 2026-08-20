@@ -29,6 +29,15 @@ config P4HOME_AGENT_SPKI_SHA256
     default ""
     depends on P4HOME_AGENT_TRANSPORT_ENABLED
 
+config P4HOME_AGENT_PROTOCOL_VERSION
+    int "Selected Device Protocol version"
+    range 1 2
+    default 1
+    depends on P4HOME_AGENT_TRANSPORT_ENABLED
+    help
+        Keep 1 for the frozen room-level protocol. Select 2 only when the
+        paired Agent Runtime supports the Phase 3 object runtime contract.
+
 config P4HOME_AGENT_TRANSPORT_TASK_STACK
     int "Agent transport worker stack bytes"
     range 6144 16384

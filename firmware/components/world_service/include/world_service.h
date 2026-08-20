@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "world_object_types.h"
 
 #define WORLD_SERVICE_ACTION_QUEUE_CAPACITY 8U
 #define WORLD_SERVICE_ACTION_RECORD_CAPACITY 128U
@@ -13,6 +14,7 @@
 #define WORLD_SERVICE_SAY_TEXT_MAX_CHARS 256U
 #define WORLD_SERVICE_SAY_TEXT_MAX_BYTES (WORLD_SERVICE_SAY_TEXT_MAX_CHARS * 4U)
 #define WORLD_SERVICE_IDEMPOTENCY_RETENTION_MS 600000U
+#define WORLD_SERVICE_OBJECT_CAPACITY 3U
 
 typedef enum {
     WORLD_ROOM_PRIMARY_BEDROOM = 0,
@@ -43,7 +45,16 @@ typedef enum {
     WORLD_ACTION_CHARACTER_SET_ACTIVITY,
     WORLD_ACTION_CHARACTER_SAY,
     WORLD_ACTION_GET_SNAPSHOT,
+    WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
+    WORLD_ACTION_CHARACTER_SIT,
+    WORLD_ACTION_CHARACTER_LOOK_AT,
+    WORLD_ACTION_CHARACTER_INTERACT,
 } world_action_tool_t;
+
+#define WORLD_ACTION_V1_FIRST WORLD_ACTION_CHARACTER_GET_STATE
+#define WORLD_ACTION_V1_LAST WORLD_ACTION_GET_SNAPSHOT
+#define WORLD_ACTION_OBJECT_FIRST WORLD_ACTION_CHARACTER_GO_TO_OBJECT
+#define WORLD_ACTION_OBJECT_LAST WORLD_ACTION_CHARACTER_INTERACT
 
 typedef enum {
     WORLD_ACTION_STATUS_ACCEPTED = 0,
@@ -61,7 +72,19 @@ typedef enum {
     WORLD_ACTION_ERROR_ACTION_ID_CONFLICT,
     WORLD_ACTION_ERROR_DEVICE_BUSY,
     WORLD_ACTION_ERROR_ACTION_NOT_FOUND,
+    WORLD_ACTION_ERROR_UNKNOWN_OBJECT,
+    WORLD_ACTION_ERROR_UNSUPPORTED_OBJECT_ACTION,
+    WORLD_ACTION_ERROR_OBJECT_UNAVAILABLE,
+    WORLD_ACTION_ERROR_OBJECT_OCCUPIED,
+    WORLD_ACTION_ERROR_OBJECT_NOT_REACHED,
 } world_action_error_t;
+
+typedef struct {
+    char object_id[WORLD_OBJECT_ID_MAX_BYTES + 1U];
+    world_room_id_t room;
+    bool available;
+    bool occupied;
+} world_object_state_t;
 
 typedef struct {
     world_room_id_t room;
@@ -74,6 +97,14 @@ typedef struct {
     uint32_t speech_revision;
     world_speech_tone_t speech_tone;
     bool agent_connected;
+    char target_object_id[WORLD_OBJECT_ID_MAX_BYTES + 1U];
+    int16_t character_art_x;
+    int16_t character_floor_y;
+    world_object_facing_t character_facing;
+    world_character_pose_t character_pose;
+    world_object_animation_t active_animation;
+    size_t object_count;
+    world_object_state_t objects[WORLD_SERVICE_OBJECT_CAPACITY];
 } world_service_snapshot_t;
 
 typedef struct {
@@ -83,6 +114,7 @@ typedef struct {
         world_room_id_t room;
         world_activity_t activity;
         const char *text;
+        const char *target_id;
     } arguments;
     uint32_t timeout_ms;
 } world_action_request_t;
@@ -102,6 +134,11 @@ typedef struct {
         world_activity_t activity;
         char text[WORLD_SERVICE_SAY_TEXT_MAX_BYTES + 1U];
         world_service_snapshot_t snapshot;
+        struct {
+            char object_id[WORLD_OBJECT_ID_MAX_BYTES + 1U];
+            world_object_action_t action;
+            world_character_pose_t pose;
+        } object;
     } result;
 } world_action_event_t;
 
@@ -133,6 +170,8 @@ void world_service_get_snapshot(world_service_snapshot_t *snapshot);
 
 esp_err_t world_service_set_agent_connected(bool connected);
 esp_err_t world_service_apply_local_fallback(const world_local_fallback_context_t *context);
+esp_err_t world_service_set_object_available(const char *object_id, bool available);
+esp_err_t world_service_set_object_occupied(const char *object_id, bool occupied);
 
 esp_err_t world_service_submit(const world_action_request_t *request,
                                world_action_event_t *event);
@@ -148,3 +187,4 @@ size_t world_service_record_count(void);
 const char *world_service_room_text(world_room_id_t room);
 const char *world_service_tool_text(world_action_tool_t tool);
 const char *world_service_error_text(world_action_error_t error);
+const char *world_service_pose_text(world_character_pose_t pose);

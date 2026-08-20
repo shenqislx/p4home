@@ -55,7 +55,8 @@ Router 24/24、Human 8/8、Robot 8/8、Cat 18/18，且无综合分。2A、2B、2
 Agent-enabled 固件构建；实机 run `32262619021` 的 100 次动作、重连 snapshot、两小时 Agent 离线、
 资源与 8 FPS artifact 判定均通过。2A–2D 退出门禁已满足；2026-08-20 用户最终 review 通过，
 Phase 2 / M7.2 已完成并归档。2026-08-20，用户明确授权启动 M7.3 / Phase 3；3A Object Registry
-Contract 的对象注册表一致性门禁已通过，下一项是 3B P4 Object Runtime；对象执行 Tool 尚未开放。
+Contract 与 3B P4 Object Runtime 门禁已通过，下一项是 3C Cat Object Event & Role Boundary；
+对象执行 Tool 尚未加入 RoleProfile。
 
 ## 5. 状态更新规则
 

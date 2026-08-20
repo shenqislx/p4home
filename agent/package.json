@@ -15,7 +15,8 @@
     "typecheck": "node scripts/check-runtime.mjs && tsc --noEmit -p tsconfig.json",
     "test": "node scripts/check-runtime.mjs && node --import tsx --test tests/contracts/*.test.ts tests/core/*.test.ts tests/domain/*.test.ts tests/eval/*.test.ts tests/provider/*.test.ts tests/runtime/*.test.ts tests/storage/*.test.ts",
     "test:ollama-live": "node scripts/check-runtime.mjs && node --import tsx --test tests/integration/ollama-live.test.ts",
-    "validate:contracts": "node scripts/check-runtime.mjs && node --import tsx packages/contracts/src/cli.ts"
+    "validate:contracts": "node scripts/check-runtime.mjs && node --import tsx packages/contracts/src/cli.ts",
+    "validate:object-runtime": "node scripts/check-runtime.mjs && node --import tsx packages/contracts/src/cli-object-runtime.ts"
   },
   "devDependencies": {
     "@p4home/contracts": "workspace:*",

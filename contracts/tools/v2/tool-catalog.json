@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "execution_policy": { "mode": "sequential", "start_next_after": "previous_terminal_success", "on_error": "stop", "max_calls_per_turn": 4 },
+  "rooms": [
+    { "id": "primary_bedroom", "display_name_zh": "主卧" },
+    { "id": "study", "display_name_zh": "书房" },
+    { "id": "guest_room", "display_name_zh": "客房" },
+    { "id": "entry", "display_name_zh": "玄关" },
+    { "id": "living_room", "display_name_zh": "客厅" },
+    { "id": "kitchen", "display_name_zh": "厨房" }
+  ],
+  "tools": [
+    { "name": "character.get_state", "description": "读取角色当前房间、活动、说话、对象目标和姿态。", "side_effect": false, "result_schema_ref": "tool-result.schema.json#/$defs/characterState", "parameters": { "type": "object", "properties": {}, "additionalProperties": false } },
+    { "name": "character.go_to_room", "description": "让角色移动到一个已注册房间的站立点。", "side_effect": true, "result_schema_ref": "tool-result.schema.json#/$defs/goToRoomResult", "parameters": { "type": "object", "required": ["room_id"], "properties": { "room_id": { "enum": ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"] } }, "additionalProperties": false } },
+    { "name": "character.set_activity", "description": "设置角色可执行的房间级活动。", "side_effect": true, "result_schema_ref": "tool-result.schema.json#/$defs/setActivityResult", "parameters": { "type": "object", "required": ["activity"], "properties": { "activity": { "enum": ["idle", "sleep"] } }, "additionalProperties": false } },
+    { "name": "character.say", "description": "在面板角色气泡中显示一段简短文本。", "side_effect": true, "result_schema_ref": "tool-result.schema.json#/$defs/sayResult", "parameters": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 256 } }, "additionalProperties": false } },
+    { "name": "world.get_snapshot", "description": "读取面板当前完整对象级世界快照。", "side_effect": false, "result_schema_ref": "tool-result.schema.json#/$defs/worldSnapshotResult", "parameters": { "type": "object", "properties": {}, "additionalProperties": false } },
+    { "name": "character.go_to", "description": "移动到一个当前可用且支持 go_to 的对象。", "side_effect": true, "result_schema_ref": "tool-result.schema.json#/$defs/goToObjectResult", "parameters": { "type": "object", "required": ["target_id"], "properties": { "target_id": { "enum": ["living_room.sofa", "study.desk", "living_room.window"] } }, "additionalProperties": false } },
+    { "name": "character.sit", "description": "在已到达且支持 sit 的对象处坐下。", "side_effect": true, "result_schema_ref": "tool-result.schema.json#/$defs/sitObjectResult", "parameters": { "type": "object", "required": ["target_id"], "properties": { "target_id": { "enum": ["living_room.sofa"] } }, "additionalProperties": false } },
+    { "name": "character.look_at", "description": "看向一个已到达且支持 look_at 的对象。", "side_effect": true, "result_schema_ref": "tool-result.schema.json#/$defs/lookAtObjectResult", "parameters": { "type": "object", "required": ["target_id"], "properties": { "target_id": { "enum": ["living_room.sofa", "study.desk", "living_room.window"] } }, "additionalProperties": false } },
+    { "name": "character.interact", "description": "与一个已到达且支持 interact 的对象交互。", "side_effect": true, "result_schema_ref": "tool-result.schema.json#/$defs/interactObjectResult", "parameters": { "type": "object", "required": ["target_id"], "properties": { "target_id": { "enum": ["living_room.sofa", "study.desk", "living_room.window"] } }, "additionalProperties": false } }
+  ]
+}

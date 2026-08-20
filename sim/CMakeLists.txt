@@ -47,11 +47,28 @@ function(add_world_service_host_test_target)
     target_compile_definitions(world_service_host_test PRIVATE WORLD_SERVICE_HOST_TEST=1)
 endfunction()
 
+function(add_world_object_runtime_host_test_target)
+    add_executable(world_object_runtime_host_test
+        world_object_runtime_host_test.c
+        shim/esp_err.c
+        "${WORLD_SERVICE_DIR}/world_service.c"
+        "${WORLD_SERVICE_DIR}/world_object_registry.c"
+    )
+    target_include_directories(world_object_runtime_host_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/shim"
+        "${WORLD_SERVICE_DIR}/include"
+    )
+    target_compile_options(world_object_runtime_host_test PRIVATE -Wall -Wextra -Werror -g -O1)
+    target_compile_definitions(world_object_runtime_host_test PRIVATE WORLD_SERVICE_HOST_TEST=1)
+endfunction()
+
 option(P4HOME_WORLD_SERVICE_TEST_ONLY "Build only the dependency-free world service test" OFF)
 if(P4HOME_WORLD_SERVICE_TEST_ONLY)
     add_world_service_host_test_target()
+    add_world_object_runtime_host_test_target()
     enable_testing()
     add_test(NAME world_service_host_test COMMAND world_service_host_test)
+    add_test(NAME world_object_runtime_host_test COMMAND world_object_runtime_host_test)
     return()
 endif()
 
@@ -143,5 +160,7 @@ target_link_libraries(pixel_sim PRIVATE lvgl ${SDL2_LIBRARIES} m)
 target_link_directories(pixel_sim PRIVATE ${SDL2_LIBRARY_DIRS})
 
 add_world_service_host_test_target()
+add_world_object_runtime_host_test_target()
 enable_testing()
 add_test(NAME world_service_host_test COMMAND world_service_host_test)
+add_test(NAME world_object_runtime_host_test COMMAND world_object_runtime_host_test)

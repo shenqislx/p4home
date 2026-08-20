@@ -35,11 +35,11 @@
 
 只有 3A 退出门禁通过后开始：
 
-- 扩展 World snapshot 的对象位置、朝向、姿态、占用与可用性；
-- 实现 `go_to/sit/look_at/interact` 的队列、deadline、幂等、取消与终态缓存；
-- 新增稳定错误码：对象不存在、不支持动作、不可用、被占用与执行中取消；
-- 通过版本化 capabilities、Device Protocol 与 Tool Schema 公布真实执行能力；
-- UI 只渲染 World snapshot，不拥有对象级语义真值。
+- [x] 扩展 World snapshot 的对象位置、朝向、姿态、占用与可用性；
+- [x] 实现 `go_to/sit/look_at/interact` 的队列、deadline、幂等、取消与终态缓存；
+- [x] 新增稳定错误码：对象不存在、不支持动作、不可用、被占用与执行中取消；
+- [x] 通过版本化 capabilities、Device Protocol 与 Tool Schema 公布真实执行能力；
+- [x] UI 只渲染 World snapshot，不拥有对象级语义真值。
 
 退出门禁：host simulator 可确定性执行和拒绝全部对象动作；capabilities 与执行层一致；旧 v1
 客户端仍按 Phase 2 行为工作。
@@ -73,8 +73,12 @@
 1/1，以及 ESP-IDF 固件对象编译和 ELF 增量链接均通过。3A 初始实现的全量固件构建已通过；本轮
 全量重跑受沙箱进程枚举权限限制，详见
 [Phase 3A Object Registry Contract Evidence](../../evidence/agent-phase-3/phase-3a-object-registry.md)。
-据此 3A 退出门禁满足，下一步进入 3B P4 Object Runtime；当前仍未向模型或真实 Device WebSocket
-公布对象级 Tool，也未修改冻结的 v1 契约。
+3B 已完成 P4 权威对象 snapshot、四种对象动作、稳定错误、Device Protocol v2 / Tool Schema v2
+candidate，以及默认 v1、显式选择 v2 的 transport 门禁。Agent 122/122、Python 53/53、C host
+2/2、ESP32-P4 变更组件编译与最终 ELF 增量链接均通过；证据见
+[Phase 3B P4 Object Runtime Evidence](../../evidence/agent-phase-3/phase-3b-object-runtime.md)。据此 3B
+退出门禁满足，下一步进入 3C Cat Object Event & Role Boundary；对象 Tool 尚未加入任何 RoleProfile，
+v1 契约保持冻结，v2 在 3C 完成端到端审计前仍为 candidate。
 
 ## 8. 完成定义
 

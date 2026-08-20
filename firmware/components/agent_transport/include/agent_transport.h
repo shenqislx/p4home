@@ -11,12 +11,15 @@
 #define AGENT_TRANSPORT_TOKEN_MAX_BYTES 256U
 #define AGENT_TRANSPORT_SPKI_SHA256_BYTES 32U
 #define AGENT_TRANSPORT_MAX_JSON_FRAME_BYTES 16384U
+#define AGENT_TRANSPORT_PROTOCOL_V1 1U
+#define AGENT_TRANSPORT_PROTOCOL_V2 2U
 
 typedef struct {
     const char *uri;
     const char *device_id;
     const char *device_token;
     uint8_t paired_spki_sha256[AGENT_TRANSPORT_SPKI_SHA256_BYTES];
+    uint8_t protocol_version;
 } agent_transport_config_t;
 
 typedef struct {
@@ -35,6 +38,7 @@ typedef struct {
     uint32_t last_state_version;
     uint32_t worker_stack_high_water_bytes;
     uint64_t disconnected_duration_ms;
+    uint8_t protocol_version;
 } agent_transport_snapshot_t;
 
 /* A NULL config loads the build-time development configuration. */
