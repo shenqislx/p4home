@@ -734,8 +734,10 @@ RoutePlan 非法时不会降级执行命令。
 退出条件：归一化 Cat event 可让 Cat “去沙发坐下”，且模型不接触坐标、用户原文不直接进入 Cat。
 
 2026-08-20 已获用户授权启动；3A Object Registry Contract、3B P4 Object Runtime 与 3C Cat
-Object Event & Role Boundary 已完成。3D simulator/host 门禁与硬件 harness 已就绪，当前等待最新
-提交的 ESP32-P4 artifact 判定；对象级执行 Tool 仅属于 Cat RoleProfile。
+Object Event & Role Boundary 已完成。3D 最终实机 run `32382940058` 已通过 manifest-first artifact
+判定：对象动作链、重连 snapshot、取消、Agent 离线后对象释放、HA/UI、资源与 240 秒 8 FPS 均通过。
+Phase 3 技术退出门禁已满足，等待用户最终 review；对象级执行 Tool 仅属于 Cat RoleProfile，Phase 4
+尚未启动。
 
 ### Phase 4 — Robot Home Assistant Tool & Multi-role Split
 
