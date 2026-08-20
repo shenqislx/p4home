@@ -55,7 +55,13 @@ class Phase3DSimulatorHardwareGateContractTests(unittest.TestCase):
         self.assertNotIn("world_service_start_next", request_handler)
         self.assertNotIn("world_service_complete_active", request_handler)
         self.assertIn("AGENT_OBJECT_ACTION_RENDER_MS 250U", transport)
+        self.assertIn("AGENT_LOCAL_FALLBACK_GRACE_MS 10000U", transport)
         self.assertIn("agent_progress_action_queue();", worker)
+        self.assertIn("agent_publish_world_disconnect_if_due();", worker)
+        self.assertIn(
+            "!event->from_cache && agent_object_tool(event->tool)",
+            transport,
+        )
         self.assertIn("VERIFY:phase3d:device_object_cancel:PASS", transport)
 
     def test_hardware_profile_selects_protocol_v2_and_emits_strong_markers(self) -> None:
@@ -72,6 +78,10 @@ class Phase3DSimulatorHardwareGateContractTests(unittest.TestCase):
         self.assertIn('echo "AGENT_PROTOCOL_VERSION=2"', workflow)
         self.assertIn('--protocol-version "$AGENT_PROTOCOL_VERSION"', workflow)
         self.assertIn("CONFIG_P4HOME_AGENT_PROTOCOL_VERSION", profile)
+        self.assertIn(
+            'protocol_version: profile === "phase3d_object" ? 2 : 1',
+            harness,
+        )
         for marker in (
             "VERIFY:phase3d:object_action_chain:PASS",
             "VERIFY:phase3d:reconnect_snapshot:PASS",

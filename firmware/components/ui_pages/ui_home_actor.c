@@ -260,10 +260,16 @@ static bool ui_home_actor_tick(uint32_t tick, void *user_data)
         } else if (s_has_waypoint) {
             s_has_waypoint = false;
         } else {
-            ui_home_actor_set_render_state(
-                ui_home_actor_desired_rest_state(s_desired_tone));
-            s_walk_frame = 0;
-            break;
+            if (s_active_animation != WORLD_OBJECT_ANIMATION_CAT_WALK) {
+                ui_home_actor_set_render_state(
+                    ui_home_actor_desired_rest_state(s_desired_tone));
+                s_walk_frame = 0;
+                break;
+            }
+            /* Object go_to does not publish the destination anchor until the
+             * action completes. Keep cycling the authoritative walk binding
+             * in place during that execution window instead of dropping back
+             * to idle after the first frame. */
         }
         if (s_target_object_id[0] != '\0') {
             const size_t frames_per_direction = ACTOR_OBJECT_WALK_FRAME_COUNT / 2U;
@@ -307,8 +313,9 @@ static bool ui_home_actor_tick(uint32_t tick, void *user_data)
         break;
     }
     case UI_ACTOR_RENDER_OBJECT_IDLE:
-        ui_home_actor_set_pose(
-            s_object_idle_frames[ui_home_actor_direction_offset(1U)]);
+        /* Static object-idle art is installed when the render state changes.
+         * Reapplying the same image every 125 ms invalidates the LVGL object
+         * and spends draw budget without changing a pixel. */
         break;
     case UI_ACTOR_RENDER_SLEEP:
     case UI_ACTOR_RENDER_DOZE:

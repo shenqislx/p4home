@@ -93,9 +93,11 @@ Hardware Gate；v1 契约和默认 transport 选择保持不变。
 像素帧，并用完整 LVGL simulator 自动核对 sofa/desk anchor、floor anchor、pose、四种 animation
 binding、取消恢复与占用冲突。复审同时发现并修复两条此前只能在实机暴露的路径：WebSocket 回调
 内同步完成动作导致取消无窗口、瞬态动画被 UI 合并；Agent 离线 fallback 保留旧对象 target 导致
-房间/对象状态矛盾。现在对象执行由 worker 推进并保留两个 8 FPS 帧，local fallback 会释放对象
-占用和 target。Phase 3D 专用 `phase3d_object` workflow/harness 已就绪，待提交推送后运行 P4 artifact
-门禁，实机项在 artifact 判定前保持未完成。
+房间/对象状态矛盾。现在对象执行由 worker 推进并保留两个 8 FPS 帧；短暂传输中断先保留权威对象
+snapshot 10 秒供自动重连，超过窗口才让 local fallback 释放对象占用和 target。跨阶段复审还修复了
+fake-device 生命周期 `state_version/world.changed` 与 P4 不一致、幂等缓存重放误报强 marker、静态
+object-idle 每帧重复 invalidation。Phase 3D 专用 `phase3d_object` workflow/harness 已就绪，最新实机
+项在 artifact 判定前保持未完成。
 
 ## 8. 完成定义
 

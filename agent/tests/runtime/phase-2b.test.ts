@@ -167,8 +167,11 @@ test("deterministic fake device completes 100 actions without silent loss", asyn
 
   device.heartbeat();
   assert.equal(device.received_action_requests, 100);
-  assert.equal(device.state_version, 101);
-  assert.equal(adapter.last_snapshot?.state_version, 101);
+  // P4 advances the authoritative version once when an action starts and once
+  // when it terminalizes/clears active_action_id, even if the destination is
+  // unchanged. The fake must preserve that lifecycle truth for reconciliation.
+  assert.equal(device.state_version, 201);
+  assert.equal(adapter.last_snapshot?.state_version, 201);
   assert.equal(adapter.last_protocol_error, null);
 });
 
@@ -399,6 +402,31 @@ test("manual fake device enforces waiter capacity, queue full, cancellation, and
       .reduce((sum, count) => sum + count, 0),
     0,
   );
+});
+
+test("fake lifecycle advances v1 world state on start and active cancellation like P4", async () => {
+  const { adapter, device } = connectedHarness({ auto_execute: false });
+  const pending = adapter.executeAction({
+    action_id: "versioned-active-cancel",
+    tool: "character.go_to_room",
+    arguments: { room_id: "study" },
+    timeout_ms: 1_000,
+    wait_timeout_ms: 10_000,
+    origin: "test",
+  });
+
+  assert.equal(device.startNext(), true);
+  assert.equal(device.state_version, 2);
+  assert.equal(adapter.last_snapshot?.state_version, 2);
+  assert.equal(adapter.last_snapshot?.character.active_action_id, "versioned-active-cancel");
+
+  await adapter.cancelAction("versioned-active-cancel", "test active cancellation");
+  const outcome = await pending;
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.status === "failed" ? outcome.error.code : null, "CANCELLED");
+  assert.equal(device.state_version, 3);
+  assert.equal(adapter.last_snapshot?.state_version, 3);
+  assert.equal(adapter.last_snapshot?.character.active_action_id, null);
 });
 
 test("disconnect produces unknown outcome and reconnect snapshot reconciles without replay", async () => {

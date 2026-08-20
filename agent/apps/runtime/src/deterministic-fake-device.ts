@@ -476,6 +476,7 @@ export class DeterministicFakeDevice {
       return true;
     }
     this.#activeActionId = actionId;
+    this.#stateVersion += 1;
     record.status = "started";
     const payload: ActionStartedPayload & Record<string, unknown> = {
       action_id: actionId,
@@ -484,6 +485,7 @@ export class DeterministicFakeDevice {
     record.latestType = "action.started";
     record.latestPayload = payload;
     this.#emit("action.started", payload, record.correlationId);
+    this.#emitWorldChanged();
     return true;
   }
 
@@ -495,11 +497,13 @@ export class DeterministicFakeDevice {
     const record = this.#records.get(actionId)!;
     if (this.#isExpired(record)) {
       this.#activeActionId = null;
+      this.#stateVersion += 1;
       this.#fail(record, {
         code: "DEADLINE_EXCEEDED",
         message: "action deadline elapsed before side effect",
         retryable: false,
       });
+      this.#emitWorldChanged();
       return true;
     }
     const objectError = this.#objectRequestError(record.request);
@@ -512,6 +516,7 @@ export class DeterministicFakeDevice {
     }
     this.#activeActionId = null;
     const previousStateVersion = this.#stateVersion;
+    this.#stateVersion += 1;
     const result = this.#execute(record.request.tool, record.request.arguments);
     this.#executionCounts.set(actionId, (this.#executionCounts.get(actionId) ?? 0) + 1);
     record.status = "completed";
@@ -647,14 +652,19 @@ export class DeterministicFakeDevice {
     if (queueIndex >= 0) {
       this.#queue.splice(queueIndex, 1);
     }
-    if (this.#activeActionId === actionId) {
+    const wasActive = this.#activeActionId === actionId;
+    if (wasActive) {
       this.#activeActionId = null;
+      this.#stateVersion += 1;
     }
     this.#fail(record, {
       code: "CANCELLED",
       message: "action cancellation confirmed",
       retryable: false,
     }, correlationId);
+    if (wasActive) {
+      this.#emitWorldChanged();
+    }
   }
 
   #isExpired(record: FakeActionRecord): boolean {
@@ -681,7 +691,7 @@ export class DeterministicFakeDevice {
   #pruneActionRecords(): void {
     const cutoff = this.#monotonicNow() - this.#idempotencyRetentionMs;
     for (const [actionId, record] of this.#records) {
-      if (record.terminalAtMonotonicMs !== null && record.terminalAtMonotonicMs < cutoff) {
+      if (record.terminalAtMonotonicMs !== null && record.terminalAtMonotonicMs <= cutoff) {
         this.#records.delete(actionId);
         this.#executionCounts.delete(actionId);
       }
@@ -701,17 +711,14 @@ export class DeterministicFakeDevice {
         target_object_id: null,
         pose: "standing",
       };
-      this.#stateVersion += 1;
       return { room_id: roomId };
     }
     if (tool === "character.set_activity") {
       const activity = argumentsValue.activity as CharacterActivity;
       this.#state = { ...this.#state, activity };
-      this.#stateVersion += 1;
       return { activity };
     }
     if (tool === "character.say") {
-      this.#stateVersion += 1;
       return { text: String(argumentsValue.text) };
     }
     const objectAction = OBJECT_ACTION_BY_TOOL[tool];
@@ -733,7 +740,6 @@ export class DeterministicFakeDevice {
         this.#refreshObjectOccupancy(objectId);
         this.#state = { ...this.#state, pose: "sitting" };
       }
-      this.#stateVersion += 1;
       return {
         object_id: objectId,
         action: objectAction,
@@ -828,14 +834,14 @@ export class DeterministicFakeDevice {
   }
 
   #emitWorldChanged(): void {
-    if (this.#protocolVersion !== 2 || this.#socket?.is_open !== true) {
+    if (this.#socket?.is_open !== true) {
       return;
     }
     this.#emit("world.changed", {
       state_version: this.#stateVersion,
       observed_at_ms: this.#now(),
       character: this.getState(),
-      objects: this.#objectSnapshot(),
+      ...(this.#protocolVersion === 2 ? { objects: this.#objectSnapshot() } : {}),
     });
   }
 

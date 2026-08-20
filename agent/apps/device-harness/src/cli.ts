@@ -73,6 +73,9 @@ async function main(): Promise<void> {
       device_tokens: { [deviceId]: deviceToken },
       max_connections: 1,
     },
+    adapter: {
+      protocol_version: profile === "phase3d_object" ? 2 : 1,
+    },
     handshake_timeout_ms: 30_000,
   });
   const policy = new CatEventPolicy({ minimum_interval_ms: 0 });

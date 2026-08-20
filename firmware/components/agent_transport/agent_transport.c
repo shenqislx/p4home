@@ -32,6 +32,7 @@ static const char *TAG = "agent_transport";
 #define AGENT_ACTION_TIMEOUT_MIN_MS 100U
 #define AGENT_ACTION_TIMEOUT_MAX_MS 120000U
 #define AGENT_OBJECT_ACTION_RENDER_MS 250U
+#define AGENT_LOCAL_FALLBACK_GRACE_MS 10000U
 
 #ifndef CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK
 #define CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK 8192
@@ -67,6 +68,7 @@ typedef struct {
     uint32_t last_rx_seq;
     uint64_t last_heartbeat_ms;
     uint64_t last_disconnect_at_ms;
+    uint64_t world_disconnect_deadline_ms;
     uint64_t active_action_complete_at_ms;
     char *rx_frame;
     size_t rx_expected;
@@ -626,7 +628,7 @@ static esp_err_t agent_send_action_event(const world_action_event_t *event,
         return ESP_ERR_INVALID_ARG;
     }
     esp_err_t result = agent_send_payload(type, payload, correlation_id);
-    if (result == ESP_OK && agent_object_tool(event->tool)) {
+    if (result == ESP_OK && !event->from_cache && agent_object_tool(event->tool)) {
         if (event->status == WORLD_ACTION_STATUS_COMPLETED) {
             ESP_LOGW(TAG,
                      "VERIFY:phase3d:device_object_action:PASS action=%s target=%s pose=%s state_version=%" PRIu32,
@@ -656,6 +658,38 @@ static esp_err_t agent_send_action_event(const world_action_event_t *event,
 static bool agent_object_tool(world_action_tool_t tool)
 {
     return tool >= WORLD_ACTION_OBJECT_FIRST && tool <= WORLD_ACTION_OBJECT_LAST;
+}
+
+static void agent_schedule_world_disconnect(uint64_t now_ms)
+{
+    taskENTER_CRITICAL(&s_agent.lock);
+    s_agent.world_disconnect_deadline_ms = now_ms + AGENT_LOCAL_FALLBACK_GRACE_MS;
+    taskEXIT_CRITICAL(&s_agent.lock);
+}
+
+static void agent_cancel_world_disconnect(void)
+{
+    taskENTER_CRITICAL(&s_agent.lock);
+    s_agent.world_disconnect_deadline_ms = 0U;
+    taskEXIT_CRITICAL(&s_agent.lock);
+}
+
+static void agent_publish_world_disconnect_if_due(void)
+{
+    bool due = false;
+    const uint64_t now_ms = agent_now_ms();
+    taskENTER_CRITICAL(&s_agent.lock);
+    if (s_agent.world_disconnect_deadline_ms != 0U &&
+        now_ms >= s_agent.world_disconnect_deadline_ms) {
+        s_agent.world_disconnect_deadline_ms = 0U;
+        due = true;
+    }
+    taskEXIT_CRITICAL(&s_agent.lock);
+    /* A successful handshake can race the worker after it consumes the due
+     * deadline. Recheck the transport truth before publishing fallback. */
+    if (due && !agent_connected()) {
+        (void)world_service_set_agent_connected(false);
+    }
 }
 
 /* Action execution is advanced by the worker rather than inside the WebSocket
@@ -1117,7 +1151,6 @@ static void agent_ws_event(void *handler_args, esp_event_base_t base,
         s_agent.metrics.connected = false;
         s_agent.metrics.handshake_sent = false;
         taskEXIT_CRITICAL(&s_agent.lock);
-        (void)world_service_set_agent_connected(false);
         if (agent_send_handshake() != ESP_OK) {
             ESP_LOGE(TAG, "device handshake failed");
             taskENTER_CRITICAL(&s_agent.lock);
@@ -1129,6 +1162,7 @@ static void agent_ws_event(void *handler_args, esp_event_base_t base,
             (void)world_service_set_agent_connected(false);
             agent_request_reconnect();
         } else {
+            agent_cancel_world_disconnect();
             taskENTER_CRITICAL(&s_agent.lock);
             s_agent.connected = true;
             s_agent.metrics.connected = true;
@@ -1156,7 +1190,12 @@ static void agent_ws_event(void *handler_args, esp_event_base_t base,
         s_agent.metrics.handshake_sent = false;
         taskEXIT_CRITICAL(&s_agent.lock);
         agent_reset_rx();
-        (void)world_service_set_agent_connected(false);
+        /* Keep the authoritative Agent snapshot through a short transport
+         * interruption. Without this grace period the UI's local fallback
+         * clears an object target before the automatic reconnect can publish
+         * its snapshot, making reconnect reconciliation observe a state that
+         * never came from either side of the protocol. */
+        agent_schedule_world_disconnect(disconnected_at_ms);
         break;
     }
     case WEBSOCKET_EVENT_DATA:
@@ -1190,6 +1229,7 @@ static void agent_worker(void *argument)
 {
     (void)argument;
     while (s_agent.running) {
+        agent_publish_world_disconnect_if_due();
         if (s_agent.reconnect_requested && s_agent.ws != NULL) {
             s_agent.reconnect_requested = false;
             esp_err_t stop_result = esp_websocket_client_stop(s_agent.ws);
@@ -1374,6 +1414,7 @@ esp_err_t agent_transport_start(void)
     }
     s_agent.running = true;
     s_agent.reconnect_requested = false;
+    agent_cancel_world_disconnect();
     BaseType_t task_result = xTaskCreate(agent_worker, "agent_transport",
                                          CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK,
                                          NULL, 5, &s_agent.worker_task);
@@ -1403,6 +1444,7 @@ esp_err_t agent_transport_stop(void)
     }
     s_agent.running = false;
     s_agent.reconnect_requested = false;
+    agent_cancel_world_disconnect();
     for (size_t attempt = 0U; attempt < 250U && s_agent.worker_task != NULL; ++attempt) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }

@@ -174,7 +174,15 @@ static bool sim_begin_object_action(world_action_request_t *request,
     sim_advance(UI_FX_TICK_MS);
     ui_home_actor_render_snapshot_t render = {0};
     ui_home_actor_get_render_snapshot(&render);
-    return render.animation == animation;
+    if (render.animation != animation) {
+        return false;
+    }
+    if (animation == WORLD_OBJECT_ANIMATION_CAT_WALK) {
+        sim_advance(UI_FX_TICK_MS);
+        ui_home_actor_get_render_snapshot(&render);
+        return render.animation == WORLD_OBJECT_ANIMATION_CAT_WALK && render.moving;
+    }
+    return true;
 }
 
 static bool sim_complete_object_action(void)

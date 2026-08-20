@@ -15,7 +15,12 @@
   四个 animation binding、取消恢复与 `OBJECT_OCCUPIED`；
 - WebSocket receive callback 不再持锁同步完成动作；worker 异步推进，并给对象动作保留 250 ms
   渲染/取消窗口；
-- local fallback 接管时释放旧对象占用与 target，避免 Agent 离线后对象和 HA 房间状态矛盾；
+- 短暂传输中断保留权威对象 snapshot 10 秒供自动重连，超过窗口后 local fallback 才释放旧对象
+  占用与 target，兼顾 reconnect 一致性与离线 HA/UI 接管；
+- fake-device 的 started、活动取消/超时与只读完成现在和 P4 一样推进 `state_version` 并发送
+  `world.changed`，避免 3C 断线对账建立在较弱的假状态机上；
+- 幂等缓存重放不再输出 `device_object_action/device_object_cancel` 强 marker；静态 object-idle 不再每个
+  8 FPS tick 重复 invalidation；object go-to 在终态 anchor 发布前持续渲染 walk binding；
 - 新增 `phase3d_object` 硬件 profile，使用 Device Protocol v2、一次性 TLS 凭据和确定性 Cat
   `go_to(living_room.sofa) → sit` harness；harness 还核对 reconnect snapshot 与 started 后取消。
 
@@ -34,7 +39,7 @@ VERIFY:phase3d:sim_occupancy_conflict:PASS error=OBJECT_OCCUPIED
 其余本地门禁：
 
 - Node 24.19 strict typecheck：通过；
-- Agent tests：139/139 通过；
+- Agent tests：140/140 通过；
 - Python contract：58/58 通过；
 - Python hardware helper：4/4 通过；
 - ESP32-P4 `agent_transport.c` 与 `ui_home_actor.c` 使用已配置 IDF 编译命令单文件编译：通过；
