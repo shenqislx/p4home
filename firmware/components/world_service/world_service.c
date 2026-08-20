@@ -663,15 +663,28 @@ esp_err_t world_service_apply_local_fallback(const world_local_fallback_context_
         return ESP_OK;
     }
 
+    /* Once local fallback owns the character, an Agent-selected object anchor
+     * can no longer remain authoritative. Keeping it would produce a snapshot
+     * whose room follows HA while target_object_id still points to another
+     * room, and the UI would remain pinned to the stale object. */
+    if (s_world.snapshot.target_object_id[0] != '\0') {
+        world_release_character_occupancy_locked();
+        s_world.snapshot.target_object_id[0] = '\0';
+        s_world.snapshot.character_pose = WORLD_CHARACTER_POSE_STANDING;
+        s_world.snapshot.active_animation = WORLD_OBJECT_ANIMATION_NONE;
+        world_increment_version_locked();
+        changed = true;
+    }
+
     if (!context->ha_connected || context->online_entities == 0U) {
         changed = world_apply_desired_locked(s_world.snapshot.room, WORLD_ACTIVITY_SLEEP,
                                              "信号断了…先打个盹",
-                                             WORLD_SPEECH_TONE_MUTED);
+                                             WORLD_SPEECH_TONE_MUTED) || changed;
     } else if (context->lights_on_total == 0U && context->climates_on_total == 0U) {
         changed = world_apply_desired_locked(WORLD_ROOM_PRIMARY_BEDROOM,
                                              WORLD_ACTIVITY_SLEEP,
                                              "全屋熄灯，去睡了",
-                                             WORLD_SPEECH_TONE_SLEEP);
+                                             WORLD_SPEECH_TONE_SLEEP) || changed;
     } else {
         world_room_id_t destination = s_world.snapshot.room;
         bool found = false;
@@ -698,7 +711,8 @@ esp_err_t world_service_apply_local_fallback(const world_local_fallback_context_
         } else {
             snprintf(speech, sizeof(speech), "去%s看看", world_service_room_text(destination));
         }
-        changed = world_apply_desired_locked(destination, WORLD_ACTIVITY_IDLE, speech, tone);
+        changed = world_apply_desired_locked(destination, WORLD_ACTIVITY_IDLE, speech, tone) ||
+                  changed;
     }
     portEXIT_CRITICAL(&s_world_lock);
     if (changed) {

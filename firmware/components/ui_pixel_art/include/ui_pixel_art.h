@@ -12,6 +12,44 @@ LV_IMAGE_DECLARE(actor_idle_1);
 /* Frame list for lv_animimg_set_src(); must stay static. */
 #define ACTOR_IDLE_FRAMES { &actor_idle_0, &actor_idle_1 }
 
+LV_IMAGE_DECLARE(actor_look_0);
+LV_IMAGE_DECLARE(actor_look_1);
+LV_IMAGE_DECLARE(actor_look_2);
+LV_IMAGE_DECLARE(actor_look_3);
+#define ACTOR_LOOK_FRAME_COUNT 4
+/* Frame list for lv_animimg_set_src(); must stay static. */
+#define ACTOR_LOOK_FRAMES { &actor_look_0, &actor_look_1, &actor_look_2, &actor_look_3 }
+
+LV_IMAGE_DECLARE(actor_object_idle_0);
+LV_IMAGE_DECLARE(actor_object_idle_1);
+#define ACTOR_OBJECT_IDLE_FRAME_COUNT 2
+/* Frame list for lv_animimg_set_src(); must stay static. */
+#define ACTOR_OBJECT_IDLE_FRAMES { &actor_object_idle_0, &actor_object_idle_1 }
+
+LV_IMAGE_DECLARE(actor_object_walk_0);
+LV_IMAGE_DECLARE(actor_object_walk_1);
+LV_IMAGE_DECLARE(actor_object_walk_2);
+LV_IMAGE_DECLARE(actor_object_walk_3);
+#define ACTOR_OBJECT_WALK_FRAME_COUNT 4
+/* Frame list for lv_animimg_set_src(); must stay static. */
+#define ACTOR_OBJECT_WALK_FRAMES { &actor_object_walk_0, &actor_object_walk_1, &actor_object_walk_2, &actor_object_walk_3 }
+
+LV_IMAGE_DECLARE(actor_paw_0);
+LV_IMAGE_DECLARE(actor_paw_1);
+LV_IMAGE_DECLARE(actor_paw_2);
+LV_IMAGE_DECLARE(actor_paw_3);
+#define ACTOR_PAW_FRAME_COUNT 4
+/* Frame list for lv_animimg_set_src(); must stay static. */
+#define ACTOR_PAW_FRAMES { &actor_paw_0, &actor_paw_1, &actor_paw_2, &actor_paw_3 }
+
+LV_IMAGE_DECLARE(actor_sit_0);
+LV_IMAGE_DECLARE(actor_sit_1);
+LV_IMAGE_DECLARE(actor_sit_2);
+LV_IMAGE_DECLARE(actor_sit_3);
+#define ACTOR_SIT_FRAME_COUNT 4
+/* Frame list for lv_animimg_set_src(); must stay static. */
+#define ACTOR_SIT_FRAMES { &actor_sit_0, &actor_sit_1, &actor_sit_2, &actor_sit_3 }
+
 LV_IMAGE_DECLARE(actor_sleep_0);
 LV_IMAGE_DECLARE(actor_sleep_1);
 #define ACTOR_SLEEP_FRAME_COUNT 2

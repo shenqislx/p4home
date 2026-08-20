@@ -2,9 +2,12 @@ import { readFile, writeFile } from "node:fs/promises";
 
 import {
   CatEventPolicy,
+  CatObjectEventPolicy,
   DeviceRuntimeHub,
   RoleScheduler,
+  runCatObjectSitEvent,
   runCatRoomTargetEvent,
+  type ObjectRuntimeCharacterState,
 } from "@p4home/runtime";
 
 const ACTION_COUNT = 100;
@@ -58,6 +61,10 @@ async function main(): Promise<void> {
   const readyFile = requiredEnvironment("P4HOME_HARNESS_READY_FILE");
   const resultFile = requiredEnvironment("P4HOME_HARNESS_RESULT_FILE");
   const port = positivePort(requiredEnvironment("P4HOME_AGENT_PORT"));
+  const profile = requiredEnvironment("P4HOME_HARDWARE_PROFILE");
+  if (profile !== "phase2d_agent" && profile !== "phase3d_object") {
+    throw new Error("unsupported_hardware_profile");
+  }
   const hub = new DeviceRuntimeHub({
     server: {
       host: "0.0.0.0",
@@ -89,6 +96,174 @@ async function main(): Promise<void> {
     const adapter = hub.getAdapter(deviceId);
     if (adapter === undefined) {
       throw new Error("device_adapter_missing");
+    }
+
+    if (profile === "phase3d_object") {
+      const expectedCapabilities = [
+        {
+          object_id: "living_room.sofa",
+          room_id: "living_room",
+          supported_actions: ["go_to", "sit", "look_at", "interact"],
+          available: true,
+        },
+        {
+          object_id: "study.desk",
+          room_id: "study",
+          supported_actions: ["go_to", "look_at", "interact"],
+          available: true,
+        },
+        {
+          object_id: "living_room.window",
+          room_id: "living_room",
+          supported_actions: ["go_to", "look_at", "interact"],
+          available: true,
+        },
+      ];
+      if (
+        adapter.protocol_version !== 2
+        || JSON.stringify(adapter.object_capabilities) !== JSON.stringify(expectedCapabilities)
+      ) {
+        throw new Error("object_capability_projection_mismatch");
+      }
+      const now = Date.now();
+      const chain = await runCatObjectSitEvent({
+        event: {
+          event_id: "hardware-phase3d-object-event",
+          event_type: "test.object_sit_target",
+          source: "test_harness",
+          occurred_at_ms: now,
+          payload: { target_id: "living_room.sofa" },
+        },
+        run_id: "hardware-phase3d-object-run",
+        session_id: "hardware-phase3d-cat-session",
+        session_created_at_ms: now,
+        tool_call_ids: ["hardware-phase3d-tool-go", "hardware-phase3d-tool-sit"],
+        action_ids: ["hardware-phase3d-action-go", "hardware-phase3d-action-sit"],
+        policy: new CatObjectEventPolicy({
+          minimum_interval_ms: 0,
+        }),
+        scheduler,
+        adapter,
+        provider: {
+          async chat() {
+            return {
+              model: "phase-3d-hardware-deterministic-cat",
+              message: {
+                role: "assistant" as const,
+                content: "",
+                tool_calls: [
+                  {
+                    type: "function" as const,
+                    function: {
+                      name: "character.go_to",
+                      arguments: { target_id: "living_room.sofa" },
+                    },
+                  },
+                  {
+                    type: "function" as const,
+                    function: {
+                      name: "character.sit",
+                      arguments: { target_id: "living_room.sofa" },
+                    },
+                  },
+                ],
+              },
+            };
+          },
+        },
+        action_timeout_ms: 5_000,
+        wait_timeout_ms: 7_000,
+        reconciliation_timeout_ms: 5_000,
+      });
+      if (chain.status !== "completed" || chain.steps.length !== 2) {
+        throw new Error("object_action_chain_not_completed");
+      }
+      await waitUntil(() => {
+        const snapshot = adapter.last_snapshot;
+        const character = snapshot?.character as ObjectRuntimeCharacterState | undefined;
+        const sofa = snapshot?.objects?.find((object) =>
+          object.object_id === "living_room.sofa"
+        );
+        return character?.target_object_id === "living_room.sofa"
+          && character.pose === "sitting"
+          && sofa?.occupied === true;
+      }, 5_000, "object_terminal_snapshot_timeout");
+
+      const beforeReconnectVersion = adapter.last_snapshot?.state_version ?? 0;
+      if (!hub.server.disconnectDevice(deviceId)) {
+        throw new Error("object_reconnect_disconnect_failed");
+      }
+      await waitUntil(() => !adapter.is_ready, 5_000, "object_disconnect_timeout");
+      await waitUntil(() => adapter.is_ready, 30_000, "object_reconnect_timeout");
+      const reconnectSnapshot = adapter.last_snapshot;
+      const reconnectCharacter = reconnectSnapshot?.character as
+        | ObjectRuntimeCharacterState
+        | undefined;
+      const reconnectSofa = reconnectSnapshot?.objects?.find((object) =>
+        object.object_id === "living_room.sofa"
+      );
+      if (
+        reconnectSnapshot === null
+        || reconnectCharacter === undefined
+        || reconnectSofa === undefined
+        || reconnectSnapshot.state_version < beforeReconnectVersion
+        || reconnectCharacter?.target_object_id !== "living_room.sofa"
+        || reconnectCharacter.pose !== "sitting"
+        || reconnectSofa?.occupied !== true
+      ) {
+        throw new Error("object_reconnect_snapshot_mismatch");
+      }
+
+      const cancelController = new AbortController();
+      const cancelledPromise = adapter.executeAction({
+        action_id: "hardware-phase3d-action-cancel",
+        tool: "character.interact",
+        arguments: { target_id: "living_room.sofa" },
+        timeout_ms: 5_000,
+        wait_timeout_ms: 7_000,
+        origin: "autonomy",
+        signal: cancelController.signal,
+      });
+      await waitUntil(
+        () => adapter.getAction("hardware-phase3d-action-cancel")?.status === "started",
+        5_000,
+        "object_cancel_action_not_started",
+      );
+      cancelController.abort();
+      const cancelled = await cancelledPromise;
+      if (cancelled.status !== "failed" || cancelled.error.code !== "CANCELLED") {
+        throw new Error("object_cancel_not_observed");
+      }
+
+      const timings = chain.steps.map((step) =>
+        adapter.getAction(step.action_id)?.timing.terminal_latency_ms ?? null
+      );
+      if (timings.some((value) => value === null)) {
+        throw new Error("object_action_timing_missing");
+      }
+      const result = {
+        schema_version: 1,
+        protocol_version: adapter.protocol_version,
+        target_object_id: reconnectCharacter.target_object_id,
+        pose: reconnectCharacter.pose,
+        occupied: reconnectSofa.occupied,
+        state_version: reconnectSnapshot.state_version,
+        action_terminal_latency_ms: timings,
+        cancellation: cancelled.error.code,
+      };
+      await writeFile(resultFile, `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });
+      process.stdout.write(
+        `VERIFY:phase3d:object_action_chain:PASS target=living_room.sofa `
+        + `pose=sitting occupied=true latencies_ms=${timings.join(",")}\n`,
+      );
+      process.stdout.write(
+        `VERIFY:phase3d:reconnect_snapshot:PASS state_version=${reconnectSnapshot.state_version} `
+        + "target=living_room.sofa pose=sitting occupied=true\n",
+      );
+      process.stdout.write("VERIFY:phase3d:object_cancel:PASS error=CANCELLED\n");
+      await closeHub();
+      process.stdout.write("HARNESS:agent_offline:STARTED profile=phase3d_object\n");
+      return;
     }
 
     let maxAcceptedLatencyMs = 0;

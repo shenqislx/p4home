@@ -10,6 +10,7 @@ on:
         options:
           - generic
           - phase2d_agent
+          - phase3d_object
         default: generic
       serial_port:
         description: macOS serial device path
@@ -20,11 +21,11 @@ on:
         required: true
         default: "120"
       agent_host:
-        description: Runner LAN host reachable by P4 (phase2d_agent only)
+        description: Runner LAN host reachable by P4 (Agent profiles only)
         required: false
         default: ""
       agent_port:
-        description: Temporary Agent TLS port (phase2d_agent only)
+        description: Temporary Agent TLS port (Agent profiles only)
         required: true
         default: "8443"
 
@@ -71,17 +72,20 @@ jobs:
           if not 10 <= seconds <= 7200:
               raise SystemExit("monitor_seconds must be between 10 and 7200")
           profile = os.environ["VALIDATION_PROFILE"]
-          if profile not in {"generic", "phase2d_agent"}:
+          if profile not in {"generic", "phase2d_agent", "phase3d_object"}:
               raise SystemExit("unsupported validation_profile")
           port = int(os.environ["AGENT_PORT"])
           if not 1 <= port <= 65535:
               raise SystemExit("agent_port must be between 1 and 65535")
-          if profile == "phase2d_agent":
+          if profile != "generic":
               host = os.environ["AGENT_HOST"]
               if not host or re.fullmatch(r"[A-Za-z0-9.-]+", host) is None:
-                  raise SystemExit("phase2d_agent requires a safe runner LAN agent_host")
+                  raise SystemExit("Agent profiles require a safe runner LAN agent_host")
+          if profile == "phase2d_agent":
               if seconds != 7200:
                   raise SystemExit("phase2d_agent requires monitor_seconds=7200")
+          if profile == "phase3d_object" and seconds < 120:
+              raise SystemExit("phase3d_object requires monitor_seconds>=120")
           PY
           test -f scripts/activate-idf-v5.5.4.sh
           test -s firmware/dependencies.lock
@@ -91,8 +95,15 @@ jobs:
           echo "AGENT_TMP_DIR=$RUNNER_TEMP/p4home-agent-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
           if [[ "$VALIDATION_PROFILE" == "phase2d_agent" ]]; then
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 300))" >> "$GITHUB_ENV"
+          elif [[ "$VALIDATION_PROFILE" == "phase3d_object" ]]; then
+            echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 120))" >> "$GITHUB_ENV"
           else
             echo "CAPTURE_SECONDS=$MONITOR_SECONDS" >> "$GITHUB_ENV"
+          fi
+          if [[ "$VALIDATION_PROFILE" == "phase3d_object" ]]; then
+            echo "AGENT_PROTOCOL_VERSION=2" >> "$GITHUB_ENV"
+          else
+            echo "AGENT_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
           fi
 
       - name: Validate agent harness helpers
@@ -136,8 +147,8 @@ jobs:
           echo "HARDWARE_SDKCONFIG=$HARDWARE_SDKCONFIG" >> "$GITHUB_ENV"
           echo "EXPECTED_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" >> "$GITHUB_ENV"
 
-      - name: Prepare ephemeral Phase 2D Agent profile
-        if: inputs.validation_profile == 'phase2d_agent'
+      - name: Prepare ephemeral Agent profile
+        if: inputs.validation_profile != 'generic'
         run: |
           set -euo pipefail
           mkdir -p "$AGENT_TMP_DIR"
@@ -148,7 +159,7 @@ jobs:
             -keyout "$AGENT_TMP_DIR/agent-key.pem" \
             -out "$AGENT_TMP_DIR/agent-cert.pem" \
             -days 1 \
-            -subj "/CN=p4home-phase2d-harness"
+            -subj "/CN=p4home-agent-harness"
           openssl rand -hex 32 > "$AGENT_TMP_DIR/device-token"
           openssl pkey -in "$AGENT_TMP_DIR/agent-key.pem" -pubout -outform DER \
             | openssl dgst -sha256 -hex \
@@ -161,7 +172,8 @@ jobs:
             --uri "$AGENT_URI" \
             --device-id "$AGENT_DEVICE_ID" \
             --token-file "$AGENT_TMP_DIR/device-token" \
-            --spki-file "$AGENT_TMP_DIR/spki-sha256"
+            --spki-file "$AGENT_TMP_DIR/spki-sha256" \
+            --protocol-version "$AGENT_PROTOCOL_VERSION"
           echo "AGENT_DEVICE_ID=$AGENT_DEVICE_ID" >> "$GITHUB_ENV"
           echo "AGENT_HARNESS_LOG=$AGENT_TMP_DIR/agent-harness.log" >> "$GITHUB_ENV"
           echo "AGENT_HARNESS_READY_FILE=$AGENT_TMP_DIR/ready" >> "$GITHUB_ENV"
@@ -187,14 +199,14 @@ jobs:
           grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
           git diff --exit-code -- firmware/dependencies.lock
 
-      - name: Set up Node for Phase 2D harness
-        if: inputs.validation_profile == 'phase2d_agent'
+      - name: Set up Node for Agent harness
+        if: inputs.validation_profile != 'generic'
         uses: actions/setup-node@v4
         with:
           node-version: 24.19.0
 
-      - name: Start Phase 2D Agent Runtime harness
-        if: inputs.validation_profile == 'phase2d_agent'
+      - name: Start Agent Runtime harness
+        if: inputs.validation_profile != 'generic'
         shell: zsh {0}
         working-directory: agent
         run: |
@@ -207,6 +219,7 @@ jobs:
           export P4HOME_AGENT_TLS_KEY_FILE="$AGENT_TMP_DIR/agent-key.pem"
           export P4HOME_AGENT_TLS_CERT_FILE="$AGENT_TMP_DIR/agent-cert.pem"
           export P4HOME_AGENT_PORT="$AGENT_PORT"
+          export P4HOME_HARDWARE_PROFILE="$VALIDATION_PROFILE"
           export P4HOME_HARNESS_READY_FILE="$AGENT_HARNESS_READY_FILE"
           export P4HOME_HARNESS_RESULT_FILE="$AGENT_HARNESS_RESULT_FILE"
           export P4HOME_HARNESS_STATUS_FILE="$AGENT_HARNESS_STATUS_FILE"
@@ -247,12 +260,12 @@ jobs:
             --append \
             --reset
 
-      - name: Append Phase 2D harness evidence
-        if: always() && inputs.validation_profile == 'phase2d_agent'
+      - name: Append Agent harness evidence
+        if: always() && inputs.validation_profile != 'generic'
         run: |
           set -euo pipefail
           if [[ -s "$AGENT_HARNESS_LOG" ]]; then
-            printf '\n$ phase2d-agent-harness\n' >> firmware/monitor.log
+            printf '\n$ agent-hardware-harness profile=%s\n' "$VALIDATION_PROFILE" >> firmware/monitor.log
             tee -a firmware/monitor.log < "$AGENT_HARNESS_LOG" > /dev/null
           fi
 

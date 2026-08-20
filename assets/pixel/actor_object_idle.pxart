@@ -1,0 +1,33 @@
+# name: actor_object_idle
+# palette: h=SHELL_DARK s=LAMP_BASE S=LAMP_HI r=FABRIC_LIGHT R=FABRIC_DARK b=COOL_DARK e=SHADOW
+# Directional standing pose used after an object action. The first frame faces
+# left and the second faces right; the nose and near eye make the direction
+# visible without relying on transforms that would blur the 4x pixel grid.
+--frame--
+..hhhh..
+.hhhhhh.
+.hsSsh..
+esSeS...
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+rRrrrrRr
+.RrrrrR.
+..b..b..
+..b..b..
+.ee..ee.
+--frame--
+..hhhh..
+.hhhhhh.
+..hsSsh.
+...SeSes
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+rRrrrrRr
+.RrrrrR.
+..b..b..
+..b..b..
+.ee..ee.

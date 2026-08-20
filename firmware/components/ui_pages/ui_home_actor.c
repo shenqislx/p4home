@@ -1,4 +1,5 @@
 #include "ui_home_actor.h"
+#include "ui_home_actor_test.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -10,6 +11,7 @@
 #include "ui_pixel_art.h"
 #include "ui_pixel_fx.h"
 #include "ui_pixel_palette.h"
+#include "world_object_registry.h"
 
 static const char *TAG = "ui_actor";
 
@@ -36,6 +38,10 @@ typedef enum {
     UI_ACTOR_RENDER_WALK,
     UI_ACTOR_RENDER_SLEEP,
     UI_ACTOR_RENDER_DOZE,
+    UI_ACTOR_RENDER_OBJECT_IDLE,
+    UI_ACTOR_RENDER_OBJECT_SIT,
+    UI_ACTOR_RENDER_OBJECT_LOOK,
+    UI_ACTOR_RENDER_OBJECT_PAW,
 } ui_actor_render_state_t;
 
 static lv_obj_t *s_actor;
@@ -49,6 +55,10 @@ static ui_actor_render_state_t s_state = UI_ACTOR_RENDER_IDLE;
 static world_activity_t s_desired_activity = WORLD_ACTIVITY_IDLE;
 static world_speech_tone_t s_desired_tone = WORLD_SPEECH_TONE_DEFAULT;
 static size_t s_room = WORLD_ROOM_LIVING_ROOM;
+static world_object_facing_t s_facing = WORLD_OBJECT_FACING_RIGHT;
+static world_character_pose_t s_object_pose = WORLD_CHARACTER_POSE_STANDING;
+static world_object_animation_t s_active_animation = WORLD_OBJECT_ANIMATION_NONE;
+static char s_target_object_id[WORLD_OBJECT_ID_MAX_BYTES + 1U];
 static ui_actor_point_t s_pos;
 static ui_actor_point_t s_target;
 /* Two-leg route so crossing storeys goes via the stairs instead of through the
@@ -77,6 +87,11 @@ static uint32_t s_speech_revision;
 static const lv_image_dsc_t *const s_idle_frames[] = ACTOR_IDLE_FRAMES;
 static const lv_image_dsc_t *const s_walk_frames[] = ACTOR_WALK_FRAMES;
 static const lv_image_dsc_t *const s_sleep_frames[] = ACTOR_SLEEP_FRAMES;
+static const lv_image_dsc_t *const s_object_idle_frames[] = ACTOR_OBJECT_IDLE_FRAMES;
+static const lv_image_dsc_t *const s_object_walk_frames[] = ACTOR_OBJECT_WALK_FRAMES;
+static const lv_image_dsc_t *const s_sit_frames[] = ACTOR_SIT_FRAMES;
+static const lv_image_dsc_t *const s_look_frames[] = ACTOR_LOOK_FRAMES;
+static const lv_image_dsc_t *const s_paw_frames[] = ACTOR_PAW_FRAMES;
 static const lv_image_dsc_t *const s_pet_frames[] = PET_IDLE_FRAMES;
 
 static void ui_home_actor_set_render_state(ui_actor_render_state_t state);
@@ -116,8 +131,31 @@ static size_t ui_home_actor_dialog_page_end(size_t start)
     return end;
 }
 
+static size_t ui_home_actor_direction_offset(size_t frames_per_direction)
+{
+    return s_facing == WORLD_OBJECT_FACING_RIGHT ? frames_per_direction : 0U;
+}
+
 static ui_actor_render_state_t ui_home_actor_desired_rest_state(world_speech_tone_t tone)
 {
+    switch (s_active_animation) {
+    case WORLD_OBJECT_ANIMATION_CAT_SIT:
+        return UI_ACTOR_RENDER_OBJECT_SIT;
+    case WORLD_OBJECT_ANIMATION_CAT_LOOK:
+        return UI_ACTOR_RENDER_OBJECT_LOOK;
+    case WORLD_OBJECT_ANIMATION_CAT_PAW:
+        return UI_ACTOR_RENDER_OBJECT_PAW;
+    case WORLD_OBJECT_ANIMATION_CAT_WALK:
+        return UI_ACTOR_RENDER_WALK;
+    case WORLD_OBJECT_ANIMATION_NONE:
+    default:
+        break;
+    }
+    if (s_target_object_id[0] != '\0') {
+        return s_object_pose == WORLD_CHARACTER_POSE_SITTING
+                   ? UI_ACTOR_RENDER_OBJECT_SIT
+                   : UI_ACTOR_RENDER_OBJECT_IDLE;
+    }
     if (s_desired_activity != WORLD_ACTIVITY_SLEEP) {
         return UI_ACTOR_RENDER_IDLE;
     }
@@ -138,6 +176,21 @@ static int16_t ui_home_actor_room_floor_y(size_t room_index)
     const ui_home_room_def_t *def = ui_home_room_def(room_index);
     bool upper = def != NULL && def->level == 0;
     return (int16_t)(upper ? UI_ACTOR_UPPER_FLOOR_Y : UI_ACTOR_LOWER_FLOOR_Y);
+}
+
+static bool ui_home_actor_object_target(const world_service_snapshot_t *snapshot,
+                                        size_t room_index,
+                                        ui_actor_point_t *target)
+{
+    if (snapshot->target_object_id[0] == '\0' || target == NULL) {
+        return false;
+    }
+    int32_t origin_x = 0;
+    int32_t origin_y = 0;
+    ui_home_room_origin(room_index, &origin_x, &origin_y);
+    target->x = (int16_t)(origin_x + snapshot->character_art_x);
+    target->y = (int16_t)(origin_y + snapshot->character_floor_y - UI_ACTOR_ART_H);
+    return true;
 }
 
 /* s_pos is the top-left of a standing actor, so the floor line is always
@@ -212,11 +265,51 @@ static bool ui_home_actor_tick(uint32_t tick, void *user_data)
             s_walk_frame = 0;
             break;
         }
-        s_walk_frame = (uint8_t)((s_walk_frame + 1U) % ACTOR_WALK_FRAME_COUNT);
-        ui_home_actor_set_pose(s_walk_frames[s_walk_frame]);
+        if (s_target_object_id[0] != '\0') {
+            const size_t frames_per_direction = ACTOR_OBJECT_WALK_FRAME_COUNT / 2U;
+            s_walk_frame = (uint8_t)((s_walk_frame + 1U) % frames_per_direction);
+            ui_home_actor_set_pose(
+                s_object_walk_frames[ui_home_actor_direction_offset(frames_per_direction) +
+                                     s_walk_frame]);
+        } else {
+            s_walk_frame = (uint8_t)((s_walk_frame + 1U) % ACTOR_WALK_FRAME_COUNT);
+            ui_home_actor_set_pose(s_walk_frames[s_walk_frame]);
+        }
         ui_home_actor_place();
         break;
     }
+    case UI_ACTOR_RENDER_OBJECT_SIT: {
+        const size_t frames_per_direction = ACTOR_SIT_FRAME_COUNT / 2U;
+        if ((tick % 8U) == 0U) {
+            s_idle_frame = (uint8_t)((s_idle_frame + 1U) % frames_per_direction);
+            ui_home_actor_set_pose(
+                s_sit_frames[ui_home_actor_direction_offset(frames_per_direction) +
+                             s_idle_frame]);
+        }
+        break;
+    }
+    case UI_ACTOR_RENDER_OBJECT_LOOK: {
+        const size_t frames_per_direction = ACTOR_LOOK_FRAME_COUNT / 2U;
+        if ((tick % 2U) == 0U) {
+            s_idle_frame = (uint8_t)((s_idle_frame + 1U) % frames_per_direction);
+            ui_home_actor_set_pose(
+                s_look_frames[ui_home_actor_direction_offset(frames_per_direction) +
+                              s_idle_frame]);
+        }
+        break;
+    }
+    case UI_ACTOR_RENDER_OBJECT_PAW: {
+        const size_t frames_per_direction = ACTOR_PAW_FRAME_COUNT / 2U;
+        s_idle_frame = (uint8_t)((s_idle_frame + 1U) % frames_per_direction);
+        ui_home_actor_set_pose(
+            s_paw_frames[ui_home_actor_direction_offset(frames_per_direction) +
+                         s_idle_frame]);
+        break;
+    }
+    case UI_ACTOR_RENDER_OBJECT_IDLE:
+        ui_home_actor_set_pose(
+            s_object_idle_frames[ui_home_actor_direction_offset(1U)]);
+        break;
     case UI_ACTOR_RENDER_SLEEP:
     case UI_ACTOR_RENDER_DOZE:
         if ((tick % 8U) == 0U) {
@@ -299,10 +392,17 @@ esp_err_t ui_home_actor_create(lv_obj_t *house)
         s_room = snapshot_room;
         s_desired_activity = snapshot.activity;
         s_desired_tone = snapshot.speech_tone;
+        s_facing = snapshot.character_facing;
+        s_object_pose = snapshot.character_pose;
+        s_active_animation = snapshot.active_animation;
+        snprintf(s_target_object_id, sizeof(s_target_object_id), "%s",
+                 snapshot.target_object_id);
     }
 
-    s_pos.x = ui_home_actor_room_stand_x(s_room);
-    s_pos.y = ui_home_actor_room_floor_y(s_room);
+    if (!ui_home_actor_object_target(&snapshot, s_room, &s_pos)) {
+        s_pos.x = ui_home_actor_room_stand_x(s_room);
+        s_pos.y = ui_home_actor_room_floor_y(s_room);
+    }
     s_target = s_pos;
     for (size_t i = 0; i <= UI_ACTOR_PET_LAG; ++i) {
         s_pet_trail[i] = s_pos;
@@ -334,19 +434,18 @@ esp_err_t ui_home_actor_create(lv_obj_t *house)
     return ESP_OK;
 }
 
-static void ui_home_actor_go_to_room(size_t room_index)
+static void ui_home_actor_go_to_target(size_t room_index, ui_actor_point_t target)
 {
     const ui_home_room_def_t *def = ui_home_room_def(room_index);
     if (def == NULL || s_actor == NULL) {
         return;
     }
-    if (room_index == s_room) {
+    if (room_index == s_room && target.x == s_pos.x && target.y == s_pos.y) {
         return;
     }
 
     s_room = room_index;
-    s_target.x = ui_home_actor_room_stand_x(room_index);
-    s_target.y = ui_home_actor_room_floor_y(room_index);
+    s_target = target;
 
     /* Crossing storeys routes through the stair run so the actor never walks
      * through the floor slab. */
@@ -358,8 +457,23 @@ static void ui_home_actor_go_to_room(size_t room_index)
         s_has_waypoint = false;
     }
     s_state = UI_ACTOR_RENDER_WALK;
-    ui_home_actor_set_pose(s_walk_frames[0]);
+    if (s_target_object_id[0] != '\0') {
+        const size_t frames_per_direction = ACTOR_OBJECT_WALK_FRAME_COUNT / 2U;
+        ui_home_actor_set_pose(
+            s_object_walk_frames[ui_home_actor_direction_offset(frames_per_direction)]);
+    } else {
+        ui_home_actor_set_pose(s_walk_frames[0]);
+    }
     ESP_LOGI(TAG, "actor heading to %s", def->title);
+}
+
+static void ui_home_actor_go_to_room(size_t room_index)
+{
+    ui_actor_point_t target = {
+        .x = ui_home_actor_room_stand_x(room_index),
+        .y = ui_home_actor_room_floor_y(room_index),
+    };
+    ui_home_actor_go_to_target(room_index, target);
 }
 
 static void ui_home_actor_set_render_state(ui_actor_render_state_t state)
@@ -370,6 +484,22 @@ static void ui_home_actor_set_render_state(ui_actor_render_state_t state)
     s_state = state;
     s_idle_frame = 0;
     switch (state) {
+    case UI_ACTOR_RENDER_OBJECT_SIT:
+        ui_home_actor_set_pose(
+            s_sit_frames[ui_home_actor_direction_offset(ACTOR_SIT_FRAME_COUNT / 2U)]);
+        break;
+    case UI_ACTOR_RENDER_OBJECT_LOOK:
+        ui_home_actor_set_pose(
+            s_look_frames[ui_home_actor_direction_offset(ACTOR_LOOK_FRAME_COUNT / 2U)]);
+        break;
+    case UI_ACTOR_RENDER_OBJECT_PAW:
+        ui_home_actor_set_pose(
+            s_paw_frames[ui_home_actor_direction_offset(ACTOR_PAW_FRAME_COUNT / 2U)]);
+        break;
+    case UI_ACTOR_RENDER_OBJECT_IDLE:
+        ui_home_actor_set_pose(
+            s_object_idle_frames[ui_home_actor_direction_offset(1U)]);
+        break;
     case UI_ACTOR_RENDER_SLEEP:
     case UI_ACTOR_RENDER_DOZE:
         ui_home_actor_set_pose(s_sleep_frames[0]);
@@ -391,9 +521,41 @@ void ui_home_actor_apply_snapshot(const world_service_snapshot_t *snapshot)
         !ui_home_actor_room_index(snapshot->room, &room_index)) {
         return;
     }
+    char previous_target[sizeof(s_target_object_id)];
+    snprintf(previous_target, sizeof(previous_target), "%s", s_target_object_id);
+    world_character_pose_t previous_pose = s_object_pose;
+    world_object_animation_t previous_animation = s_active_animation;
+    world_object_facing_t previous_facing = s_facing;
     s_desired_activity = snapshot->activity;
     s_desired_tone = snapshot->speech_tone;
-    if (room_index != s_room) {
+    s_facing = snapshot->character_facing;
+    s_object_pose = snapshot->character_pose;
+    s_active_animation = snapshot->active_animation;
+    snprintf(s_target_object_id, sizeof(s_target_object_id), "%s",
+             snapshot->target_object_id);
+    ui_actor_point_t object_target = {0};
+    if (ui_home_actor_object_target(snapshot, room_index, &object_target)) {
+        if (strcmp(previous_target, snapshot->target_object_id) != 0 &&
+            snapshot->active_animation == WORLD_OBJECT_ANIMATION_NONE) {
+            /* The service publishes the destination only in the completed
+             * snapshot. Commit that authoritative anchor immediately: the
+             * started snapshot has already rendered the bound walk frames,
+             * and a later visual walk would overlap the following sit action. */
+            s_room = room_index;
+            s_pos = object_target;
+            s_target = object_target;
+            s_has_waypoint = false;
+            ui_home_actor_place();
+            ui_home_actor_set_render_state(
+                ui_home_actor_desired_rest_state(snapshot->speech_tone));
+        } else if (object_target.x != s_pos.x || object_target.y != s_pos.y ||
+            room_index != s_room) {
+            ui_home_actor_go_to_target(room_index, object_target);
+        } else if (s_state != UI_ACTOR_RENDER_WALK) {
+            ui_home_actor_set_render_state(
+                ui_home_actor_desired_rest_state(snapshot->speech_tone));
+        }
+    } else if (room_index != s_room) {
         ui_home_actor_go_to_room(room_index);
     } else if (s_state != UI_ACTOR_RENDER_WALK) {
         ui_home_actor_set_render_state(
@@ -421,6 +583,48 @@ void ui_home_actor_apply_snapshot(const world_service_snapshot_t *snapshot)
         ui_home_actor_say(snapshot->speech_text, accent);
         s_speech_revision = snapshot->speech_revision;
     }
+    if (snapshot->target_object_id[0] != '\0' &&
+        (strcmp(previous_target, snapshot->target_object_id) != 0 ||
+         previous_pose != snapshot->character_pose ||
+         previous_animation != snapshot->active_animation ||
+         previous_facing != snapshot->character_facing)) {
+        ESP_LOGW(TAG,
+                 "VERIFY:phase3d:ui_object_state:PASS target=%s facing=%s pose=%s animation=%s anchor_x=%d floor_y=%d",
+                 snapshot->target_object_id,
+                 snapshot->character_facing == WORLD_OBJECT_FACING_LEFT ? "left" : "right",
+                 world_service_pose_text(snapshot->character_pose),
+                 world_object_animation_text(snapshot->active_animation),
+                 (int)s_target.x, (int)(s_target.y + UI_ACTOR_ART_H));
+    } else if (!snapshot->agent_connected && previous_target[0] != '\0' &&
+               snapshot->target_object_id[0] == '\0') {
+        ESP_LOGW(TAG,
+                 "VERIFY:phase3d:ui_agent_offline:PASS released_target=%s fallback_room=%s",
+                 previous_target, world_service_room_text(snapshot->room));
+    }
+}
+
+void ui_home_actor_get_render_snapshot(ui_home_actor_render_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) {
+        return;
+    }
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->art_x = s_pos.x;
+    snapshot->floor_y = (int16_t)(s_pos.y + UI_ACTOR_ART_H);
+    snapshot->facing = s_facing;
+    snapshot->pose = s_object_pose;
+    snapshot->animation = s_state == UI_ACTOR_RENDER_WALK
+                              ? WORLD_OBJECT_ANIMATION_CAT_WALK
+                              : s_state == UI_ACTOR_RENDER_OBJECT_SIT
+                                    ? WORLD_OBJECT_ANIMATION_CAT_SIT
+                                    : s_state == UI_ACTOR_RENDER_OBJECT_LOOK
+                                          ? WORLD_OBJECT_ANIMATION_CAT_LOOK
+                                          : s_state == UI_ACTOR_RENDER_OBJECT_PAW
+                                                ? WORLD_OBJECT_ANIMATION_CAT_PAW
+                                                : WORLD_OBJECT_ANIMATION_NONE;
+    snapshot->moving = s_state == UI_ACTOR_RENDER_WALK;
+    snprintf(snapshot->target_object_id, sizeof(snapshot->target_object_id), "%s",
+             s_target_object_id);
 }
 
 esp_err_t ui_home_actor_create_dialog(lv_obj_t *parent, int32_t art_w, int32_t art_h)

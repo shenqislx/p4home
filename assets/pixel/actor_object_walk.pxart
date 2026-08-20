@@ -1,0 +1,56 @@
+# name: actor_object_walk
+# palette: h=SHELL_DARK s=LAMP_BASE S=LAMP_HI r=FABRIC_LIGHT R=FABRIC_DARK b=COOL_DARK e=SHADOW
+# Two left-facing frames followed by two right-facing frames. Object travel is
+# direction-aware even when the destination stays inside the current room.
+--frame--
+..hhhh..
+.hhhhhh.
+.hsSsh..
+esSeS...
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+.RrrrrR.
+.b....b.
+b......b
+ee....ee
+--frame--
+..hhhh..
+.hhhhhh.
+.hsSsh..
+esSeS...
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+.RrrrrR.
+..b..b..
+..b..b..
+.ee.ee..
+--frame--
+..hhhh..
+.hhhhhh.
+..hsSsh.
+...SeSes
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+.RrrrrR.
+.b....b.
+b......b
+ee....ee
+--frame--
+..hhhh..
+.hhhhhh.
+..hsSsh.
+...SeSes
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+.RrrrrR.
+..b..b..
+..b..b..
+..ee.ee.

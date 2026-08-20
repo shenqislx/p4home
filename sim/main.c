@@ -7,9 +7,12 @@
 #include "lvgl.h"
 
 #include "fake_backend.h"
+#include "ui_home_actor.h"
+#include "ui_home_actor_test.h"
 #include "ui_pages.h"
 #include "ui_pixel_fx.h"
 #include "ui_time_source.h"
+#include "world_service.h"
 
 #if LV_USE_SDL
 #include "src/drivers/sdl/lv_sdl_mouse.h"
@@ -145,11 +148,171 @@ static void sim_advance(uint32_t ms)
     lv_timer_handler();
 }
 
+static world_action_request_t sim_object_request(const char *action_id,
+                                                 world_action_tool_t tool,
+                                                 const char *target_id)
+{
+    world_action_request_t request = {
+        .action_id = action_id,
+        .tool = tool,
+        .timeout_ms = 5000U,
+    };
+    request.arguments.target_id = target_id;
+    return request;
+}
+
+static bool sim_begin_object_action(world_action_request_t *request,
+                                    world_object_animation_t animation)
+{
+    world_action_event_t event = {0};
+    if (world_service_submit(request, &event) != ESP_OK ||
+        event.status != WORLD_ACTION_STATUS_ACCEPTED ||
+        world_service_start_next(&event) != ESP_OK ||
+        event.status != WORLD_ACTION_STATUS_STARTED) {
+        return false;
+    }
+    sim_advance(UI_FX_TICK_MS);
+    ui_home_actor_render_snapshot_t render = {0};
+    ui_home_actor_get_render_snapshot(&render);
+    return render.animation == animation;
+}
+
+static bool sim_complete_object_action(void)
+{
+    world_action_event_t event = {0};
+    if (world_service_complete_active(&event) != ESP_OK ||
+        event.status != WORLD_ACTION_STATUS_COMPLETED) {
+        return false;
+    }
+    sim_advance(UI_FX_TICK_MS);
+    return true;
+}
+
+static bool sim_wait_for_actor(uint32_t max_ticks)
+{
+    for (uint32_t tick = 0U; tick < max_ticks; ++tick) {
+        ui_home_actor_render_snapshot_t render = {0};
+        ui_home_actor_get_render_snapshot(&render);
+        if (!render.moving) {
+            return true;
+        }
+        sim_advance(UI_FX_TICK_MS);
+    }
+    return false;
+}
+
+static int sim_verify_object_gate(void)
+{
+    if (world_service_set_agent_connected(true) != ESP_OK) {
+        return 1;
+    }
+    world_action_request_t go_sofa = sim_object_request(
+        "sim-3d-go-sofa", WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
+        "living_room.sofa");
+    if (!sim_begin_object_action(&go_sofa, WORLD_OBJECT_ANIMATION_CAT_WALK) ||
+        !sim_complete_object_action() || !sim_wait_for_actor(256U)) {
+        fprintf(stderr, "VERIFY:phase3d:sim_object_anchor:FAIL reason=go_to_sofa\n");
+        return 1;
+    }
+    ui_home_actor_render_snapshot_t render = {0};
+    ui_home_actor_get_render_snapshot(&render);
+    /* Living room is the centre lower bay: origin (60,52), plus registry
+     * anchor (10,32). The renderer reports a global floor coordinate. */
+    if (render.art_x != 70 || render.floor_y != 84 ||
+        render.facing != WORLD_OBJECT_FACING_RIGHT ||
+        strcmp(render.target_object_id, "living_room.sofa") != 0) {
+        fprintf(stderr, "VERIFY:phase3d:sim_object_anchor:FAIL reason=anchor_or_facing\n");
+        return 1;
+    }
+
+    world_action_request_t sit = sim_object_request(
+        "sim-3d-sit-sofa", WORLD_ACTION_CHARACTER_SIT, "living_room.sofa");
+    if (!sim_begin_object_action(&sit, WORLD_OBJECT_ANIMATION_CAT_SIT) ||
+        !sim_complete_object_action()) {
+        fprintf(stderr, "VERIFY:phase3d:sim_object_pose:FAIL reason=sit_binding\n");
+        return 1;
+    }
+    ui_home_actor_get_render_snapshot(&render);
+    if (render.pose != WORLD_CHARACTER_POSE_SITTING ||
+        render.animation != WORLD_OBJECT_ANIMATION_CAT_SIT) {
+        fprintf(stderr, "VERIFY:phase3d:sim_object_pose:FAIL reason=sit_pose\n");
+        return 1;
+    }
+
+    world_action_request_t look = sim_object_request(
+        "sim-3d-look-sofa", WORLD_ACTION_CHARACTER_LOOK_AT,
+        "living_room.sofa");
+    if (!sim_begin_object_action(&look, WORLD_OBJECT_ANIMATION_CAT_LOOK)) {
+        fprintf(stderr, "VERIFY:phase3d:sim_animation_bindings:FAIL reason=look\n");
+        return 1;
+    }
+    world_action_event_t cancelled = {0};
+    if (world_service_cancel(look.action_id, &cancelled) != ESP_OK ||
+        cancelled.error != WORLD_ACTION_ERROR_CANCELLED) {
+        fprintf(stderr, "VERIFY:phase3d:sim_cancel:FAIL reason=cancel_lifecycle\n");
+        return 1;
+    }
+    sim_advance(UI_FX_TICK_MS);
+    ui_home_actor_get_render_snapshot(&render);
+    if (render.pose != WORLD_CHARACTER_POSE_SITTING ||
+        render.animation != WORLD_OBJECT_ANIMATION_CAT_SIT) {
+        fprintf(stderr, "VERIFY:phase3d:sim_cancel:FAIL reason=pose_not_restored\n");
+        return 1;
+    }
+
+    world_action_request_t paw = sim_object_request(
+        "sim-3d-paw-sofa", WORLD_ACTION_CHARACTER_INTERACT,
+        "living_room.sofa");
+    if (!sim_begin_object_action(&paw, WORLD_OBJECT_ANIMATION_CAT_PAW) ||
+        !sim_complete_object_action()) {
+        fprintf(stderr, "VERIFY:phase3d:sim_animation_bindings:FAIL reason=interact\n");
+        return 1;
+    }
+
+    world_action_request_t go_desk = sim_object_request(
+        "sim-3d-go-desk", WORLD_ACTION_CHARACTER_GO_TO_OBJECT, "study.desk");
+    if (!sim_begin_object_action(&go_desk, WORLD_OBJECT_ANIMATION_CAT_WALK) ||
+        !sim_complete_object_action() || !sim_wait_for_actor(256U)) {
+        fprintf(stderr, "VERIFY:phase3d:sim_object_anchor:FAIL reason=go_to_desk\n");
+        return 1;
+    }
+    ui_home_actor_get_render_snapshot(&render);
+    /* Study is the centre upper bay: origin (60,14), plus anchor (34,32). */
+    if (render.art_x != 94 || render.floor_y != 46 ||
+        render.facing != WORLD_OBJECT_FACING_LEFT ||
+        strcmp(render.target_object_id, "study.desk") != 0) {
+        fprintf(stderr, "VERIFY:phase3d:sim_object_anchor:FAIL reason=left_anchor\n");
+        return 1;
+    }
+
+    if (world_service_set_object_occupied("living_room.sofa", true) != ESP_OK) {
+        return 1;
+    }
+    world_action_request_t conflict = sim_object_request(
+        "sim-3d-occupied-sofa", WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
+        "living_room.sofa");
+    world_action_event_t rejected = {0};
+    if (world_service_submit(&conflict, &rejected) != ESP_OK ||
+        rejected.status != WORLD_ACTION_STATUS_FAILED ||
+        rejected.error != WORLD_ACTION_ERROR_OBJECT_OCCUPIED) {
+        fprintf(stderr, "VERIFY:phase3d:sim_occupancy_conflict:FAIL reason=not_rejected\n");
+        return 1;
+    }
+
+    printf("VERIFY:phase3d:sim_object_anchor:PASS targets=sofa,desk facing=right,left\n");
+    printf("VERIFY:phase3d:sim_object_pose:PASS pose=sitting floor_anchor=stable\n");
+    printf("VERIFY:phase3d:sim_animation_bindings:PASS animations=walk,sit,look,paw fps=8\n");
+    printf("VERIFY:phase3d:sim_cancel:PASS restored=sitting\n");
+    printf("VERIFY:phase3d:sim_occupancy_conflict:PASS error=OBJECT_OCCUPIED\n");
+    return 0;
+}
+
 static void sim_usage(const char *argv0)
 {
     fprintf(stderr,
             "usage: %s [--mode window|dump] [--out DIR] [--frames N]\n"
-            "          [--clock-speed N] [--start-hour H] [--scenario]\n",
+            "          [--clock-speed N] [--start-hour H] [--scenario]\n"
+            "          [--verify-object-gate]\n",
             argv0);
 }
 
@@ -160,6 +323,7 @@ int main(int argc, char **argv)
     uint32_t frames = 0;
     int start_hour = 20;
     bool scenario = false;
+    bool verify_object_gate = false;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
@@ -174,6 +338,8 @@ int main(int argc, char **argv)
             start_hour = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--scenario") == 0) {
             scenario = true;
+        } else if (strcmp(argv[i], "--verify-object-gate") == 0) {
+            verify_object_gate = true;
         } else {
             sim_usage(argv[0]);
             return 2;
@@ -221,6 +387,10 @@ int main(int argc, char **argv)
     if (ui_pages_render_bootstrap() != ESP_OK) {
         fprintf(stderr, "ui_pages_render_bootstrap failed\n");
         return 1;
+    }
+
+    if (verify_object_gate) {
+        return sim_verify_object_gate();
     }
 
     if (frames == 0) {

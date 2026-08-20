@@ -274,6 +274,31 @@ int main(void)
     CHECK(!snapshot_object(&snapshot, "living_room.sofa")->occupied);
     CHECK(world_service_set_object_available("living_room.sofa", true) == ESP_OK);
 
+    world_action_request_t offline_go_sofa = object_request(
+        "object-offline-go-sofa", WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
+        "living_room.sofa");
+    CHECK(complete_object_action(&offline_go_sofa, &completed,
+                                 WORLD_OBJECT_ANIMATION_CAT_WALK) == 0);
+    world_action_request_t offline_sit_sofa = object_request(
+        "object-offline-sit-sofa", WORLD_ACTION_CHARACTER_SIT,
+        "living_room.sofa");
+    CHECK(complete_object_action(&offline_sit_sofa, &completed,
+                                 WORLD_OBJECT_ANIMATION_CAT_SIT) == 0);
+    CHECK(world_service_set_agent_connected(true) == ESP_OK);
+    CHECK(world_service_set_agent_connected(false) == ESP_OK);
+    world_local_fallback_context_t fallback = {
+        .ha_connected = true,
+        .online_entities = 1U,
+        .lights_on_total = 1U,
+    };
+    fallback.room_lit[WORLD_ROOM_ENTRY] = true;
+    CHECK(world_service_apply_local_fallback(&fallback) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.target_object_id[0] == '\0');
+    CHECK(snapshot.character_pose == WORLD_CHARACTER_POSE_STANDING);
+    CHECK(snapshot.room == WORLD_ROOM_ENTRY);
+    CHECK(!snapshot_object(&snapshot, "living_room.sofa")->occupied);
+
     CHECK(strcmp(world_service_tool_text(WORLD_ACTION_CHARACTER_GO_TO_OBJECT),
                  "character.go_to") == 0);
     CHECK(strcmp(world_service_error_text(WORLD_ACTION_ERROR_UNKNOWN_OBJECT),

@@ -60,9 +60,9 @@
 
 只有 3C 退出门禁通过后开始：
 
-- 在完整像素 simulator 验证对象锚点、朝向、姿态与动画绑定；
-- 通过真实 Device WebSocket 在 P4 实机完成 `go_to(living_room.sofa) → sit`；
-- 验证重连 snapshot、取消、占用冲突、Agent 离线、HA/UI 隔离与资源/8 FPS 回归；
+- [x] 在完整像素 simulator 验证对象锚点、朝向、姿态与动画绑定；
+- [ ] 通过真实 Device WebSocket 在 P4 实机完成 `go_to(living_room.sofa) → sit`；
+- [ ] 验证重连 snapshot、取消、占用冲突、Agent 离线、HA/UI 隔离与资源/8 FPS 回归；
 - artifact 身份、强 marker 与无矛盾证据由 Codex 判定，workflow 绿色本身不代表通过。
 
 ## 7. 当前进度
@@ -88,6 +88,14 @@ strict typecheck、Agent 139/139 与 Python contract 54/54 通过。3C 复审进
 [Phase 3C Cat Object Event and Role Boundary Evidence](../../evidence/agent-phase-3/phase-3c-cat-object-boundary.md)。
 据此 3C 退出门禁满足，Device Protocol v2 / Tool Schema v2 已冻结，下一步进入 3D Simulator &
 Hardware Gate；v1 契约和默认 transport 选择保持不变。
+
+3D 本地部分已把对象 snapshot 接入同一套 Pixel Home renderer，增加左右朝向及 walk/sit/look/paw
+像素帧，并用完整 LVGL simulator 自动核对 sofa/desk anchor、floor anchor、pose、四种 animation
+binding、取消恢复与占用冲突。复审同时发现并修复两条此前只能在实机暴露的路径：WebSocket 回调
+内同步完成动作导致取消无窗口、瞬态动画被 UI 合并；Agent 离线 fallback 保留旧对象 target 导致
+房间/对象状态矛盾。现在对象执行由 worker 推进并保留两个 8 FPS 帧，local fallback 会释放对象
+占用和 target。Phase 3D 专用 `phase3d_object` workflow/harness 已就绪，待提交推送后运行 P4 artifact
+门禁，实机项在 artifact 判定前保持未完成。
 
 ## 8. 完成定义
 

@@ -39,6 +39,7 @@ class PrepareAgentHardwareSdkconfigTests(unittest.TestCase):
             self.assertIn("CONFIG_UNRELATED=y", output)
             self.assertIn("CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED=y", output)
             self.assertEqual(output.count("CONFIG_P4HOME_AGENT_DEVICE_TOKEN="), 1)
+            self.assertIn("CONFIG_P4HOME_AGENT_PROTOCOL_VERSION=1", output)
             self.assertNotIn('CONFIG_P4HOME_AGENT_DEVICE_TOKEN="stale"', output)
             self.assertEqual(sdkconfig.stat().st_mode & 0o777, 0o600)
 
@@ -55,6 +56,7 @@ class PrepareAgentHardwareSdkconfigTests(unittest.TestCase):
             {"device_id": "invalid device"},
             {"device_token": "too-short"},
             {"spki_sha256": "AB" * 32},
+            {"protocol_version": 3},
         ):
             with self.subTest(update=next(iter(update))):
                 with self.assertRaises(ValueError):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Overlay ephemeral Phase 2D Agent credentials onto a private sdkconfig."""
+"""Overlay ephemeral Agent hardware credentials onto a private sdkconfig."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ class AgentHardwareConfig:
     device_id: str
     device_token: str
     spki_sha256: str
+    protocol_version: int = 1
 
 
 def validate(config: AgentHardwareConfig) -> None:
@@ -54,6 +55,8 @@ def validate(config: AgentHardwareConfig) -> None:
         raise ValueError("invalid Agent device token")
     if SPKI_RE.fullmatch(config.spki_sha256) is None:
         raise ValueError("invalid Agent SPKI pin")
+    if config.protocol_version not in {1, 2}:
+        raise ValueError("invalid Agent protocol version")
 
 
 def apply_profile(path: pathlib.Path, config: AgentHardwareConfig) -> None:
@@ -72,6 +75,9 @@ def apply_profile(path: pathlib.Path, config: AgentHardwareConfig) -> None:
         "CONFIG_P4HOME_AGENT_SPKI_SHA256": (
             f"CONFIG_P4HOME_AGENT_SPKI_SHA256={json.dumps(config.spki_sha256)}"
         ),
+        "CONFIG_P4HOME_AGENT_PROTOCOL_VERSION": (
+            f"CONFIG_P4HOME_AGENT_PROTOCOL_VERSION={config.protocol_version}"
+        ),
     }
     lines = path.read_text(encoding="utf-8").splitlines()
     retained: list[str] = []
@@ -82,7 +88,7 @@ def apply_profile(path: pathlib.Path, config: AgentHardwareConfig) -> None:
         ):
             continue
         retained.append(line)
-    retained.extend(("", "# Ephemeral Phase 2D Agent hardware profile."))
+    retained.extend(("", "# Ephemeral Agent hardware validation profile."))
     retained.extend(replacements.values())
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
@@ -103,12 +109,14 @@ def main() -> int:
     parser.add_argument("--device-id", required=True)
     parser.add_argument("--token-file", required=True, type=pathlib.Path)
     parser.add_argument("--spki-file", required=True, type=pathlib.Path)
+    parser.add_argument("--protocol-version", type=int, choices=(1, 2), default=1)
     args = parser.parse_args()
     config = AgentHardwareConfig(
         uri=args.uri,
         device_id=args.device_id,
         device_token=args.token_file.read_text(encoding="utf-8").strip(),
         spki_sha256=args.spki_file.read_text(encoding="utf-8").strip(),
+        protocol_version=args.protocol_version,
     )
     apply_profile(args.sdkconfig, config)
     return 0

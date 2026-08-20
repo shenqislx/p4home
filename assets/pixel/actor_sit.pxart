@@ -1,0 +1,48 @@
+# name: actor_sit
+# palette: h=SHELL_DARK s=LAMP_BASE S=LAMP_HI r=FABRIC_LIGHT R=FABRIC_DARK b=COOL_DARK e=SHADOW
+# Left breathing frames, then right breathing frames. The shorter sprite is
+# floor-anchored by ui_home_actor so sitting never floats above the object.
+--frame--
+..hhhh..
+.hhhhhh.
+.hsSsh..
+esSeS...
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+.RrrrrR.
+.beeeeb.
+--frame--
+........
+..hhhh..
+.hhhhhh.
+.hsSsh..
+esSeS...
+.sSSSSs.
+..ssss..
+.rrrrrr.
+.RrrrrR.
+.beeeeb.
+--frame--
+..hhhh..
+.hhhhhh.
+..hsSsh.
+...SeSes
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+.RrrrrR.
+.beeeeb.
+--frame--
+........
+..hhhh..
+.hhhhhh.
+..hsSsh.
+...SeSes
+.sSSSSs.
+..ssss..
+.rrrrrr.
+.RrrrrR.
+.beeeeb.

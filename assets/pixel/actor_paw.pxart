@@ -1,0 +1,56 @@
+# name: actor_paw
+# palette: h=SHELL_DARK s=LAMP_BASE S=LAMP_HI r=FABRIC_LIGHT R=FABRIC_DARK b=COOL_DARK e=SHADOW
+# Left reach/rest followed by right reach/rest. The one-pixel paw extension is a
+# deliberate hard-edged interaction cue rather than a sub-pixel tween.
+--frame--
+..hhhh..
+.hhhhhh.
+.hsSsh..
+esSeS...
+.sSSSSs.
+..ssss..
+rrrrrrr.
+eRrrrrRr
+.RrrrrR.
+..b..b..
+..b..b..
+.ee..ee.
+--frame--
+..hhhh..
+.hhhhhh.
+.hsSsh..
+esSeS...
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+.RrrrrR.
+..b..b..
+..b..b..
+.ee..ee.
+--frame--
+..hhhh..
+.hhhhhh.
+..hsSsh.
+...SeSes
+.sSSSSs.
+..ssss..
+.rrrrrrr
+rRrrrrRe
+.RrrrrR.
+..b..b..
+..b..b..
+.ee..ee.
+--frame--
+..hhhh..
+.hhhhhh.
+..hsSsh.
+...SeSes
+.sSSSSs.
+..ssss..
+.rrrrrr.
+rRrrrrRr
+.RrrrrR.
+..b..b..
+..b..b..
+.ee..ee.

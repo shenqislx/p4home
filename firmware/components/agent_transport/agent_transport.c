@@ -31,6 +31,7 @@ static const char *TAG = "agent_transport";
 #define AGENT_WS_BUFFER_BYTES 4096
 #define AGENT_ACTION_TIMEOUT_MIN_MS 100U
 #define AGENT_ACTION_TIMEOUT_MAX_MS 120000U
+#define AGENT_OBJECT_ACTION_RENDER_MS 250U
 
 #ifndef CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK
 #define CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK 8192
@@ -66,6 +67,7 @@ typedef struct {
     uint32_t last_rx_seq;
     uint64_t last_heartbeat_ms;
     uint64_t last_disconnect_at_ms;
+    uint64_t active_action_complete_at_ms;
     char *rx_frame;
     size_t rx_expected;
     size_t rx_received;
@@ -78,6 +80,8 @@ static agent_transport_state_t s_agent = {
     .lock = portMUX_INITIALIZER_UNLOCKED,
 };
 static const mbedtls_x509_crt s_dummy_ca;
+
+static bool agent_object_tool(world_action_tool_t tool);
 
 static uint64_t agent_now_ms(void)
 {
@@ -622,6 +626,21 @@ static esp_err_t agent_send_action_event(const world_action_event_t *event,
         return ESP_ERR_INVALID_ARG;
     }
     esp_err_t result = agent_send_payload(type, payload, correlation_id);
+    if (result == ESP_OK && agent_object_tool(event->tool)) {
+        if (event->status == WORLD_ACTION_STATUS_COMPLETED) {
+            ESP_LOGW(TAG,
+                     "VERIFY:phase3d:device_object_action:PASS action=%s target=%s pose=%s state_version=%" PRIu32,
+                     world_object_action_text(event->result.object.action),
+                     event->result.object.object_id,
+                     world_service_pose_text(event->result.object.pose),
+                     event->state_version);
+        } else if (event->status == WORLD_ACTION_STATUS_FAILED &&
+                   event->error == WORLD_ACTION_ERROR_CANCELLED) {
+            ESP_LOGW(TAG,
+                     "VERIFY:phase3d:device_object_cancel:PASS action_id=%s state_version=%" PRIu32,
+                     event->action_id, event->state_version);
+        }
+    }
     if (result == ESP_OK && !event->from_cache) {
         taskENTER_CRITICAL(&s_agent.lock);
         if (event->status == WORLD_ACTION_STATUS_COMPLETED) {
@@ -634,33 +653,53 @@ static esp_err_t agent_send_action_event(const world_action_event_t *event,
     return result;
 }
 
-static void agent_execute_queued_action(const char *correlation_id)
+static bool agent_object_tool(world_action_tool_t tool)
 {
+    return tool >= WORLD_ACTION_OBJECT_FIRST && tool <= WORLD_ACTION_OBJECT_LAST;
+}
+
+/* Action execution is advanced by the worker rather than inside the WebSocket
+ * receive callback. This leaves the receive path free to process action.cancel
+ * and gives object animations two complete 8 FPS frames before the terminal
+ * snapshot replaces active_animation. */
+static void agent_progress_action_queue(void)
+{
+    uint64_t now_ms = agent_now_ms();
+    world_service_snapshot_t snapshot = {0};
+    world_service_get_snapshot(&snapshot);
+    if (snapshot.active_action_id[0] != '\0') {
+        if (s_agent.active_action_complete_at_ms == 0U ||
+            now_ms < s_agent.active_action_complete_at_ms) {
+            return;
+        }
+        world_action_event_t completed = {0};
+        esp_err_t result = world_service_complete_active(&completed);
+        s_agent.active_action_complete_at_ms = 0U;
+        if (result != ESP_OK) {
+            (void)agent_send_protocol_error("INTERNAL", "failed to complete active action",
+                                            NULL);
+            return;
+        }
+        (void)agent_send_action_event(&completed, NULL);
+        (void)agent_send_world_changed();
+    }
+
     world_action_event_t started = {0};
     esp_err_t result = world_service_start_next(&started);
     if (result == ESP_ERR_NOT_FOUND || result == ESP_ERR_INVALID_STATE) {
         return;
     }
     if (result != ESP_OK) {
-        (void)agent_send_protocol_error("INTERNAL", "failed to start queued action",
-                                        correlation_id);
+        (void)agent_send_protocol_error("INTERNAL", "failed to start queued action", NULL);
         return;
     }
-    (void)agent_send_action_event(&started, correlation_id);
+    (void)agent_send_action_event(&started, NULL);
     if (started.status != WORLD_ACTION_STATUS_STARTED) {
         return;
     }
     (void)agent_send_world_changed();
-
-    world_action_event_t completed = {0};
-    result = world_service_complete_active(&completed);
-    if (result != ESP_OK) {
-        (void)agent_send_protocol_error("INTERNAL", "failed to complete active action",
-                                        correlation_id);
-        return;
-    }
-    (void)agent_send_action_event(&completed, correlation_id);
-    (void)agent_send_world_changed();
+    s_agent.active_action_complete_at_ms =
+        now_ms + (agent_object_tool(started.tool) ? AGENT_OBJECT_ACTION_RENDER_MS : 1U);
 }
 
 static bool agent_parse_action_request(const cJSON *payload, world_action_request_t *request)
@@ -778,9 +817,6 @@ static void agent_handle_action_request(const cJSON *payload, const char *messag
         return;
     }
     (void)agent_send_action_event(&accepted, message_id);
-    if (accepted.status == WORLD_ACTION_STATUS_ACCEPTED && !accepted.from_cache) {
-        agent_execute_queued_action(message_id);
-    }
     xSemaphoreGive(s_agent.action_mutex);
 }
 
@@ -820,6 +856,10 @@ static void agent_handle_cancel(const cJSON *payload, const char *message_id)
         return;
     }
     (void)agent_send_action_event(&event, message_id);
+    if (before.active_action_id[0] != '\0' &&
+        strcmp(before.active_action_id, action_id->valuestring) == 0) {
+        s_agent.active_action_complete_at_ms = 0U;
+    }
     world_service_snapshot_t after = {0};
     world_service_get_snapshot(&after);
     if (after.state_version != before.state_version) {
@@ -1182,6 +1222,12 @@ static void agent_worker(void *argument)
                     }
                     before_expire = after_expire;
                 }
+                world_service_snapshot_t after_expirations = {0};
+                world_service_get_snapshot(&after_expirations);
+                if (after_expirations.active_action_id[0] == '\0') {
+                    s_agent.active_action_complete_at_ms = 0U;
+                }
+                agent_progress_action_queue();
                 xSemaphoreGive(s_agent.action_mutex);
             }
             uint64_t now = agent_now_ms();
