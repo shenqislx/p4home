@@ -57,8 +57,32 @@ jobs:
       IDF_SKIP_CHECK_SUBMODULES: "1"
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout repository archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          EXPECTED_WORKSPACE="$RUNNER_WORKSPACE/${GITHUB_REPOSITORY#*/}"
+          test "$GITHUB_WORKSPACE" = "$EXPECTED_WORKSPACE"
+          ARCHIVE="$RUNNER_TEMP/p4home-$GITHUB_SHA.tar.gz"
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --retry 3 \
+            --retry-all-errors \
+            --connect-timeout 30 \
+            --max-time 300 \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/tarball/$GITHUB_SHA" \
+            --output "$ARCHIVE"
+          tar -tzf "$ARCHIVE" > /dev/null
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+          tar -xzf "$ARCHIVE" --strip-components=1 -C "$GITHUB_WORKSPACE"
+          test -f .github/workflows/firmware-self-hosted-flash-serial.yml
 
       - name: Validate runner and inputs
         run: |
@@ -90,6 +114,7 @@ jobs:
           test -f scripts/activate-idf-v5.5.4.sh
           test -s firmware/dependencies.lock
           test -f "$HOME/.espressif/tools/activate_idf_v5.5.4.sh"
+          echo "DEPENDENCY_LOCK_SHA256_BEFORE=$(shasum -a 256 firmware/dependencies.lock | awk '{print $1}')" >> "$GITHUB_ENV"
           echo "BUILD_DIR=$RUNNER_TEMP/p4home-hardware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
           echo "SIZE_REPORT=$RUNNER_TEMP/p4home-size-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json" >> "$GITHUB_ENV"
           echo "AGENT_TMP_DIR=$RUNNER_TEMP/p4home-agent-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
@@ -206,7 +231,7 @@ jobs:
           if [[ "${{ inputs.validation_profile }}" != "generic" ]]; then
             grep -qx "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=$EXPECTED_AGENT_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
           fi
-          git diff --exit-code -- firmware/dependencies.lock
+          test "$(shasum -a 256 firmware/dependencies.lock | awk '{print $1}')" = "$DEPENDENCY_LOCK_SHA256_BEFORE"
 
       - name: Set up Node for Agent harness
         if: inputs.validation_profile != 'generic'

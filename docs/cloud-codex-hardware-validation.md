@@ -13,6 +13,10 @@ P4 Home 硬件验证采用 artifact-first 模式：
 
 - [Firmware Self-Hosted Flash Serial](../.github/workflows/firmware-self-hosted-flash-serial.yml)
 
+self-hosted runner 的 checkout 从 GitHub API 下载由 `GITHUB_SHA` 锁定的 repository archive，避免
+Git Smart HTTP 暂时不可用时阻塞硬件门禁。归档解包前必须验证 workspace 边界；dependency lock
+则在构建前后分别计算 SHA-256，替代对 `.git` 元数据的依赖。
+
 ## 2. Runner 前置条件
 
 Runner 必须带有以下标签：

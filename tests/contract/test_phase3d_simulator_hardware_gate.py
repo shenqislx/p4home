@@ -90,6 +90,9 @@ class Phase3DSimulatorHardwareGateContractTests(unittest.TestCase):
         )
         self.assertIn("CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=12288", defaults)
         self.assertIn("agent_transport_task_stack_size_bytes", workflow)
+        self.assertNotIn("actions/checkout@v4", workflow)
+        self.assertIn("tarball/$GITHUB_SHA", workflow)
+        self.assertIn("DEPENDENCY_LOCK_SHA256_BEFORE", workflow)
         self.assertGreaterEqual(
             workflow.count('if [[ "${{ inputs.validation_profile }}" != "generic" ]]; then'),
             2,
