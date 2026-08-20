@@ -1,9 +1,9 @@
-# Phase 2D Real Transport Software & Hardware-Gate Preparation Evidence
+# Phase 2D Real Transport & Hardware Gate Evidence
 
-> Date: 2026-08-19
+> Date: 2026-08-20
 > Runtime: Node.js 24.19.0
 > Firmware: ESP-IDF v5.5.4 / ESP32-P4
-> Hardware verdict: pending; no artifact has been interpreted yet
+> Hardware verdict: `pass`; run `32262619021`, commit `91aa3e58d24fee48e40d98d159485717f1a4252a`
 
 ## 当前完成范围
 
@@ -46,21 +46,43 @@ snapshot reconciliation 语义。
 立即注销 handshake timeout。workflow harness 改为从 `agent/` workspace 启动，已验证 `tsx` 与
 workspace package 可以正确解析。
 
-## 实机门禁准备
+## 实机门禁结果
 
 `Firmware Self-Hosted Flash Serial` 新增 `phase2d_agent` profile。runner 会在临时目录生成一次性
 P-256 TLS 证书、256-bit device token 与 SPKI pin，覆写到私密 sdkconfig 后启动真实 Runtime Hub。
-硬件 harness 计划执行 100 次 Cat 房间动作，在第 50 次后由 server 主动断线并验证 reconnect full
+硬件 harness 执行 100 次 Cat 房间动作，在第 50 次后由 server 主动断线并验证 reconnect full
 snapshot，再关闭 Agent 并继续采集完整两小时。manifest 会记录 profile、实际 capture 时长、harness
 状态与无敏感字段的延迟摘要；业务 marker 仍由 Codex 从 artifact 判定，workflow 绿色本身不代表通过。
 
-待实机 artifact 同时出现且无矛盾证据后，2D 才可完成：
+2026-08-20，GitHub Actions
+[run 32262619021](https://github.com/shenqislx/p4home/actions/runs/32262619021) 完成并成功上传
+`esp32-p4-monitor-log`。manifest 与 run 身份、仓库基线和 Phase 2D profile 一致：
+
+| 检查 | 结果 | Artifact 证据 |
+|---|---:|---|
+| Workflow transport | 通过 | build、flash、7,500 秒 capture、manifest、artifact upload 全部 success |
+| Artifact identity | 通过 | `git_sha=91aa3e5...`、`run_id=32262619021`、`run_attempt=1` |
+| Profile / duration | 通过 | `validation_profile=phase2d_agent`、`monitor_seconds=7200`、`capture_seconds=7500` |
+| Build baseline | 通过 | app `1,471,088` bytes；main stack `5,120` bytes；dependency lock SHA-256 与仓库一致 |
+| 100 次真实动作 | 通过 | `actions_completed=100`，accepted/started/completed 最大延迟均小于 `595 ms` |
+| 中途重连与 snapshot | 通过 | 第 50 次动作后重连，`reconnect_snapshot_version=102` |
+| Agent 离线两小时 | 通过 | 设备在 `offline_ms=7,228,791` 时输出 fallback PASS，HA 同时保持 `READY` |
+| 资源与 UI | 通过 | 891 个 8 FPS PASS；main/agent worker stack high-water 为 `800/2044` bytes；heap/PSRAM 稳定 |
+
+三条目标强 marker 均出现且无矛盾证据：
 
 ```text
-VERIFY:agent_transport:cat_action_chain:PASS actions=100 ...
-VERIFY:agent_transport:reconnect_snapshot:PASS ...
+VERIFY:agent_transport:cat_action_chain:PASS actions=100 accepted_max_ms=589.862... started_max_ms=592.173... completed_max_ms=594.618...
+VERIFY:agent_transport:reconnect_snapshot:PASS state_version=102
 VERIFY:agent_transport:offline_2h_fallback:PASS
 ```
 
-还必须结合周期 diagnostics 核对 heap/internal RAM/PSRAM、main 与 agent worker stack，以及持续的
-UI 8 FPS 心跳。当前尚未触发该长跑，Phase 2 仍为 `in_progress`，不能进入 Phase 3。
+串口日志只有一次 `POWERON` 启动，未出现 panic、watchdog、brownout、assert 或重启。启动阶段的首个
+8 FPS 周期为 `10,205 ms`，并在 SNTP 尚未同步时各产生一次 FAIL；随后 UI 连续 891 次 PASS，SNTP
+在 `36.631 s` 输出 PASS。两者均为启动瞬态，不反证 Agent 动作、重连或两小时 fallback 门禁。
+周期 diagnostics 从动作完成后到采集结束持续保持 `completed=100`、`failed=0`、
+`protocol_errors=0`，最终 HA 仍为 `READY`、`reconnect=0`。
+
+据此，workflow status 为 `success`，artifact integrity 为 `valid`，Phase 2D functional verdict 为
+`pass`。2D 退出门禁已满足；2026-08-20 用户确认 Phase 2 最终 review 通过，Phase 2 已完成。
+Phase 3 保持 `pending`，不会由本次收口自动启动。

@@ -1,7 +1,7 @@
 # P4 Home 当前工作计划
 
 > Current Focus: [P4 Home 本地 LLM Agent 化架构](../p4-local-agent-architecture.md)
-> Updated: 2026-08-19
+> Updated: 2026-08-20
 > Working Branch: `feature/agent-harness`
 
 ## 工作规则
@@ -21,7 +21,7 @@
 |---|---|---|---|---|
 | 0 | Baseline & Contract | `completed` | 可重复构建、运行期基线、协议 v1、Mock | [Phase 0 归档](../archive/plans/agent/2026-08-15-agent-phase-0-baseline-contract-plan.md) |
 | 1 | Text Agent Runtime | `completed` | TypeScript Runtime、Ollama、有限 Tool Loop | [Phase 1 归档](../archive/plans/agent/2026-08-15-agent-phase-1-text-runtime-plan.md) |
-| 2 | Role Runtime & Cat World | `in_progress` | Role Router、三角色隔离、Cat 房间动作 | [Phase 2](./2026-08-15-agent-phase-2-p4-room-world-plan.md) |
+| 2 | Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作 | [Phase 2 归档](../archive/plans/agent/2026-08-15-agent-phase-2-p4-room-world-plan.md) |
 | 3 | Cat Object World | `pending` | sofa 等对象锚点与 Cat 交互动作 | [Phase 3](./2026-08-15-agent-phase-3-object-world-plan.md) |
 | 4 | Robot HA & Multi-role | `pending` | Robot 受限 HA 工具、Human/Robot 语义分割 | [Phase 4](./2026-08-15-agent-phase-4-ha-tool-plan.md) |
 | 5 | Role-aware Voice | `pending` | ESP-SR → STT → Router/Roles → TTS | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
@@ -30,15 +30,15 @@
 
 ## 下一步
 
-只执行 Phase 2。2026-08-17 用户要求重新设计并推进 Phase 2，Phase 1 review 已通过。
-Phase 2 按 2A Role Contract & Router、2B Cat Action Adapter、2C P4 World Service、2D Real
-Transport & Hardware Gate 四个纵切推进。2A、2B、2C 的各自退出门禁已依次满足；2026-08-19，
-2D 的真实 Device WebSocket、P4 `agent_transport`、Cat 产品入口闭环和自包含硬件 harness 已完成
-软件验证。下一项是提交后运行 `phase2d_agent` 实机 profile，并从 artifact 判定 100 次动作、重连、
-两小时 Agent 离线、资源与 8 FPS 门禁；在此之前 Phase 2 仍为 `in_progress`。
+Phase 2 已于 2026-08-20 完成并通过用户最终 review。2A Role Contract & Router、2B Cat Action
+Adapter、2C P4 World Service、2D Real Transport & Hardware Gate 四个纵切的退出门禁均已满足；
+`phase2d_agent` 实机 run `32262619021` 的 artifact 已通过身份、100 次动作、第 50 次后重连 snapshot、
+两小时 Agent 离线、资源与 8 FPS 门禁判定。Phase 2 计划已归档。
+
+当前没有 `in_progress` Phase。Phase 3 仍为 `pending`，下一步需由用户明确授权启动 Phase 3。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
-deadline、action_id 幂等和 snapshot reconciliation 属于 Phase 2，必须在真实 Action 前完成。
+deadline、action_id 幂等和 snapshot reconciliation 已在 Phase 2 完成并通过实机证据验证。
 
 产品角色边界已纳入 Phase 2–7：默认模型统一使用 `qwen3.8:27b-mlx`，但 Role Router、Robot、
 Human、Cat 的上下文、工具、temperature、预算与 eval 独立。当前 32 场景 ToolCall 结果只作为

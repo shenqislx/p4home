@@ -73,7 +73,7 @@
 | `settings_service` | NVS 配置 |
 | `weather_service` | 天气获取与面板数据写入 |
 
-Agent Phase 2 计划新增：
+Agent Phase 2 已新增：
 
 - `role_router`：用户输入到 Human/Robot 的结构化分发；
 - `roles`：Robot/Human/Cat RoleProfile、Context 与 Policy；

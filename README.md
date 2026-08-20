@@ -31,10 +31,10 @@ Cat 作为事件驱动电子宠物使用最小 P4 World 能力。它们默认共
 - [当前里程碑](./docs/project-milestones.md)
 - [Harness Workflow](./docs/harness-workflow.md)
 
-当前推进 Phase 2，并按 Role Contract & Router、Cat Action Adapter、P4 World Service、真实传输与
-实机门禁四个纵切实施；2A、2B、2C 已完成各自退出门禁，2D 的 Agent/P4 真实 Device WebSocket
-软件链与自包含硬件 harness 已就绪，下一项是提交后执行实机 100 次动作、重连和两小时离线门禁。
-在 artifact 判定前仍不能把 Phase 2 描述为整体完成。
+Phase 2 已完成并通过用户最终 review。Role Contract & Router、Cat Action Adapter、P4 World
+Service、真实传输与实机门禁四个纵切均满足退出条件；Agent/P4 真实 Device WebSocket 已通过实机
+100 次动作、第 50 次后重连 snapshot、两小时 Agent 离线与资源/8 FPS artifact 判定。Phase 2 计划
+已归档，Phase 3 保持 `pending`，等待明确启动。
 
 ## 工作规则
 

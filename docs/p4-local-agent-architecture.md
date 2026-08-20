@@ -698,7 +698,7 @@ Device Protocol v1 与 Tool Schema v1 已冻结。
 
 ### Phase 2 — Role Runtime & P4 Room-level Cat World
 
-执行计划：[Phase 2 — Role Runtime & P4 Room-level Cat World](./plans/2026-08-15-agent-phase-2-p4-room-world-plan.md)
+归档计划：[Phase 2 — Role Runtime & P4 Room-level Cat World](./archive/plans/agent/2026-08-15-agent-phase-2-p4-room-world-plan.md)
 
 交付：
 
@@ -722,6 +722,8 @@ Test Cat Event: room_target=living_room
 
 同时必须证明用户输入只会路由到 Human/Robot，Cat 不接收用户原始文本；Human 不能执行 Tool；
 RoutePlan 非法时不会降级执行命令。
+
+退出条件已于 2026-08-20 满足，并通过用户最终 review；Phase 2 已完成归档。
 
 ### Phase 3 — Cat Object-level World
 

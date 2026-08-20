@@ -1,8 +1,10 @@
 # Agent Phase 2 — Role Runtime & P4 Room-level Cat World Plan
 
-> Status: `in_progress`
+> Status: `completed`
 > Restarted: 2026-08-17
-> Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
+> Completed: 2026-08-20
+> Reviewed: 2026-08-20
+> Architecture: [P4 Local Agent Architecture](../../../p4-local-agent-architecture.md)
 > Depends on: Phase 0–1 complete; M6 HA 主链保持隔离
 
 ## 1. 目标与边界
@@ -84,11 +86,11 @@ snapshot 恢复一致；过期与越权 event 100% 在 WebSocket 前被拒绝。
 
 只有 2C 退出门禁通过后开始：
 
-- 新增与 HA WebSocket 隔离的 `agent_transport`；
-- 完成 Cat Runtime ↔ P4 Device WebSocket ↔ world_service ↔ UI 闭环；
-- 验证 reconnect、snapshot reconciliation、Agent 离线两小时与连续 100 次动作；
-- 采集 image、DIRAM、heap、stack、8 FPS 和 accepted/started/completed 延迟证据；
-- 实机阶段不同时扩大米家设备覆盖或修改 HA 主链。
+- [x] 新增与 HA WebSocket 隔离的 `agent_transport`；
+- [x] 完成 Cat Runtime ↔ P4 Device WebSocket ↔ world_service ↔ UI 闭环；
+- [x] 验证 reconnect、snapshot reconciliation、Agent 离线两小时与连续 100 次动作；
+- [x] 采集 image、DIRAM、heap、stack、8 FPS 和 accepted/started/completed 延迟证据；
+- [x] 实机阶段不同时扩大米家设备覆盖或修改 HA 主链。
 
 最终退出链：
 
@@ -114,13 +116,13 @@ Run 仍在底层串行，避免绕过组合入口时产生历史竞态。Node 24
 真实 `qwen3.8:27b-mlx` Router 已完成 4 个样例 smoke：Human、Robot、混合澄清和含糊澄清均符合
 预期。首轮发现默认模型不稳定遵循 Ollama `format`，现已改成精确 JSON 提示词加 Runtime 本地 AJV
 复验；修订后 4/4 通过，证据见
-[Phase 2A Role Router Live Smoke](../../evidence/agent-phase-2/role-router-smoke.md)。临时 Ollama 服务
+[Phase 2A Role Router Live Smoke](../../../../evidence/agent-phase-2/role-router-smoke.md)。临时 Ollama 服务
 已停止。
 
 review 修复后的四角色 v2 eval 已执行两轮且不生成综合分：Router 24/24、Human 8/8、Robot 8/8、
 Cat 18/18；Router unsafe misroute 为 0，Human policy violation 为 0，Robot 模型/Tool 调用为 0，
 Cat 用户原文拒绝为 2/2。CLI 现在对任一角色失败返回非零状态。完整摘要与原始 JSON 见
-[Phase 2A Role Eval](../../evidence/agent-phase-2/role-eval.md)。
+[Phase 2A Role Eval](../../../../evidence/agent-phase-2/role-eval.md)。
 
 据此，Phase 2A 的退出门禁于 2026-08-18 review 修复后重新满足。尚未连接 simulator、P4 或 HA，
 因此该结果只允许开始 2B，不得把它描述为 Phase 2 完成。
@@ -132,7 +134,7 @@ snapshot 对账；拒绝事件不会产生 action frame 或审计 Run。review �
 伪完成、outbound seq 消耗、resync correlation、Run 对账审计和无界缓存，并接入只暴露批准 Tool
 的 Cat 模型决策。Node 24.19.0 严格类型检查和 111 项全量
 确定性测试通过，详细证据见
-[Phase 2B Cat Action Adapter & Deterministic Device Evidence](../../evidence/agent-phase-2/phase-2b-deterministic-device.md)。
+[Phase 2B Cat Action Adapter & Deterministic Device Evidence](../../../../evidence/agent-phase-2/phase-2b-deterministic-device.md)。
 该 deterministic 验收链使用 fake provider 验证一次 Cat 模型 ToolCall，并在审计中记录
 `model_turns=1`；尚未执行 live Cat 模型专项评测。冻结 v1 snapshot 只用于恢复权威状态，不能把
 “目标状态已满足”伪装成特定 `action_id` 的 completed。
@@ -148,7 +150,7 @@ accepted/started due sweep、cancel、duplicate/conflict 和五个 v1 Tool 生�
 Python 协议/分层契约 33/33、Agent 回归 111/111、完整像素 simulator 构建与 headless smoke 均通过。
 ESP-IDF v5.5.4 固件在将动作记录从内部 BSS 迁移到 PSRAM 后构建成功，应用镜像 `0x162370`，3 MiB
 分区剩余 54%。详细证据见
-[Phase 2C P4 World Service & UI Separation Evidence](../../evidence/agent-phase-2/phase-2c-world-service.md)。
+[Phase 2C P4 World Service & UI Separation Evidence](../../../../evidence/agent-phase-2/phase-2c-world-service.md)。
 
 据此，2C 的 host 与固件编译退出门禁满足，可以开始 2D。当前仍未接入真实 Device WebSocket 或
 执行实机连续动作、断线与性能门禁，不能把 Phase 2 描述为完成或实机通过。
@@ -159,18 +161,29 @@ ESP-IDF v5.5.4 固件在将动作记录从内部 BSS 迁移到 PSRAM 后构建�
 不可恢复错误重连和 HA fallback 均已实现。Node 全量 115/115、Python contract 42/42、hardware
 helper 4/4、world host 1/1 通过；默认与 Agent-enabled ESP-IDF 构建均成功且 app 分区剩余 54%。
 软件与门禁准备证据见
-[Phase 2D Real Transport Software & Hardware-Gate Preparation Evidence](../../evidence/agent-phase-2/phase-2d-real-transport.md)。
+[Phase 2D Real Transport & Hardware Gate Evidence](../../../../evidence/agent-phase-2/phase-2d-real-transport.md)。
 
-自托管 workflow 的 `phase2d_agent` profile 会使用 runner 临时生成的 TLS/设备凭据执行实机 100 次
-Cat 动作、第 50 次后的主动重连与 full snapshot，并在关闭 Agent 后继续采集两小时。该 workflow
-尚未对当前变更执行，故 2D 和 Phase 2 仍为 `in_progress`，不得启动 Phase 3。
+2026-08-20，自托管 workflow run
+[32262619021](https://github.com/shenqislx/p4home/actions/runs/32262619021) 已对提交
+`91aa3e58d24fee48e40d98d159485717f1a4252a` 完成 `phase2d_agent` 实机门禁。manifest 身份匹配，
+profile 为 `phase2d_agent`，采集 `7,500` 秒；100 次 Cat 动作全部完成，三阶段最大延迟均小于
+`595 ms`，第 50 次后的重连 snapshot version 为 `102`。设备侧在 Agent 离线超过两小时后输出
+`VERIFY:agent_transport:offline_2h_fallback:PASS`，同时 HA 保持 READY；891 个后续 8 FPS marker
+持续 PASS，周期 diagnostics 保持 `failed=0`、`protocol_errors=0`，无 panic/watchdog/reboot。
+完整判定见
+[Phase 2D Real Transport & Hardware Gate Evidence](../../../../evidence/agent-phase-2/phase-2d-real-transport.md)。
+
+据此，2D 退出门禁满足。2026-08-20，用户确认 Phase 2 最终 review 通过，Phase 2 状态更新为
+`completed`。Phase 3 保持 `pending`，需用户另行授权后才能启动。
 
 ## 8. Phase 2 完成定义
 
-- [ ] 2A–2D 四个纵切的退出门禁全部通过；
-- [ ] Router/Human 无执行权限，Robot/Cat Tool namespace 不交叉；
-- [ ] Cat 房间级事件动作闭环稳定，UI 不拥有语义真值；
-- [ ] timeout、幂等、断线与 snapshot reconciliation 有确定性和实机证据；
-- [ ] Agent 离线不影响既有 P4 ↔ HA；
-- [ ] 故障、资源、性能和角色专项 eval 证据齐全；
-- [ ] 用户 review 通过后启动 Phase 3。
+- [x] 2A–2D 四个纵切的退出门禁全部通过；
+- [x] Router/Human 无执行权限，Robot/Cat Tool namespace 不交叉；
+- [x] Cat 房间级事件动作闭环稳定，UI 不拥有语义真值；
+- [x] timeout、幂等、断线与 snapshot reconciliation 有确定性和实机证据；
+- [x] Agent 离线不影响既有 P4 ↔ HA；
+- [x] 故障、资源、性能和角色专项 eval 证据齐全；
+- [x] 用户已完成 Phase 2 最终 review。
+
+Phase 2 已完成并归档。本计划的完成不自动启动 Phase 3。

@@ -1,6 +1,6 @@
 # P4 Home 当前里程碑
 
-> Updated: 2026-08-17
+> Updated: 2026-08-20
 > Current Architecture: [P4 Local Agent Architecture](./p4-local-agent-architecture.md)
 > Active Work: [Agent Phase Plans](./plans/README.md)
 
@@ -22,7 +22,7 @@
 |---|---|---|
 | M7.0 Baseline & Contract | `completed` | 可重复构建、实机资源基线、冻结协议 v1、Mock 合约测试 |
 | M7.1 Text Agent Runtime | `completed` | Ollama + 有限 Tool Loop + SQLite + eval |
-| M7.2 Role Runtime & Cat World | `in_progress` | Role Router、三角色隔离、Cat 房间动作闭环 |
+| M7.2 Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作闭环 |
 | M7.3 Cat Object World | `pending` | sofa/window/desk 等 Cat 对象级动作 |
 | M7.4 Robot HA & Multi-role | `pending` | Robot 受限 HA 工具、Human/Robot 语义分割 |
 | M7.5 Role-aware Voice | `pending` | 本地唤醒、STT、Router/Roles、TTS 闭环 |
@@ -43,16 +43,18 @@
 更广泛设备覆盖，仍须维持独立验证边界，不得在未隔离风险时同时改动 HA 主链和新的
 Agent WebSocket。
 
-## 4. 当前唯一允许推进的工作
+## 4. 下一阶段入口
 
-执行 [Phase 2 plan](./plans/2026-08-15-agent-phase-2-p4-room-world-plan.md)。2026-08-17 已重新设计为
+[Phase 2 归档计划](./archive/plans/agent/2026-08-15-agent-phase-2-p4-room-world-plan.md) 于 2026-08-17 重新设计为
 2A–2D 四个纵切。2A Role Contract & Router 的 Role Contract、三个 RoleProfile、Cat
 原文隔离、fail-closed Router、独立 Session、Human/Robot 入口、有界调度与路由审计已落地并通过
 92 项确定性测试。2026-08-18 review 修复后，Human 文本策略、本地 eval gate、Session 串行、模型
 轮次审计、SQLite schema v2 关联索引和统一 Role 组合入口均有回归覆盖；四角色两轮 v2 eval 分别为
 Router 24/24、Human 8/8、Robot 8/8、Cat 18/18，且无综合分。2A、2B、2C 已依次满足退出门禁。
-2026-08-19，2D 真实 WSS 软件链、P4 `agent_transport` 与硬件 harness 已通过软件回归和
-Agent-enabled 固件构建；Phase 2 仍等待实机 100 次动作、重连、两小时离线和资源 artifact 判定。
+2026-08-20，2D 真实 WSS 软件链、P4 `agent_transport` 与硬件 harness 已通过软件回归和
+Agent-enabled 固件构建；实机 run `32262619021` 的 100 次动作、重连 snapshot、两小时 Agent 离线、
+资源与 8 FPS artifact 判定均通过。2A–2D 退出门禁已满足；2026-08-20 用户最终 review 通过，
+Phase 2 / M7.2 已完成并归档。M7.3 / Phase 3 保持 `pending`，等待用户明确启动。
 
 ## 5. 状态更新规则
 
