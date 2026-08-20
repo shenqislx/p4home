@@ -273,6 +273,10 @@ export class DeterministicFakeDevice {
   }
 
   public setObjectOccupied(objectId: ObjectId, occupied: boolean): void {
+    this.#objectState(objectId);
+    if (this.#externalOccupied.has(objectId) === occupied) {
+      return;
+    }
     if (occupied) {
       this.#externalOccupied.add(objectId);
     } else {

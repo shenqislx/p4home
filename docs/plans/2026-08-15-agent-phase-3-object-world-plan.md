@@ -82,7 +82,9 @@ ASan/UBSan 2/2、ESP32-P4 默认与显式 v2 编译及最终 ELF 增量链接均
 `go_to → sit`；Cat 只能从实时、无坐标 capability projection 确认该序列，Human/Robot 仍无对象
 Tool，用户原文也不能进入 Cat。两步 ToolCall 均有终态审计，第一步非 completed 时第二步不会发往
 设备；fake-device 的对象不存在、不支持、占用、取消与断线 unknown/重连对账均通过。Node 24.19
-strict typecheck、Agent 134/134 与 Python contract 54/54 通过，证据见
+strict typecheck、Agent 139/139 与 Python contract 54/54 通过。3C 复审进一步收紧 canonical capability
+字段/顺序，修复对账窗口取消状态和 Action 审计冲突遗留 pending ToolCall，并把非法 timeout 前移到
+策略/模型之前拒绝；证据见
 [Phase 3C Cat Object Event and Role Boundary Evidence](../../evidence/agent-phase-3/phase-3c-cat-object-boundary.md)。
 据此 3C 退出门禁满足，Device Protocol v2 / Tool Schema v2 已冻结，下一步进入 3D Simulator &
 Hardware Gate；v1 契约和默认 transport 选择保持不变。

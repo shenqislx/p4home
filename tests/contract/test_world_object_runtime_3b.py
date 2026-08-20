@@ -200,6 +200,9 @@ class WorldObjectRuntimePhase3BContractTests(unittest.TestCase):
         self.assertIn("runCatObjectSitEvent", runner)
         self.assertIn("previous.outcome.status !== \"completed\"", runner)
         self.assertIn("adapter.protocol_version !== 2", runner)
+        self.assertIn("isCanonicalObjectCapabilityProjection", profiles)
+        self.assertIn("modelCallsAudited", runner)
+        self.assertIn("cancelledDuringReconciliation", runner)
 
 
 if __name__ == "__main__":

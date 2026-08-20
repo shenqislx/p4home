@@ -66,6 +66,8 @@ export interface CatObjectActionRunResult {
 }
 
 const CONTRACT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const ACTION_TIMEOUT_MIN_MS = 100;
+const ACTION_TIMEOUT_MAX_MS = 120_000;
 
 export class CatObjectModelDecisionError extends Error {
   public readonly code = "INVALID_CAT_OBJECT_MODEL_DECISION";
@@ -79,6 +81,32 @@ export class CatObjectModelDecisionError extends Error {
 function assertId(value: string, label: string): void {
   if (!CONTRACT_ID.test(value)) {
     throw new TypeError(`${label} is not a valid contract id`);
+  }
+}
+
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+function validateExecutionOptions(options: RunCatObjectSitEventOptions): void {
+  const actionTimeoutMs = options.action_timeout_ms ?? 5_000;
+  if (
+    !Number.isInteger(actionTimeoutMs)
+    || actionTimeoutMs < ACTION_TIMEOUT_MIN_MS
+    || actionTimeoutMs > ACTION_TIMEOUT_MAX_MS
+  ) {
+    throw new RangeError(
+      `action_timeout_ms must be between ${ACTION_TIMEOUT_MIN_MS} and ${ACTION_TIMEOUT_MAX_MS}`,
+    );
+  }
+  for (const [name, value] of [
+    ["wait_timeout_ms", options.wait_timeout_ms],
+    ["model_timeout_ms", options.model_timeout_ms],
+    ["reconciliation_timeout_ms", options.reconciliation_timeout_ms],
+  ] as const) {
+    if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
+      throw new RangeError(`${name} must be a positive integer`);
+    }
   }
 }
 
@@ -210,6 +238,19 @@ function skippedOutcome(actionId: string, previous: DeviceActionOutcome): Device
         dependency_outcome: previous.status,
         replay_allowed: false,
       },
+    },
+  };
+}
+
+function cancelledBeforeDispatchOutcome(actionId: string): DeviceActionOutcome {
+  return {
+    status: "failed",
+    action_id: actionId,
+    error: {
+      code: "CANCELLED",
+      message: "object sequence was cancelled before device dispatch",
+      retryable: false,
+      details: { skipped: true, replay_allowed: false },
     },
   };
 }
@@ -375,6 +416,7 @@ async function auditFinish(
   startedAtMs: number,
   completedAtMs: number,
   actionCreatedAt: ReadonlyMap<number, number>,
+  modelCallsAudited: boolean,
 ): Promise<void> {
   const store = options.audit_store;
   if (store === undefined) {
@@ -397,7 +439,7 @@ async function auditFinish(
       created_at_ms: actionCreatedAt.get(step.index) ?? startedAtMs,
     }));
   const event: Event = {
-    event_id: `${options.run_id}:event:${steps.length === 0 ? 2 : 3}`,
+    event_id: `${options.run_id}:event:${modelCallsAudited ? 3 : 2}`,
     run_id: options.run_id,
     type: `cat.object.run.${status}`,
     occurred_at_ms: completedAtMs,
@@ -453,6 +495,7 @@ export async function runCatObjectSitEvent(
   if (new Set(options.tool_call_ids).size !== 2 || new Set(options.action_ids).size !== 2) {
     throw new TypeError("Cat object tool_call_ids and action_ids must be unique");
   }
+  validateExecutionOptions(options);
   const approved = options.policy.approve(options.event);
   const clock = options.clock ?? Date.now;
   return await options.scheduler.schedule({
@@ -464,6 +507,8 @@ export async function runCatObjectSitEvent(
       let calls: readonly ToolCall[] = [];
       const steps: CatObjectStepResult[] = [];
       const actionCreatedAt = new Map<number, number>();
+      let modelCallsAudited = false;
+      let cancelledDuringReconciliation = false;
       let status: CatObjectActionRunResult["status"] = "failed";
       try {
         capabilities = projectCapabilities(options.adapter, approved);
@@ -471,6 +516,7 @@ export async function runCatObjectSitEvent(
         calls = await decideObjectSequence(options, approved, capabilities);
         const modelCompletedAtMs = Math.max(startedAtMs, clock());
         await auditModelCalls(options, calls, modelCompletedAtMs);
+        modelCallsAudited = true;
 
         for (const rawIndex of [0, 1] as const) {
           const approvedStep = approved.steps[rawIndex];
@@ -486,6 +532,18 @@ export async function runCatObjectSitEvent(
               outcome: skippedOutcome(options.action_ids[rawIndex], previous.outcome),
             });
             break;
+          }
+          if (isAborted(options.signal)) {
+            steps.push({
+              index: rawIndex,
+              tool_call_id: options.tool_call_ids[rawIndex],
+              action_id: options.action_ids[rawIndex],
+              tool: approvedStep.tool,
+              arguments: approvedStep.arguments,
+              executed: false,
+              outcome: cancelledBeforeDispatchOutcome(options.action_ids[rawIndex]),
+            });
+            continue;
           }
           const requestedAtMs = Math.max(startedAtMs, clock());
           actionCreatedAt.set(rawIndex, requestedAtMs);
@@ -509,6 +567,8 @@ export async function runCatObjectSitEvent(
                 options.reconciliation_timeout_ms ?? 5_000,
                 options.signal,
               );
+              cancelledDuringReconciliation = outcome.status === "unknown"
+                && isAborted(options.signal);
             }
           } catch (error) {
             outcome = internalOutcome(options.action_ids[rawIndex], error);
@@ -523,9 +583,11 @@ export async function runCatObjectSitEvent(
             outcome,
           });
         }
-        status = steps.every((step) => step.outcome.status === "completed")
-          ? "completed"
-          : outcomeStatus(steps.find((step) => step.outcome.status !== "completed")!.outcome);
+        status = cancelledDuringReconciliation
+          ? "cancelled"
+          : steps.every((step) => step.outcome.status === "completed")
+            ? "completed"
+            : outcomeStatus(steps.find((step) => step.outcome.status !== "completed")!.outcome);
       } catch (error) {
         if (error instanceof OllamaProviderError) {
           status = error.code === "CANCELLED"
@@ -535,6 +597,26 @@ export async function runCatObjectSitEvent(
               : "failed";
         } else if (options.signal?.aborted === true) {
           status = "cancelled";
+        }
+        if (modelCallsAudited) {
+          for (const rawIndex of [0, 1] as const) {
+            if (steps.some((step) => step.index === rawIndex)) {
+              continue;
+            }
+            const approvedStep = approved.steps[rawIndex];
+            const previous = steps[rawIndex - 1];
+            steps.push({
+              index: rawIndex,
+              tool_call_id: options.tool_call_ids[rawIndex],
+              action_id: options.action_ids[rawIndex],
+              tool: approvedStep.tool,
+              arguments: approvedStep.arguments,
+              executed: false,
+              outcome: previous !== undefined && previous.outcome.status !== "completed"
+                ? skippedOutcome(options.action_ids[rawIndex], previous.outcome)
+                : internalOutcome(options.action_ids[rawIndex], error),
+            });
+          }
         }
         if (capabilities.length === 0) {
           capabilities = options.adapter.object_capabilities.map((object) => ({
@@ -555,6 +637,7 @@ export async function runCatObjectSitEvent(
         startedAtMs,
         completedAtMs,
         actionCreatedAt,
+        modelCallsAudited,
       );
       return {
         run_id: options.run_id,

@@ -20,6 +20,18 @@ Device Protocol v2 adapter 和 deterministic fake-device 已接入对象 capabil
 进入终态审计；未执行的后续步骤以 `CANCELLED` 和 `skipped=true` 终结，但不会创建或发送 Device
 Action。unknown 结果禁止 replay，即使 snapshot 显示目标状态也不伪造某个 action_id 已完成。
 
+## 复审修复
+
+- Role Context 对 capability projection 做精确字段、注册表顺序、对象/房间、动作顺序与完整容量校验，
+  拒绝 `default_available`、animation binding 或任意额外内部字段；
+- 取消发生在模型完成后、设备 dispatch 前时，两条 ToolCall 都会终结，但不创建虚假的 Device Action；
+- 取消发生在 unknown reconciliation 窗口时保留 unknown/replay 禁止事实，同时把 Run 标记为
+  `cancelled`；若迟到的显式 terminal 已到达，则 terminal 结果优先；
+- 模型 ToolCall 已入库后若 Action 审计身份冲突，所有 pending ToolCall 会以确定性错误终结，Run 不会
+  留在 running；
+- action/model/wait/reconciliation timeout 在策略、模型和 WebSocket 前校验；fake-device 的重复占用
+  设置不再制造虚假的 state version 变化。
+
 ## 确定性场景
 
 - 合法 sofa 事件严格执行 `go_to → sit`，两步 action/result/audit 全部成功；
@@ -38,8 +50,8 @@ Action。unknown 结果禁止 replay，即使 snapshot 显示目标状态也不�
 | 检查 | 结果 |
 |---|---:|
 | Node 24.19 TypeScript strict typecheck | 通过 |
-| Agent 全量确定性测试 | 134/134 |
-| Phase 3C 专项 Node 测试 | 11/11 |
+| Agent 全量确定性测试 | 139/139 |
+| Phase 3C 专项 Node 测试 | 16/16 |
 | Python contract tests | 54/54 |
 | Device Protocol v1 / Tool Schema v1 冻结与默认路径回归 | 通过 |
 | Device Protocol v2 / Tool Schema v2 冻结校验 | 通过 |

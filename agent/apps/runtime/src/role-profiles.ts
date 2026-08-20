@@ -1,6 +1,11 @@
 import type { OllamaChatMessage } from "@p4home/provider-ollama";
 import { ROOM_IDS, type RoomId } from "@p4home/domain-p4home";
-import type { WorldObjectCapability } from "@p4home/contracts";
+import {
+  WORLD_OBJECT_ACTIONS,
+  WORLD_OBJECT_REGISTRY_CAPACITY,
+  projectWorldObjectCapabilities,
+  type WorldObjectCapability,
+} from "@p4home/contracts";
 
 import type { RoleId, SourceSpan } from "./role-contracts.ts";
 
@@ -124,6 +129,59 @@ function assertCanonicalRoleProfile(profile: RoleProfile): RoleProfile {
   return canonical;
 }
 
+function isExactObjectCapability(value: unknown): value is WorldObjectCapability {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const capability = value as Record<string, unknown>;
+  const keys = Object.keys(capability).sort();
+  const expectedKeys = ["available", "object_id", "room_id", "supported_actions"];
+  return keys.length === expectedKeys.length
+    && keys.every((key, index) => key === expectedKeys[index])
+    && typeof capability.object_id === "string"
+    && typeof capability.room_id === "string"
+    && (ROOM_IDS as readonly string[]).includes(capability.room_id)
+    && typeof capability.available === "boolean"
+    && Array.isArray(capability.supported_actions)
+    && capability.supported_actions.length > 0
+    && new Set(capability.supported_actions).size === capability.supported_actions.length
+    && capability.supported_actions.every((action) =>
+      typeof action === "string"
+      && (WORLD_OBJECT_ACTIONS as readonly string[]).includes(action)
+    );
+}
+
+function isCanonicalObjectCapabilityProjection(
+  value: unknown,
+): value is readonly WorldObjectCapability[] {
+  if (
+    !Array.isArray(value)
+    || value.length !== WORLD_OBJECT_REGISTRY_CAPACITY
+    || !value.every(isExactObjectCapability)
+    || new Set(value.map((object) => object.object_id)).size !== value.length
+  ) {
+    return false;
+  }
+  try {
+    const expected = projectWorldObjectCapabilities(
+      new Map(value.map((object) => [object.object_id, object.available])),
+    );
+    return value.every((object, index) => {
+      const canonical = expected[index];
+      return canonical !== undefined
+        && object.object_id === canonical.object_id
+        && object.room_id === canonical.room_id
+        && object.available === canonical.available
+        && object.supported_actions.length === canonical.supported_actions.length
+        && object.supported_actions.every(
+          (action, actionIndex) => action === canonical.supported_actions[actionIndex],
+        );
+    });
+  } catch {
+    return false;
+  }
+}
+
 export function assertRoleToolAuthorization(
   profile: RoleProfile,
   toolNames: readonly string[],
@@ -181,8 +239,8 @@ export function buildRoleContext(
       || payloadKeys.length !== 2
       || payloadKeys[0] !== "objects"
       || payloadKeys[1] !== "target_id"
-      || !Array.isArray(input.payload.objects)
-      || input.payload.objects.length === 0
+      || typeof input.payload.target_id !== "string"
+      || !isCanonicalObjectCapabilityProjection(input.payload.objects)
       || !input.payload.objects.some((object) =>
         object.object_id === input.payload.target_id
         && object.available
@@ -193,7 +251,14 @@ export function buildRoleContext(
       throw new TypeError("normalized Cat object event is not allowed by the Phase 3C contract");
     }
     const serialized = JSON.stringify(input.payload);
-    for (const forbidden of ["anchor", "art_x", "floor_y", "facing", "animation"]) {
+    for (const forbidden of [
+      "anchor",
+      "art_x",
+      "floor_y",
+      "facing",
+      "animation_bindings",
+      "default_available",
+    ]) {
       if (serialized.includes(`\"${forbidden}\"`)) {
         throw new TypeError(`normalized Cat object event exposes forbidden ${forbidden}`);
       }

@@ -185,6 +185,65 @@ test("only Cat owns object tools and Cat still rejects original user text", () =
   }));
 });
 
+test("Cat role context rejects extra execution metadata and malformed capability projections", () => {
+  const cat = getRoleProfile("cat");
+  const capabilities = [
+    {
+      object_id: TARGET_ID,
+      room_id: "living_room",
+      supported_actions: ["go_to", "sit", "look_at", "interact"],
+      available: true,
+    },
+    {
+      object_id: "study.desk",
+      room_id: "study",
+      supported_actions: ["go_to", "look_at", "interact"],
+      available: true,
+    },
+    {
+      object_id: "living_room.window",
+      room_id: "living_room",
+      supported_actions: ["go_to", "look_at", "interact"],
+      available: true,
+    },
+  ] as const;
+  assert.doesNotThrow(() => buildRoleContext(cat, {
+    kind: "normalized_event",
+    event_type: "test.object_sit_target",
+    payload: { target_id: TARGET_ID, objects: capabilities },
+  }));
+  for (const extra of [
+    { default_available: true },
+    { animation_bindings: { sit: "cat_sit" } },
+    { internal_note: "device-only" },
+  ]) {
+    assert.throws(() => buildRoleContext(cat, {
+      kind: "normalized_event",
+      event_type: "test.object_sit_target",
+      payload: {
+        target_id: TARGET_ID,
+        objects: [{ ...capabilities[0], ...extra }, ...capabilities.slice(1)],
+      },
+    } as never), /not allowed/);
+  }
+  assert.throws(() => buildRoleContext(cat, {
+    kind: "normalized_event",
+    event_type: "test.object_sit_target",
+    payload: {
+      target_id: TARGET_ID,
+      objects: [capabilities[0], capabilities[0], capabilities[2]],
+    },
+  }), /not allowed/);
+  assert.throws(() => buildRoleContext(cat, {
+    kind: "normalized_event",
+    event_type: "test.object_sit_target",
+    payload: {
+      target_id: TARGET_ID,
+      objects: [capabilities[1], capabilities[0], capabilities[2]],
+    },
+  }), /not allowed/);
+});
+
 test("Cat executes go_to then sit and audits the coordinate-free capability observation", async () => {
   const now = 110_000;
   const harness = connectedV2({ now: () => now });
@@ -261,6 +320,49 @@ test("a model cannot rewrite the policy target or leave unaudited pending calls"
   const trace = await store.getRunTrace("object-run-model-rewrite");
   assert.equal(trace?.run.status, "failed");
   assert.equal(trace?.tool_calls.length, 0);
+  assert.equal(trace?.actions.length, 0);
+});
+
+test("invalid execution timeouts fail before policy, model, audit, or WebSocket work", async () => {
+  const now = 118_000;
+  const harness = connectedV2({ now: () => now });
+  const model = objectSequenceProvider();
+  using store = new SqliteAuditStore(":memory:");
+  await assert.rejects(
+    runCatObjectSitEvent({
+      ...runOptions("invalid-timeout", now, harness, model.provider, store),
+      action_timeout_ms: 99,
+    }),
+    /action_timeout_ms/,
+  );
+  assert.equal(model.requests.length, 0);
+  assert.equal(harness.device.received_action_requests, 0);
+  assert.equal(await store.getRunTrace("object-run-invalid-timeout"), null);
+});
+
+test("an Action audit identity conflict terminalizes both previously stored ToolCalls", async () => {
+  const now = 119_000;
+  const harness = connectedV2({ now: () => now });
+  const firstModel = objectSequenceProvider();
+  const secondModel = objectSequenceProvider();
+  using store = new SqliteAuditStore(":memory:");
+  const firstOptions = runOptions("audit-owner", now, harness, firstModel.provider, store);
+  assert.equal((await runCatObjectSitEvent(firstOptions)).status, "completed");
+  const requestsBeforeConflict = harness.device.received_action_requests;
+
+  const result = await runCatObjectSitEvent({
+    ...runOptions("audit-conflict", now, harness, secondModel.provider, store),
+    action_ids: firstOptions.action_ids,
+  });
+  assert.equal(result.status, "failed");
+  assert.equal(result.steps.length, 2);
+  assert.equal(result.steps.every((step) => !step.executed), true);
+  assert.equal(harness.device.received_action_requests, requestsBeforeConflict);
+  const trace = await store.getRunTrace("object-run-audit-conflict");
+  assert.equal(trace?.run.status, "failed");
+  assert.deepEqual(trace?.tool_calls.map((call) => call.status), ["error", "error"]);
+  assert.equal(trace?.tool_calls[0]?.error?.code, "INTERNAL");
+  assert.equal(trace?.tool_calls[1]?.error?.code, "CANCELLED");
   assert.equal(trace?.actions.length, 0);
 });
 
@@ -354,6 +456,66 @@ test("cancellation during go_to is audited and never dispatches sit", async () =
   const trace = await store.getRunTrace("object-run-cancelled");
   assert.equal(trace?.run.status, "cancelled");
   assert.deepEqual(trace?.tool_calls.map((call) => call.status), ["error", "error"]);
+});
+
+test("cancellation after model output terminalizes both calls without creating an Action", async () => {
+  const now = 145_000;
+  const harness = connectedV2({ now: () => now });
+  const controller = new AbortController();
+  const model = objectSequenceProvider(TARGET_ID, () => controller.abort());
+  using store = new SqliteAuditStore(":memory:");
+  const result = await runCatObjectSitEvent(runOptions(
+    "cancelled-before-dispatch",
+    now,
+    harness,
+    model.provider,
+    store,
+    { signal: controller.signal },
+  ));
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.steps.length, 2);
+  assert.equal(result.steps.every((step) => !step.executed), true);
+  assert.equal(harness.device.received_action_requests, 0);
+  const trace = await store.getRunTrace("object-run-cancelled-before-dispatch");
+  assert.equal(trace?.run.status, "cancelled");
+  assert.deepEqual(trace?.tool_calls.map((call) => call.status), ["error", "error"]);
+  assert.equal(trace?.actions.length, 0);
+});
+
+test("cancellation during unknown reconciliation keeps unknown truth but marks the Run cancelled", async () => {
+  const now = 147_000;
+  const harness = connectedV2({ now: () => now, auto_execute: false });
+  const controller = new AbortController();
+  const model = objectSequenceProvider();
+  using store = new SqliteAuditStore(":memory:");
+  const runPromise = runCatObjectSitEvent(runOptions(
+    "cancelled-reconciliation",
+    now,
+    harness,
+    model.provider,
+    store,
+    {
+      signal: controller.signal,
+      wait_timeout_ms: 1_000,
+      reconciliation_timeout_ms: 10_000,
+    },
+  ));
+  await waitForRequests(harness.device, 1);
+  assert.equal(harness.device.startNext(), true);
+  harness.socket.disconnect();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  controller.abort();
+  const result = await runPromise;
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.steps[0]?.outcome.status, "unknown");
+  assert.equal(result.steps[1]?.executed, false);
+  assert.equal(harness.device.received_action_requests, 1);
+  const trace = await store.getRunTrace("object-run-cancelled-reconciliation");
+  assert.equal(trace?.run.status, "cancelled");
+  assert.equal(trace?.tool_calls[0]?.error?.code, "DEVICE_OFFLINE");
+  assert.equal(trace?.tool_calls[0]?.error?.details?.replay_allowed, false);
+  assert.equal(trace?.tool_calls[1]?.error?.code, "CANCELLED");
 });
 
 test("disconnect remains audited unknown after snapshot reconciliation and is never replayed", async () => {
