@@ -38,7 +38,8 @@ Service、真实传输与实机门禁四个纵切均满足退出条件；Agent/P
 与 3C Cat Object Event & Role Boundary 已完成。3D 最终实机 run `32382940058` 已通过动作链、重连、
 取消、Agent 离线释放、HA/UI、资源与 8 FPS artifact 判定。2026-08-20 用户最终 review 通过，
 Phase 3 已完成并归档；对象级 Tool 仅加入 Cat RoleProfile，冻结的 Device Protocol v1 / Tool
-Schema v1 未修改。Phase 4 尚未启动，需用户另行明确授权。
+Schema v1 未修改。2026-08-20 用户已授权启动 Phase 4 并先完成准备；4A–4E 独立门禁、Robot/P4
+凭证隔离、HA 写侧 unknown 语义与多角色 span 边界已冻结，真实 Robot HA Tool 尚未开放。
 
 ## 工作规则
 

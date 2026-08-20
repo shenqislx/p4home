@@ -24,7 +24,7 @@
 | M7.1 Text Agent Runtime | `completed` | Ollama + 有限 Tool Loop + SQLite + eval |
 | M7.2 Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作闭环 |
 | M7.3 Cat Object World | `completed` | sofa/window/desk 等 Cat 对象级动作，实机门禁与最终 review 已通过 |
-| M7.4 Robot HA & Multi-role | `pending` | Robot 受限 HA 工具、Human/Robot 语义分割 |
+| M7.4 Robot HA & Multi-role | `in_progress` | Robot 受限 HA 工具、Human/Robot 语义分割；启动准备完成 |
 | M7.5 Role-aware Voice | `pending` | 本地唤醒、STT、Router/Roles、TTS 闭环 |
 | M7.6 Role-aware Memory | `pending` | 评测共享、私有与混合角色记忆 |
 | M7.7 Cat Autonomy | `pending` | Timer/HA 事件驱动、低优先级、可关闭 Cat 行为 |
@@ -58,7 +58,9 @@ Phase 2 / M7.2 已完成并归档。2026-08-20，用户明确授权启动 M7.3 /
 Contract、3B P4 Object Runtime 与 3C Cat Object Event & Role Boundary 门禁已通过。3D 最终实机
 run `32382940058` 已通过 manifest、对象动作链、重连 snapshot、取消、Agent 离线释放、HA/UI、资源
 与 240 秒 8 FPS artifact 判定。2026-08-20 用户最终 review 通过，Phase 3 / M7.3 已完成并归档；
-对象执行 Tool 仅加入 Cat RoleProfile。M7.4 尚未启动，需用户另行明确授权。
+对象执行 Tool 仅加入 Cat RoleProfile。2026-08-20，用户明确授权启动 M7.4 / Phase 4 并先做准备；
+4A–4E 的独立门禁、Robot/P4 凭证隔离、HA 写侧 unknown 语义和多角色 span 边界已冻结。当前下一项
+是 4A Robot HA Contract & Credential Boundary，尚未连接真实 Robot HA 或开放 Robot Tool。
 
 ## 5. 状态更新规则
 

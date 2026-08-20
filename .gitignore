@@ -54,6 +54,9 @@ evidence/agent-phase-2/*
 !evidence/agent-phase-3/
 evidence/agent-phase-3/*
 !evidence/agent-phase-3/*.md
+!evidence/agent-phase-4/
+evidence/agent-phase-4/*
+!evidence/agent-phase-4/*.md
 
 # Local ESP-IDF / component-manager caches under the firmware tree
 firmware/.cache/
