@@ -48,10 +48,10 @@
 
 只有 3B 退出门禁通过后开始：
 
-- 定义经过策略层归一化的对象事件，不接受用户原文或任意 target/action；
-- Cat 模型只从无坐标 capability projection 选择对象 Tool，并将观察结果写入 Run 审计；
-- 支持 `go_to(target_id) → sit(target_id)` 的有界顺序执行，前一步失败立即停止；
-- 回归 Router/Human/Robot 无法看到、选择或调用对象级 Cat Tool。
+- [x] 定义经过策略层归一化的对象事件，不接受用户原文或任意 target/action；
+- [x] Cat 模型只从无坐标 capability projection 选择对象 Tool，并将观察结果写入 Run 审计；
+- [x] 支持 `go_to(target_id) → sit(target_id)` 的有界顺序执行，前一步失败立即停止；
+- [x] 回归 Router/Human/Robot 无法看到、选择或调用对象级 Cat Tool。
 
 退出门禁：fake device 上对象不存在、不支持动作、被占用、中途取消和断线 unknown 均有可审计
 终态；任何越权事件在模型或 WebSocket 前拒绝。
@@ -78,8 +78,14 @@ candidate，以及默认 v1、显式选择 v2 的 transport 门禁。3B 复审�
 角色/对象状态不变量、逐动作结果与 retryable 约束。Agent 123/123、Python 54/54、C host 2/2、
 ASan/UBSan 2/2、ESP32-P4 默认与显式 v2 编译及最终 ELF 增量链接均通过；证据见
 [Phase 3B P4 Object Runtime Evidence](../../evidence/agent-phase-3/phase-3b-object-runtime.md)。据此 3B
-退出门禁满足，下一步进入 3C Cat Object Event & Role Boundary；对象 Tool 尚未加入任何 RoleProfile，
-v1 契约保持冻结，v2 在 3C 完成端到端审计前仍为 candidate。
+退出门禁满足。3C 已增加只接受 `test.object_sit_target` 的前置策略，动作由策略固定派生为
+`go_to → sit`；Cat 只能从实时、无坐标 capability projection 确认该序列，Human/Robot 仍无对象
+Tool，用户原文也不能进入 Cat。两步 ToolCall 均有终态审计，第一步非 completed 时第二步不会发往
+设备；fake-device 的对象不存在、不支持、占用、取消与断线 unknown/重连对账均通过。Node 24.19
+strict typecheck、Agent 134/134 与 Python contract 54/54 通过，证据见
+[Phase 3C Cat Object Event and Role Boundary Evidence](../../evidence/agent-phase-3/phase-3c-cat-object-boundary.md)。
+据此 3C 退出门禁满足，Device Protocol v2 / Tool Schema v2 已冻结，下一步进入 3D Simulator &
+Hardware Gate；v1 契约和默认 transport 选择保持不变。
 
 ## 8. 完成定义
 

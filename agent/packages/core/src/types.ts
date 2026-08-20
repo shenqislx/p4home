@@ -68,6 +68,11 @@ export type ToolErrorCode =
   | "CANCELLED"
   | "DEVICE_BUSY"
   | "ACTION_ID_CONFLICT"
+  | "UNKNOWN_OBJECT"
+  | "UNSUPPORTED_OBJECT_ACTION"
+  | "OBJECT_UNAVAILABLE"
+  | "OBJECT_OCCUPIED"
+  | "OBJECT_NOT_REACHED"
   | "INTERNAL";
 
 export interface ToolError {
@@ -78,7 +83,7 @@ export interface ToolError {
 }
 
 export interface ToolSuccessResult {
-  readonly schema_version: 1;
+  readonly schema_version: 1 | 2;
   readonly tool_call_id: string;
   readonly name: string;
   readonly status: "success";
@@ -87,7 +92,7 @@ export interface ToolSuccessResult {
 }
 
 export interface ToolFailureResult {
-  readonly schema_version: 1;
+  readonly schema_version: 1 | 2;
   readonly tool_call_id: string;
   readonly name: string;
   readonly status: "error";

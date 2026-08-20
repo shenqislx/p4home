@@ -1,9 +1,10 @@
 import type { OllamaChatMessage } from "@p4home/provider-ollama";
 import { ROOM_IDS, type RoomId } from "@p4home/domain-p4home";
+import type { WorldObjectCapability } from "@p4home/contracts";
 
 import type { RoleId, SourceSpan } from "./role-contracts.ts";
 
-export const CAT_WORLD_TOOLS = [
+export const CAT_ROOM_TOOLS = [
   "character.get_state",
   "character.go_to_room",
   "character.set_activity",
@@ -11,8 +12,17 @@ export const CAT_WORLD_TOOLS = [
   "world.get_snapshot",
 ] as const;
 
+export const CAT_OBJECT_TOOLS = [
+  "character.go_to",
+  "character.sit",
+  "character.look_at",
+  "character.interact",
+] as const;
+
+export const CAT_WORLD_TOOLS = [...CAT_ROOM_TOOLS, ...CAT_OBJECT_TOOLS] as const;
+
 export interface RoleProfile {
-  readonly revision: "role-profile/v1";
+  readonly revision: "role-profile/v1" | "role-profile/v2";
   readonly role_id: RoleId;
   readonly accepts_user_text: boolean;
   readonly allowed_tools: readonly string[];
@@ -36,6 +46,14 @@ export type RoleInput =
       readonly kind: "normalized_event";
       readonly event_type: "test.room_target";
       readonly payload: Readonly<{ readonly room_target: RoomId }>;
+    }
+  | {
+      readonly kind: "normalized_event";
+      readonly event_type: "test.object_sit_target";
+      readonly payload: Readonly<{
+        readonly target_id: string;
+        readonly objects: readonly WorldObjectCapability[];
+      }>;
     };
 
 const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
@@ -67,7 +85,7 @@ const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
     system_prompt: "你是 P4 Home 的 Human，只负责自然、简洁的中文对话。你没有任何执行工具，不得声称已控制设备。",
   },
   cat: {
-    revision: "role-profile/v1",
+    revision: "role-profile/v2",
     role_id: "cat",
     accepts_user_text: false,
     allowed_tools: CAT_WORLD_TOOLS,
@@ -77,7 +95,7 @@ const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
     max_model_turns: 2,
     history_message_limit: 6,
     queue_priority: "background",
-    system_prompt: "你是 P4 Home 的 Cat，只处理经过策略层归一化的世界事件，并且只能使用最小 P4 World 工具。",
+    system_prompt: "你是 P4 Home 的 Cat，只处理经过策略层归一化的世界事件，只能从给定的无坐标对象能力中选择最小 P4 World 工具，不得改写目标。",
   },
 };
 
@@ -148,14 +166,38 @@ export function buildRoleContext(
   if (profile.role_id !== "cat") {
     throw new TypeError("normalized Cat events cannot enter Human or Robot context");
   }
-  const payloadKeys = Object.keys(input.payload);
-  if (
-    input.event_type !== "test.room_target"
-    || payloadKeys.length !== 1
-    || payloadKeys[0] !== "room_target"
-    || !(ROOM_IDS as readonly string[]).includes(input.payload.room_target)
-  ) {
-    throw new TypeError("normalized Cat event is not allowed by the Phase 2A contract");
+  const payloadKeys = Object.keys(input.payload).sort();
+  if (input.event_type === "test.room_target") {
+    if (
+      payloadKeys.length !== 1
+      || payloadKeys[0] !== "room_target"
+      || !(ROOM_IDS as readonly string[]).includes(input.payload.room_target)
+    ) {
+      throw new TypeError("normalized Cat room event is not allowed by the contract");
+    }
+  } else {
+    if (
+      input.event_type !== "test.object_sit_target"
+      || payloadKeys.length !== 2
+      || payloadKeys[0] !== "objects"
+      || payloadKeys[1] !== "target_id"
+      || !Array.isArray(input.payload.objects)
+      || input.payload.objects.length === 0
+      || !input.payload.objects.some((object) =>
+        object.object_id === input.payload.target_id
+        && object.available
+        && object.supported_actions.includes("go_to")
+        && object.supported_actions.includes("sit")
+      )
+    ) {
+      throw new TypeError("normalized Cat object event is not allowed by the Phase 3C contract");
+    }
+    const serialized = JSON.stringify(input.payload);
+    for (const forbidden of ["anchor", "art_x", "floor_y", "facing", "animation"]) {
+      if (serialized.includes(`\"${forbidden}\"`)) {
+        throw new TypeError(`normalized Cat object event exposes forbidden ${forbidden}`);
+      }
+    }
   }
   return [
     { role: "system", content: profile.system_prompt },

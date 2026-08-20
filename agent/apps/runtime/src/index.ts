@@ -3,6 +3,8 @@ import { validateFrozenContracts } from "@p4home/contracts";
 export * from "./text-agent.ts";
 export * from "./cat-event-policy.ts";
 export * from "./cat-action-runner.ts";
+export * from "./cat-object-event-policy.ts";
+export * from "./cat-object-action-runner.ts";
 export * from "./deterministic-fake-device.ts";
 export * from "./device-action-adapter.ts";
 export * from "./device-protocol.ts";

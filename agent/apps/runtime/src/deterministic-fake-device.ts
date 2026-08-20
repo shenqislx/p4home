@@ -13,13 +13,21 @@ import {
   type ActionStartedPayload,
   type CharacterState,
   type DeviceActionError,
+  type DeviceActionErrorCode,
   type DeviceMessage,
+  type DeviceObjectCapability,
+  type DeviceObjectState,
+  type DeviceProtocolVersion,
   type DeviceToolName,
+  type ObjectAction,
+  type ObjectId,
+  type ObjectRuntimeCharacterState,
   type WorldSnapshotPayload,
 } from "./device-protocol.ts";
 
 export interface DeterministicFakeDeviceOptions {
   readonly device_id?: string;
+  readonly protocol_version?: DeviceProtocolVersion;
   readonly now?: () => number;
   readonly monotonic_now?: () => number;
   readonly auto_execute?: boolean;
@@ -29,6 +37,27 @@ export interface DeterministicFakeDeviceOptions {
   readonly idempotency_retention_ms?: number;
   readonly idempotency_capacity?: number;
 }
+
+const OBJECT_CAPABILITIES: readonly DeviceObjectCapability[] = [
+  { object_id: "living_room.sofa", room_id: "living_room", supported_actions: ["go_to", "sit", "look_at", "interact"], available: true },
+  { object_id: "study.desk", room_id: "study", supported_actions: ["go_to", "look_at", "interact"], available: true },
+  { object_id: "living_room.window", room_id: "living_room", supported_actions: ["go_to", "look_at", "interact"], available: true },
+];
+
+const OBJECT_ACTION_BY_TOOL: Readonly<Partial<Record<DeviceToolName, ObjectAction>>> = {
+  "character.go_to": "go_to",
+  "character.sit": "sit",
+  "character.look_at": "look_at",
+  "character.interact": "interact",
+};
+
+type MutableFakeCharacterState = {
+  room_id: RoomId;
+  activity: CharacterActivity;
+  speaking: boolean;
+  target_object_id: ObjectId | null;
+  pose: "standing" | "sitting";
+};
 
 type FakeActionLifecycleType =
   | "action.accepted"
@@ -134,6 +163,7 @@ export class DeterministicFakeDeviceSocket implements DeviceWebSocketConnection 
 
 export class DeterministicFakeDevice {
   readonly #deviceId: string;
+  readonly #protocolVersion: DeviceProtocolVersion;
   readonly #now: () => number;
   readonly #monotonicNow: () => number;
   readonly #autoExecute: boolean;
@@ -152,13 +182,26 @@ export class DeterministicFakeDevice {
   #snapshotCounter = 0;
   #activeActionId: string | null = null;
   #stateVersion = 1;
-  #state: Omit<CharacterState, "active_action_id">;
+  #state: MutableFakeCharacterState;
+  #objects: DeviceObjectState[] = OBJECT_CAPABILITIES.map((object) => ({
+    object_id: object.object_id,
+    room_id: object.room_id,
+    available: object.available,
+    occupied: false,
+  }));
+  readonly #externalOccupied = new Set<ObjectId>();
+  #characterOccupiedObjectId: ObjectId | null = null;
+  readonly #forcedObjectErrors = new Map<string, DeviceActionError>();
   #receivedActionRequests = 0;
   #pendingResyncCorrelationId: string | null = null;
   readonly #bootStartedAtMonotonicMs: number;
 
   public constructor(options: DeterministicFakeDeviceOptions = {}) {
     this.#deviceId = options.device_id ?? "p4-fake-2b";
+    this.#protocolVersion = options.protocol_version ?? 1;
+    if (this.#protocolVersion !== 1 && this.#protocolVersion !== 2) {
+      throw new RangeError("protocol_version must be 1 or 2");
+    }
     this.#now = options.now ?? Date.now;
     this.#monotonicNow = options.monotonic_now ?? options.now ?? (() => performance.now());
     this.#autoExecute = options.auto_execute ?? true;
@@ -175,6 +218,8 @@ export class DeterministicFakeDevice {
       room_id: options.initial_room ?? "living_room",
       activity: options.initial_activity ?? "idle",
       speaking: false,
+      target_object_id: null,
+      pose: "standing",
     };
     this.#bootStartedAtMonotonicMs = this.#monotonicNow();
   }
@@ -196,7 +241,64 @@ export class DeterministicFakeDevice {
   }
 
   public getState(): CharacterState {
-    return { ...this.#state, active_action_id: this.#activeActionId };
+    const base: CharacterState = {
+      room_id: this.#state.room_id,
+      activity: this.#state.activity,
+      speaking: this.#state.speaking,
+      active_action_id: this.#activeActionId,
+    };
+    return this.#protocolVersion === 2
+      ? {
+          ...base,
+          target_object_id: this.#state.target_object_id,
+          pose: this.#state.pose,
+        } as ObjectRuntimeCharacterState
+      : base;
+  }
+
+  public setObjectAvailable(objectId: ObjectId, available: boolean): void {
+    const object = this.#objectState(objectId);
+    if (object.available === available) {
+      return;
+    }
+    this.#objects = this.#objects.map((candidate) =>
+      candidate.object_id === objectId ? { ...candidate, available } : candidate
+    );
+    if (!available && this.#state.target_object_id === objectId) {
+      this.#releaseCharacterOccupancy();
+      this.#state = { ...this.#state, target_object_id: null, pose: "standing" };
+    }
+    this.#stateVersion += 1;
+    this.#emitWorldChanged();
+  }
+
+  public setObjectOccupied(objectId: ObjectId, occupied: boolean): void {
+    if (occupied) {
+      this.#externalOccupied.add(objectId);
+    } else {
+      this.#externalOccupied.delete(objectId);
+    }
+    if (occupied && this.#state.target_object_id === objectId) {
+      this.#releaseCharacterOccupancy();
+      this.#state = { ...this.#state, target_object_id: null, pose: "standing" };
+    }
+    this.#refreshObjectOccupancy(objectId);
+    this.#stateVersion += 1;
+    this.#emitWorldChanged();
+  }
+
+  public forceObjectError(
+    tool: "character.go_to" | "character.sit" | "character.look_at" | "character.interact",
+    objectId: ObjectId,
+    code: Extract<DeviceActionErrorCode,
+      "UNKNOWN_OBJECT" | "UNSUPPORTED_OBJECT_ACTION" | "OBJECT_UNAVAILABLE" |
+      "OBJECT_OCCUPIED" | "OBJECT_NOT_REACHED">,
+  ): void {
+    this.#forcedObjectErrors.set(`${tool}:${objectId}`, {
+      code,
+      message: `forced fake-device ${code}`,
+      retryable: code === "OBJECT_UNAVAILABLE" || code === "OBJECT_OCCUPIED",
+    });
   }
 
   public executionCount(actionId: string): number {
@@ -217,20 +319,33 @@ export class DeterministicFakeDevice {
     this.#nextIncomingSeq = 0;
     this.#emit("device.hello", {
       boot_id: "fake-boot-1",
-      firmware_version: "phase-2b-fake",
-      protocol_versions: [1],
+      firmware_version: this.#protocolVersion === 2 ? "phase-3c-fake" : "phase-2b-fake",
+      protocol_versions: this.#protocolVersion === 2 ? [1, 2] : [1],
       connection_reason: reason,
     });
     this.#emit("device.capabilities", {
-      selected_protocol_version: 1,
+      selected_protocol_version: this.#protocolVersion,
       rooms: [...ROOM_IDS],
-      actions: [
+      actions: this.#protocolVersion === 2 ? [
+        "character.get_state",
+        "character.go_to_room",
+        "character.set_activity",
+        "character.say",
+        "world.get_snapshot",
+        "character.go_to",
+        "character.sit",
+        "character.look_at",
+        "character.interact",
+      ] : [
         "character.get_state",
         "character.go_to_room",
         "character.set_activity",
         "character.say",
         "world.get_snapshot",
       ],
+      ...(this.#protocolVersion === 2
+        ? { objects: this.#capabilitySnapshot() }
+        : {}),
       limits: {
         max_json_frame_bytes: 16_384,
         action_queue_capacity: DEVICE_ACTION_QUEUE_CAPACITY,
@@ -254,8 +369,8 @@ export class DeterministicFakeDevice {
   public emitInBandHelloForTest(): void {
     this.#emit("device.hello", {
       boot_id: "fake-boot-1",
-      firmware_version: "phase-2b-fake",
-      protocol_versions: [1],
+      firmware_version: this.#protocolVersion === 2 ? "phase-3c-fake" : "phase-2b-fake",
+      protocol_versions: this.#protocolVersion === 2 ? [1, 2] : [1],
       connection_reason: "manual",
     });
   }
@@ -281,6 +396,7 @@ export class DeterministicFakeDevice {
       state_version: this.#stateVersion + 2,
       observed_at_ms: this.#now(),
       character: this.getState(),
+      ...(this.#protocolVersion === 2 ? { objects: this.#objectSnapshot() } : {}),
     });
   }
 
@@ -299,6 +415,9 @@ export class DeterministicFakeDevice {
 
   public receiveFrame(frame: string): void {
     const message = decodeDeviceMessage(frame);
+    if (message.protocol_version !== this.#protocolVersion) {
+      throw new TypeError("agent frame protocol_version does not match fake device");
+    }
     if (message.device_id !== this.#deviceId) {
       throw new TypeError("agent frame device_id does not match fake device");
     }
@@ -347,6 +466,11 @@ export class DeterministicFakeDevice {
       });
       return true;
     }
+    const objectError = this.#objectRequestError(record.request);
+    if (objectError !== null) {
+      this.#fail(record, objectError);
+      return true;
+    }
     this.#activeActionId = actionId;
     record.status = "started";
     const payload: ActionStartedPayload & Record<string, unknown> = {
@@ -374,6 +498,14 @@ export class DeterministicFakeDevice {
       });
       return true;
     }
+    const objectError = this.#objectRequestError(record.request);
+    if (objectError !== null) {
+      this.#activeActionId = null;
+      this.#stateVersion += 1;
+      this.#fail(record, objectError);
+      this.#emitWorldChanged();
+      return true;
+    }
     this.#activeActionId = null;
     const previousStateVersion = this.#stateVersion;
     const result = this.#execute(record.request.tool, record.request.arguments);
@@ -395,6 +527,7 @@ export class DeterministicFakeDevice {
         state_version: this.#stateVersion,
         observed_at_ms: this.#now(),
         character: this.getState(),
+        ...(this.#protocolVersion === 2 ? { objects: this.#objectSnapshot() } : {}),
       });
     }
     return true;
@@ -432,6 +565,22 @@ export class DeterministicFakeDevice {
     }
     if (this.#records.size >= this.#idempotencyCapacity) {
       throw new Error("fake device idempotency capacity is exhausted");
+    }
+    const objectError = this.#objectRequestError(request);
+    if (objectError !== null) {
+      const record: FakeActionRecord = {
+        request: structuredClone(request),
+        fingerprint,
+        acceptedAtMs: this.#monotonicNow(),
+        correlationId: message.message_id,
+        status: "failed",
+        terminalAtMonotonicMs: null,
+        latestType: "action.failed",
+        latestPayload: {},
+      };
+      this.#records.set(request.action_id, record);
+      this.#fail(record, objectError, message.message_id);
+      return;
     }
     if (this.queue_length >= DEVICE_ACTION_QUEUE_CAPACITY) {
       const record: FakeActionRecord = {
@@ -541,7 +690,13 @@ export class DeterministicFakeDevice {
     }
     if (tool === "character.go_to_room") {
       const roomId = argumentsValue.room_id as RoomId;
-      this.#state = { ...this.#state, room_id: roomId };
+      this.#releaseCharacterOccupancy();
+      this.#state = {
+        ...this.#state,
+        room_id: roomId,
+        target_object_id: null,
+        pose: "standing",
+      };
       this.#stateVersion += 1;
       return { room_id: roomId };
     }
@@ -555,11 +710,129 @@ export class DeterministicFakeDevice {
       this.#stateVersion += 1;
       return { text: String(argumentsValue.text) };
     }
+    const objectAction = OBJECT_ACTION_BY_TOOL[tool];
+    if (objectAction !== undefined) {
+      const objectId = argumentsValue.target_id as ObjectId;
+      const capability = this.#objectCapability(objectId);
+      if (objectAction === "go_to") {
+        this.#releaseCharacterOccupancy();
+        this.#state = {
+          ...this.#state,
+          room_id: capability.room_id,
+          activity: "idle",
+          target_object_id: objectId,
+          pose: "standing",
+        };
+      } else if (objectAction === "sit") {
+        this.#releaseCharacterOccupancy();
+        this.#characterOccupiedObjectId = objectId;
+        this.#refreshObjectOccupancy(objectId);
+        this.#state = { ...this.#state, pose: "sitting" };
+      }
+      this.#stateVersion += 1;
+      return {
+        object_id: objectId,
+        action: objectAction,
+        pose: this.#state.pose,
+      };
+    }
     return {
       state_version: this.#stateVersion,
       observed_at_ms: this.#now(),
       character: this.getState(),
+      ...(this.#protocolVersion === 2 ? { objects: this.#objectSnapshot() } : {}),
     };
+  }
+
+  #objectRequestError(request: ActionRequestPayload): DeviceActionError | null {
+    const action = OBJECT_ACTION_BY_TOOL[request.tool];
+    if (action === undefined) {
+      return null;
+    }
+    const objectId = request.arguments.target_id as ObjectId;
+    const forced = this.#forcedObjectErrors.get(`${request.tool}:${objectId}`);
+    if (forced !== undefined) {
+      return structuredClone(forced);
+    }
+    const capability = OBJECT_CAPABILITIES.find((object) => object.object_id === objectId);
+    if (capability === undefined) {
+      return { code: "UNKNOWN_OBJECT", message: "object is not registered", retryable: false };
+    }
+    if (!capability.supported_actions.includes(action)) {
+      return {
+        code: "UNSUPPORTED_OBJECT_ACTION",
+        message: "object does not support the action",
+        retryable: false,
+      };
+    }
+    const state = this.#objectState(objectId);
+    if (!state.available) {
+      return { code: "OBJECT_UNAVAILABLE", message: "object is unavailable", retryable: true };
+    }
+    if (this.#externalOccupied.has(objectId)) {
+      return { code: "OBJECT_OCCUPIED", message: "object is occupied", retryable: true };
+    }
+    if (action !== "go_to" && this.#state.target_object_id !== objectId) {
+      return { code: "OBJECT_NOT_REACHED", message: "object was not reached", retryable: false };
+    }
+    return null;
+  }
+
+  #objectCapability(objectId: ObjectId): DeviceObjectCapability {
+    const capability = OBJECT_CAPABILITIES.find((object) => object.object_id === objectId);
+    if (capability === undefined) {
+      throw new Error(`fake object capability is missing: ${objectId}`);
+    }
+    return capability;
+  }
+
+  #objectState(objectId: ObjectId): DeviceObjectState {
+    const state = this.#objects.find((object) => object.object_id === objectId);
+    if (state === undefined) {
+      throw new Error(`fake object state is missing: ${objectId}`);
+    }
+    return state;
+  }
+
+  #objectSnapshot(): readonly DeviceObjectState[] {
+    return structuredClone(this.#objects);
+  }
+
+  #capabilitySnapshot(): readonly DeviceObjectCapability[] {
+    return OBJECT_CAPABILITIES.map((capability) => ({
+      ...capability,
+      supported_actions: [...capability.supported_actions],
+      available: this.#objectState(capability.object_id).available,
+    }));
+  }
+
+  #releaseCharacterOccupancy(): void {
+    const occupied = this.#characterOccupiedObjectId;
+    if (occupied === null) {
+      return;
+    }
+    this.#characterOccupiedObjectId = null;
+    this.#refreshObjectOccupancy(occupied);
+  }
+
+  #refreshObjectOccupancy(objectId: ObjectId): void {
+    const occupied = this.#externalOccupied.has(objectId)
+      || this.#characterOccupiedObjectId === objectId;
+    this.#objects = this.#objects.map((object) =>
+      object.object_id === objectId ? { ...object, occupied } : object
+    );
+  }
+
+  #emitWorldChanged(): void {
+    if (this.#protocolVersion !== 2 || this.#socket?.is_open !== true) {
+      return;
+    }
+    this.#emit("world.changed", {
+      state_version: this.#stateVersion,
+      observed_at_ms: this.#now(),
+      character: this.getState(),
+      objects: this.#objectSnapshot(),
+    });
   }
 
   #emitSnapshot(
@@ -572,6 +845,7 @@ export class DeterministicFakeDevice {
       state_version: this.#stateVersion,
       observed_at_ms: this.#now(),
       character: this.getState(),
+      ...(this.#protocolVersion === 2 ? { objects: this.#objectSnapshot() } : {}),
     };
     this.#emit("world.snapshot", payload, correlationId);
   }
@@ -582,7 +856,7 @@ export class DeterministicFakeDevice {
     correlationId: string | null = null,
   ): void {
     const message: DeviceMessage = {
-      protocol_version: 1,
+      protocol_version: this.#protocolVersion,
       message_id: `fake-message-${this.#messageCounter++}`,
       correlation_id: correlationId,
       device_id: this.#deviceId,

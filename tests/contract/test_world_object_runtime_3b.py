@@ -12,6 +12,8 @@ TRANSPORT_HEADER = ROOT / "firmware/components/agent_transport/include/agent_tra
 TRANSPORT_SOURCE = ROOT / "firmware/components/agent_transport/agent_transport.c"
 TRANSPORT_KCONFIG = ROOT / "firmware/components/agent_transport/Kconfig.projbuild"
 ROLE_PROFILES = ROOT / "agent/apps/runtime/src/role-profiles.ts"
+CAT_OBJECT_POLICY = ROOT / "agent/apps/runtime/src/cat-object-event-policy.ts"
+CAT_OBJECT_RUNNER = ROOT / "agent/apps/runtime/src/cat-object-action-runner.ts"
 
 
 class WorldObjectRuntimePhase3BContractTests(unittest.TestCase):
@@ -174,15 +176,30 @@ class WorldObjectRuntimePhase3BContractTests(unittest.TestCase):
             source,
         )
 
-    def test_phase_3b_does_not_expose_object_tools_to_roles(self) -> None:
+    def test_phase_3c_exposes_object_tools_only_through_the_cat_boundary(self) -> None:
         profiles = ROLE_PROFILES.read_text(encoding="utf-8")
+        robot_profile = profiles.split("robot: {", 1)[1].split("human: {", 1)[0]
+        human_profile = profiles.split("human: {", 1)[1].split("cat: {", 1)[0]
         for tool in (
             '"character.go_to"',
             '"character.sit"',
             '"character.look_at"',
             '"character.interact"',
         ):
-            self.assertNotIn(tool, profiles)
+            self.assertIn(tool, profiles)
+            self.assertNotIn(tool, robot_profile)
+            self.assertNotIn(tool, human_profile)
+        self.assertIn("allowed_tools: CAT_WORLD_TOOLS", profiles)
+        self.assertIn("accepts_user_text: false", profiles)
+
+        policy = CAT_OBJECT_POLICY.read_text(encoding="utf-8")
+        runner = CAT_OBJECT_RUNNER.read_text(encoding="utf-8")
+        self.assertIn('event_type: "test.object_sit_target"', policy)
+        self.assertIn('["target_id"]', policy)
+        self.assertIn('"character.go_to", "character.sit"', policy)
+        self.assertIn("runCatObjectSitEvent", runner)
+        self.assertIn("previous.outcome.status !== \"completed\"", runner)
+        self.assertIn("adapter.protocol_version !== 2", runner)
 
 
 if __name__ == "__main__":

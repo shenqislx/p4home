@@ -2,11 +2,15 @@ import {
   ContractBoundaryError,
   type FrozenDeviceMessage,
   type FrozenDeviceMessageType,
+  type ObjectRuntimeDeviceMessage,
+  validateObjectRuntimeDeviceMessage,
   validateFrozenDeviceMessage,
 } from "@p4home/contracts";
 import type { CharacterActivity, RoomId } from "@p4home/domain-p4home";
 
 export const DEVICE_PROTOCOL_VERSION = 1 as const;
+export const OBJECT_RUNTIME_DEVICE_PROTOCOL_VERSION = 2 as const;
+export type DeviceProtocolVersion = 1 | 2;
 export const DEVICE_MAX_JSON_FRAME_BYTES = 16_384;
 export const DEVICE_ACTION_QUEUE_CAPACITY = 8;
 
@@ -15,7 +19,11 @@ export type DeviceToolName =
   | "character.go_to_room"
   | "character.set_activity"
   | "character.say"
-  | "world.get_snapshot";
+  | "world.get_snapshot"
+  | "character.go_to"
+  | "character.sit"
+  | "character.look_at"
+  | "character.interact";
 
 export type DeviceActionErrorCode =
   | "INVALID_ARGUMENT"
@@ -26,6 +34,11 @@ export type DeviceActionErrorCode =
   | "CANCELLED"
   | "DEVICE_BUSY"
   | "ACTION_ID_CONFLICT"
+  | "UNKNOWN_OBJECT"
+  | "UNSUPPORTED_OBJECT_ACTION"
+  | "OBJECT_UNAVAILABLE"
+  | "OBJECT_OCCUPIED"
+  | "OBJECT_NOT_REACHED"
   | "INTERNAL";
 
 export type DeviceActionOrigin = "user" | "agent" | "autonomy" | "test";
@@ -37,12 +50,43 @@ export type CharacterState = Readonly<{
   active_action_id: string | null;
 }>;
 
+export type ObjectRuntimeCharacterState = CharacterState & Readonly<{
+  target_object_id: ObjectId | null;
+  pose: "standing" | "sitting";
+}>;
+
+export type ObjectId = "living_room.sofa" | "study.desk" | "living_room.window";
+export type ObjectAction = "go_to" | "sit" | "look_at" | "interact";
+
+export type DeviceObjectCapability = Readonly<{
+  object_id: ObjectId;
+  room_id: RoomId;
+  supported_actions: readonly ObjectAction[];
+  available: boolean;
+}>;
+
+export type DeviceObjectState = Readonly<{
+  object_id: ObjectId;
+  room_id: RoomId;
+  available: boolean;
+  occupied: boolean;
+}>;
+
 export type WorldSnapshotPayload = Readonly<{
   snapshot_id: string;
   reason: "connect" | "reconnect" | "resync" | "requested";
   state_version: number;
   observed_at_ms: number;
-  character: CharacterState;
+  character: CharacterState | ObjectRuntimeCharacterState;
+  objects?: readonly DeviceObjectState[];
+}>;
+
+export type DeviceCapabilitiesPayload = Readonly<{
+  selected_protocol_version: DeviceProtocolVersion;
+  rooms: readonly RoomId[];
+  actions: readonly DeviceToolName[];
+  objects?: readonly DeviceObjectCapability[];
+  limits: Readonly<Record<string, number>>;
 }>;
 
 export type ActionRequestPayload = Readonly<{
@@ -85,10 +129,11 @@ export type ActionFailedPayload = Readonly<{
   error: DeviceActionError;
 }>;
 
-export type DeviceMessage<
-  TType extends FrozenDeviceMessageType = FrozenDeviceMessageType,
-  TPayload extends Record<string, unknown> = Record<string, unknown>,
-> = FrozenDeviceMessage<TType, TPayload>;
+export type ObjectRuntimeMessage = Omit<ObjectRuntimeDeviceMessage, "type"> & {
+  readonly type: FrozenDeviceMessageType;
+};
+
+export type DeviceMessage = FrozenDeviceMessage | ObjectRuntimeMessage;
 
 export type DeviceProtocolBoundaryErrorCode =
   | "FRAME_TOO_LARGE"
@@ -108,7 +153,9 @@ export class DeviceProtocolBoundaryError extends Error {
 export function encodeDeviceMessage(message: DeviceMessage): string {
   let validated: DeviceMessage;
   try {
-    validated = validateFrozenDeviceMessage(message);
+    validated = message.protocol_version === OBJECT_RUNTIME_DEVICE_PROTOCOL_VERSION
+      ? validateObjectRuntimeDeviceMessage<ObjectRuntimeMessage>(message)
+      : validateFrozenDeviceMessage(message);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new DeviceProtocolBoundaryError("INVALID_MESSAGE", detail);
@@ -117,7 +164,7 @@ export function encodeDeviceMessage(message: DeviceMessage): string {
   if (Buffer.byteLength(frame, "utf8") > DEVICE_MAX_JSON_FRAME_BYTES) {
     throw new DeviceProtocolBoundaryError(
       "FRAME_TOO_LARGE",
-      `Device Protocol v1 frame exceeds ${DEVICE_MAX_JSON_FRAME_BYTES} bytes`,
+      `Device Protocol v${message.protocol_version} frame exceeds ${DEVICE_MAX_JSON_FRAME_BYTES} bytes`,
     );
   }
   return frame;
@@ -127,7 +174,7 @@ export function decodeDeviceMessage(frame: string): DeviceMessage {
   if (Buffer.byteLength(frame, "utf8") > DEVICE_MAX_JSON_FRAME_BYTES) {
     throw new DeviceProtocolBoundaryError(
       "FRAME_TOO_LARGE",
-      `Device Protocol v1 frame exceeds ${DEVICE_MAX_JSON_FRAME_BYTES} bytes`,
+      `Device Protocol frame exceeds ${DEVICE_MAX_JSON_FRAME_BYTES} bytes`,
     );
   }
   let value: unknown;
@@ -137,6 +184,10 @@ export function decodeDeviceMessage(frame: string): DeviceMessage {
     throw new DeviceProtocolBoundaryError("INVALID_JSON", "Device Protocol v1 frame is not JSON");
   }
   try {
+    const version = (value as { protocol_version?: unknown }).protocol_version;
+    if (version === OBJECT_RUNTIME_DEVICE_PROTOCOL_VERSION) {
+      return validateObjectRuntimeDeviceMessage<ObjectRuntimeMessage>(value);
+    }
     return validateFrozenDeviceMessage(value);
   } catch (error) {
     const detail = error instanceof ContractBoundaryError ? error.message : String(error);

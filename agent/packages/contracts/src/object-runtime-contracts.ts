@@ -44,8 +44,12 @@ const FORBIDDEN_MODEL_METADATA = [
 
 interface ToolCatalog {
   readonly schema_version: number;
+  readonly execution_policy: {
+    readonly max_calls_per_turn: number;
+  };
   readonly tools: readonly {
     readonly name: string;
+    readonly description: string;
     readonly result_schema_ref: string;
     readonly parameters: AnySchema;
   }[];
@@ -89,6 +93,17 @@ export interface ObjectRuntimeToolResult {
   readonly status: "success" | "error";
   readonly result: Record<string, unknown> | null;
   readonly error: Record<string, unknown> | null;
+}
+
+export interface ObjectRuntimeToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly parameters: Readonly<Record<string, unknown>>;
+}
+
+export interface ObjectRuntimeToolCallInput {
+  readonly name: string;
+  readonly arguments: Record<string, unknown>;
 }
 
 export interface ObjectRuntimeContractReport {
@@ -269,6 +284,50 @@ export function validateObjectRuntimeToolResult<T extends ObjectRuntimeToolResul
   return cloned;
 }
 
+function readObjectRuntimeToolCatalog(): ToolCatalog {
+  const catalog = readJson<ToolCatalog>(`${TOOLS_V2_ROOT}/tool-catalog.json`);
+  const readme = readFileSync(`${TOOLS_V2_ROOT}/README.md`, "utf8");
+  if (catalog.schema_version !== 2 || !readme.includes("Status: frozen after Phase 3C")) {
+    throw new ObjectRuntimeContractError("runtime may import only frozen Tool Schema v2");
+  }
+  return catalog;
+}
+
+export function getObjectRuntimeToolDefinitions(): readonly ObjectRuntimeToolDefinition[] {
+  return readObjectRuntimeToolCatalog().tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: structuredClone(tool.parameters) as Record<string, unknown>,
+  }));
+}
+
+export function validateObjectRuntimeToolCalls(
+  calls: readonly ObjectRuntimeToolCallInput[],
+): readonly ObjectRuntimeToolCallInput[] {
+  const catalog = readObjectRuntimeToolCatalog();
+  if (calls.length > catalog.execution_policy.max_calls_per_turn) {
+    throw new ObjectRuntimeContractError(
+      `Tool Schema v2 allows at most ${catalog.execution_policy.max_calls_per_turn} calls per turn`,
+    );
+  }
+  const ajv = createAjv();
+  const validators = new Map(
+    catalog.tools.map((tool) => [tool.name, ajv.compile(tool.parameters)] as const),
+  );
+  return calls.map((call) => {
+    const validate = validators.get(call.name);
+    if (validate === undefined) {
+      throw new ObjectRuntimeContractError(`tool ${call.name} is not in Tool Schema v2`);
+    }
+    if (!validate(call.arguments)) {
+      throw new ObjectRuntimeContractError(
+        `${call.name}: ${formatErrors(validate.errors)}`,
+      );
+    }
+    return { name: call.name, arguments: structuredClone(call.arguments) };
+  });
+}
+
 function assertModelBoundary(value: unknown, label: string): void {
   const serialized = JSON.stringify(value);
   for (const forbidden of FORBIDDEN_MODEL_METADATA) {
@@ -281,9 +340,9 @@ function assertModelBoundary(value: unknown, label: string): void {
 export function validateObjectRuntimeContracts(): ObjectRuntimeContractReport {
   const protocolReadme = readFileSync(`${DEVICE_V2_ROOT}/README.md`, "utf8");
   const toolsReadme = readFileSync(`${TOOLS_V2_ROOT}/README.md`, "utf8");
-  if (!protocolReadme.includes("Status: candidate for Phase 3B") ||
-      !toolsReadme.includes("Status: candidate for Phase 3B")) {
-    throw new ObjectRuntimeContractError("object runtime v2 contracts are not marked Phase 3B");
+  if (!protocolReadme.includes("Status: frozen after Phase 3C") ||
+      !toolsReadme.includes("Status: frozen after Phase 3C")) {
+    throw new ObjectRuntimeContractError("object runtime v2 contracts are not frozen after Phase 3C");
   }
 
   const validMessages = readJson<unknown[]>(

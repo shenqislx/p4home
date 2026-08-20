@@ -11,8 +11,12 @@ import {
   type ActionStartedPayload,
   type DeviceActionError,
   type DeviceActionOrigin,
+  type DeviceCapabilitiesPayload,
   type DeviceMessage,
+  type DeviceProtocolVersion,
+  type DeviceObjectCapability,
   type DeviceToolName,
+  type ObjectRuntimeCharacterState,
   type WorldSnapshotPayload,
 } from "./device-protocol.ts";
 
@@ -103,6 +107,7 @@ export class DeviceActionAdapterError extends Error {
 
 export interface DeviceActionAdapterOptions {
   readonly device_id: string;
+  readonly protocol_version?: DeviceProtocolVersion;
   readonly now?: () => number;
   readonly monotonic_now?: () => number;
   readonly waiter_capacity?: number;
@@ -165,6 +170,7 @@ function sameValue(left: unknown, right: unknown): boolean {
 export class DeviceWebSocketActionAdapter {
   readonly #connection: DeviceWebSocketConnection;
   readonly #deviceId: string;
+  readonly #protocolVersion: DeviceProtocolVersion;
   readonly #now: () => number;
   readonly #monotonicNow: () => number;
   readonly #waiterCapacity: number;
@@ -178,6 +184,7 @@ export class DeviceWebSocketActionAdapter {
   #nextIncomingSeq: number | null = null;
   #messageCounter = 0;
   #hasCapabilities = false;
+  #capabilities: DeviceCapabilitiesPayload | null = null;
   #ready = false;
   #resyncInFlight = false;
   #resyncRequestId: string | null = null;
@@ -190,6 +197,10 @@ export class DeviceWebSocketActionAdapter {
     }
     this.#connection = connection;
     this.#deviceId = options.device_id;
+    this.#protocolVersion = options.protocol_version ?? 1;
+    if (this.#protocolVersion !== 1 && this.#protocolVersion !== 2) {
+      throw new RangeError("protocol_version must be 1 or 2");
+    }
     this.#now = options.now ?? Date.now;
     this.#monotonicNow = options.monotonic_now ?? (() => performance.now());
     this.#waiterCapacity = options.waiter_capacity ?? 16;
@@ -211,6 +222,20 @@ export class DeviceWebSocketActionAdapter {
 
   public get pending_waiters(): number {
     return this.#waiters.size;
+  }
+
+  public get protocol_version(): DeviceProtocolVersion {
+    return this.#protocolVersion;
+  }
+
+  public get object_capabilities(): readonly DeviceObjectCapability[] {
+    const observedAvailability = new Map(
+      (this.#lastSnapshot?.objects ?? []).map((object) => [object.object_id, object.available]),
+    );
+    return (this.#capabilities?.objects ?? []).map((object) => ({
+      ...structuredClone(object),
+      available: observedAvailability.get(object.object_id) ?? object.available,
+    }));
   }
 
   public get last_snapshot(): WorldSnapshotPayload | null {
@@ -464,7 +489,7 @@ export class DeviceWebSocketActionAdapter {
       throw new DeviceActionAdapterError("NOT_READY", "device connection is not open");
     }
     encodeDeviceMessage({
-      protocol_version: 1,
+      protocol_version: this.#protocolVersion,
       message_id: `agent-validation-${this.#messageCounter}`,
       correlation_id: null,
       device_id: this.#deviceId,
@@ -486,7 +511,7 @@ export class DeviceWebSocketActionAdapter {
     }
     const seq = this.#nextOutgoingSeq;
     const message: DeviceMessage = {
-      protocol_version: 1,
+      protocol_version: this.#protocolVersion,
       message_id: preparedMessageId ?? this.#allocateMessageId(),
       correlation_id: null,
       device_id: this.#deviceId,
@@ -521,6 +546,9 @@ export class DeviceWebSocketActionAdapter {
   }
 
   #applyMessage(message: DeviceMessage): void {
+    if (message.protocol_version !== this.#protocolVersion) {
+      throw new TypeError("device message protocol_version does not match the adapter");
+    }
     if (message.device_id !== this.#deviceId) {
       throw new TypeError("device message does not match the authenticated device_id");
     }
@@ -535,6 +563,7 @@ export class DeviceWebSocketActionAdapter {
       this.#nextIncomingSeq = message.seq + 1;
       this.#nextOutgoingSeq = 0;
       this.#hasCapabilities = false;
+      this.#capabilities = null;
       this.#ready = false;
       this.#resyncInFlight = false;
       this.#resyncRequestId = null;
@@ -554,6 +583,11 @@ export class DeviceWebSocketActionAdapter {
     this.#nextIncomingSeq += 1;
 
     if (message.type === "device.capabilities") {
+      const capabilities = payloadOf<DeviceCapabilitiesPayload & Record<string, unknown>>(message);
+      if (capabilities.selected_protocol_version !== this.#protocolVersion) {
+        throw new TypeError("device selected_protocol_version does not match the adapter");
+      }
+      this.#capabilities = structuredClone(capabilities);
       this.#hasCapabilities = true;
       return;
     }
@@ -591,6 +625,13 @@ export class DeviceWebSocketActionAdapter {
           state_version: changed.state_version,
           observed_at_ms: Number(changed.observed_at_ms),
           character: changed.character as WorldSnapshotPayload["character"],
+          ...(this.#protocolVersion === 2
+            ? {
+                objects: structuredClone(
+                  changed.objects as NonNullable<WorldSnapshotPayload["objects"]>,
+                ),
+              }
+            : {}),
         };
       } else {
         this.#beginResync("state_version_gap");
@@ -664,8 +705,38 @@ export class DeviceWebSocketActionAdapter {
           ? { activity: record.request.arguments.activity }
           : record.request.tool === "character.say"
             ? { text: record.request.arguments.text }
-            : null;
-      if (expectedResult !== null && !sameValue(outcome.result, expectedResult)) {
+            : record.request.tool === "character.go_to"
+              ? {
+                  object_id: record.request.arguments.target_id,
+                  action: "go_to",
+                  pose: "standing",
+                }
+              : record.request.tool === "character.sit"
+                ? {
+                    object_id: record.request.arguments.target_id,
+                    action: "sit",
+                    pose: "sitting",
+                  }
+                : record.request.tool === "character.look_at"
+                  ? {
+                      object_id: record.request.arguments.target_id,
+                      action: "look_at",
+                    }
+                  : record.request.tool === "character.interact"
+                    ? {
+                        object_id: record.request.arguments.target_id,
+                        action: "interact",
+                      }
+                    : null;
+      const resultMatches = expectedResult === null
+        ? true
+        : record.request.tool === "character.look_at"
+          || record.request.tool === "character.interact"
+          ? outcome.result.object_id === expectedResult.object_id
+            && outcome.result.action === expectedResult.action
+            && (outcome.result.pose === "standing" || outcome.result.pose === "sitting")
+          : sameValue(outcome.result, expectedResult);
+      if (!resultMatches) {
         throw new TypeError(`action ${actionId} completed with a result that contradicts its request`);
       }
     }
@@ -696,6 +767,7 @@ export class DeviceWebSocketActionAdapter {
     this.#sessionId = null;
     this.#nextIncomingSeq = null;
     this.#hasCapabilities = false;
+    this.#capabilities = null;
     this.#resyncInFlight = false;
     this.#resyncRequestId = null;
     for (const actionId of [...this.#waiters.keys()]) {
@@ -739,13 +811,27 @@ export class DeviceWebSocketActionAdapter {
         continue;
       }
       const roomId = record.request.arguments.room_id;
-      const reconciliationStatus = record.request.tool !== "character.go_to_room"
-        ? "not_observable"
-        : typeof roomId === "string"
-          && snapshot.state_version > record.baselineStateVersion
+      const targetId = record.request.arguments.target_id;
+      const character = snapshot.character as ObjectRuntimeCharacterState;
+      const stateAdvanced = snapshot.state_version > record.baselineStateVersion;
+      const reconciliationStatus = record.request.tool === "character.go_to_room"
+        ? typeof roomId === "string" && stateAdvanced
           && snapshot.character.room_id === roomId as RoomId
           ? "state_satisfied"
-          : "state_not_satisfied";
+          : "state_not_satisfied"
+        : record.request.tool === "character.go_to"
+          ? typeof targetId === "string" && stateAdvanced
+            && character.target_object_id === targetId
+            && character.pose === "standing"
+            ? "state_satisfied"
+            : "state_not_satisfied"
+          : record.request.tool === "character.sit"
+            ? typeof targetId === "string" && stateAdvanced
+              && character.target_object_id === targetId
+              && character.pose === "sitting"
+              ? "state_satisfied"
+              : "state_not_satisfied"
+            : "not_observable";
       record.outcome = {
         ...record.outcome,
         reconciliation: {

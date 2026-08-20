@@ -19,7 +19,6 @@ import {
 } from "./device-action-adapter.ts";
 import { QWEN_THINKING_ENABLED } from "./model-config.ts";
 import {
-  CAT_WORLD_TOOLS,
   assertRoleToolAuthorization,
   buildRoleContext,
   getRoleProfile,
@@ -140,15 +139,17 @@ async function auditStart(
   if (store === undefined) {
     return;
   }
+  const profile = getRoleProfile("cat");
+  const profileId = `${profile.revision}:cat`;
   await store.saveAgentProfile({
-    agent_profile_id: "role-profile-v1:cat",
+    agent_profile_id: profileId,
     name: "P4 Home cat",
     locale: "zh-CN",
-    allowed_tools: CAT_WORLD_TOOLS,
+    allowed_tools: profile.allowed_tools,
   });
   await store.saveSession({
     session_id: options.session_id,
-    agent_profile_id: "role-profile-v1:cat",
+    agent_profile_id: profileId,
     created_at_ms: options.session_created_at_ms,
     updated_at_ms: startedAtMs,
   });
