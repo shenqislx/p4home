@@ -733,6 +733,9 @@ RoutePlan 非法时不会降级执行命令。
 
 退出条件：归一化 Cat event 可让 Cat “去沙发坐下”，且模型不接触坐标、用户原文不直接进入 Cat。
 
+2026-08-20 已获用户授权启动；3A Object Registry Contract 已完成，下一项为 3B P4 Object
+Runtime，尚未开放对象级执行 Tool。
+
 ### Phase 4 — Robot Home Assistant Tool & Multi-role Split
 
 执行计划：[Phase 4 — Home Assistant Tool](./plans/2026-08-15-agent-phase-4-ha-tool-plan.md)

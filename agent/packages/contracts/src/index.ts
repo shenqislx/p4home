@@ -8,6 +8,8 @@ import {
   type ValidateFunction,
 } from "ajv/dist/2020.js";
 
+export * from "./world-object-registry.ts";
+
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const DEVICE_PROTOCOL_ROOT = `${REPOSITORY_ROOT}contracts/device-protocol/v1`;
 const TOOL_SCHEMA_ROOT = `${REPOSITORY_ROOT}contracts/tools/v1`;

@@ -37,6 +37,7 @@ function(add_world_service_host_test_target)
         world_service_host_test.c
         shim/esp_err.c
         "${WORLD_SERVICE_DIR}/world_service.c"
+        "${WORLD_SERVICE_DIR}/world_object_registry.c"
     )
     target_include_directories(world_service_host_test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/shim"
@@ -117,6 +118,7 @@ add_executable(pixel_sim
     "${UI_PAGES_DIR}/ui_pixel_fx.c"
     "${UI_PAGES_DIR}/ui_time_source.c"
     "${WORLD_SERVICE_DIR}/world_service.c"
+    "${WORLD_SERVICE_DIR}/world_object_registry.c"
     "${UI_PAGES_DIR}/fonts/ui_font_source_han_sans_sc_16.c"
     "${UI_PAGES_DIR}/fonts/ui_font_pixel_modes_48.c"
     ${UI_ART_SOURCES}

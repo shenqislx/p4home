@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "world_object_registry.h"
 #include "world_service.h"
 
 typedef struct {
@@ -74,6 +75,28 @@ static int run_action(world_action_request_t *request, world_action_event_t *com
 
 int main(void)
 {
+    CHECK(world_object_registry_count() == WORLD_OBJECT_REGISTRY_CAPACITY);
+    const world_object_definition_t *sofa =
+        world_object_registry_find("living_room.sofa");
+    CHECK(sofa != NULL);
+    CHECK(sofa->room == WORLD_ROOM_LIVING_ROOM);
+    CHECK(sofa->anchor_art_x == 10);
+    CHECK(sofa->anchor_floor_y == 32);
+    CHECK(sofa->facing == WORLD_OBJECT_FACING_RIGHT);
+    CHECK(sofa->default_available);
+    CHECK(world_object_supports_action(sofa, WORLD_OBJECT_ACTION_GO_TO));
+    CHECK(world_object_supports_action(sofa, WORLD_OBJECT_ACTION_SIT));
+    CHECK(world_object_animation_for(sofa, WORLD_OBJECT_ACTION_SIT) ==
+          WORLD_OBJECT_ANIMATION_CAT_SIT);
+
+    const world_object_definition_t *desk = world_object_registry_find("study.desk");
+    CHECK(desk != NULL);
+    CHECK(!world_object_supports_action(desk, WORLD_OBJECT_ACTION_SIT));
+    CHECK(world_object_animation_for(desk, WORLD_OBJECT_ACTION_SIT) ==
+          WORLD_OBJECT_ANIMATION_NONE);
+    CHECK(world_object_registry_find("living_room.missing") == NULL);
+    CHECK(world_object_registry_at(WORLD_OBJECT_REGISTRY_CAPACITY) == NULL);
+
     world_service_config_t config = {
         .monotonic_ms = host_monotonic_ms,
         .wall_ms = host_wall_ms,

@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "registry_id": "p4home.object-registry/v1",
+  "coordinate_space": "p4home.room-art/v1",
+  "objects": [
+    {
+      "object_id": "living_room.sofa",
+      "room_id": "living_room",
+      "anchor": {
+        "art_x": 10,
+        "floor_y": 32,
+        "facing": "right"
+      },
+      "supported_actions": ["go_to", "sit", "look_at", "interact"],
+      "default_available": true,
+      "animation_bindings": {
+        "go_to": "cat_walk",
+        "sit": "cat_sit",
+        "look_at": "cat_look",
+        "interact": "cat_paw"
+      }
+    },
+    {
+      "object_id": "study.desk",
+      "room_id": "study",
+      "anchor": {
+        "art_x": 34,
+        "floor_y": 32,
+        "facing": "left"
+      },
+      "supported_actions": ["go_to", "look_at", "interact"],
+      "default_available": true,
+      "animation_bindings": {
+        "go_to": "cat_walk",
+        "look_at": "cat_look",
+        "interact": "cat_paw"
+      }
+    },
+    {
+      "object_id": "living_room.window",
+      "room_id": "living_room",
+      "anchor": {
+        "art_x": 40,
+        "floor_y": 32,
+        "facing": "left"
+      },
+      "supported_actions": ["go_to", "look_at", "interact"],
+      "default_available": true,
+      "animation_bindings": {
+        "go_to": "cat_walk",
+        "look_at": "cat_look",
+        "interact": "cat_paw"
+      }
+    }
+  ]
+}

@@ -22,7 +22,7 @@
 | 0 | Baseline & Contract | `completed` | 可重复构建、运行期基线、协议 v1、Mock | [Phase 0 归档](../archive/plans/agent/2026-08-15-agent-phase-0-baseline-contract-plan.md) |
 | 1 | Text Agent Runtime | `completed` | TypeScript Runtime、Ollama、有限 Tool Loop | [Phase 1 归档](../archive/plans/agent/2026-08-15-agent-phase-1-text-runtime-plan.md) |
 | 2 | Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作 | [Phase 2 归档](../archive/plans/agent/2026-08-15-agent-phase-2-p4-room-world-plan.md) |
-| 3 | Cat Object World | `pending` | sofa 等对象锚点与 Cat 交互动作 | [Phase 3](./2026-08-15-agent-phase-3-object-world-plan.md) |
+| 3 | Cat Object World | `in_progress` | sofa 等对象锚点与 Cat 交互动作 | [Phase 3](./2026-08-15-agent-phase-3-object-world-plan.md) |
 | 4 | Robot HA & Multi-role | `pending` | Robot 受限 HA 工具、Human/Robot 语义分割 | [Phase 4](./2026-08-15-agent-phase-4-ha-tool-plan.md) |
 | 5 | Role-aware Voice | `pending` | ESP-SR → STT → Router/Roles → TTS | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
 | 6 | Role-aware Memory | `pending` | 比较共享、私有和混合记忆可见性 | [Phase 6](./2026-08-15-agent-phase-6-memory-plan.md) |
@@ -35,7 +35,10 @@ Adapter、2C P4 World Service、2D Real Transport & Hardware Gate 四个纵切�
 `phase2d_agent` 实机 run `32262619021` 的 artifact 已通过身份、100 次动作、第 50 次后重连 snapshot、
 两小时 Agent 离线、资源与 8 FPS 门禁判定。Phase 2 计划已归档。
 
-当前没有 `in_progress` Phase。Phase 3 仍为 `pending`，下一步需由用户明确授权启动 Phase 3。
+2026-08-20，用户已明确授权启动 Phase 3。3A Object Registry Contract 已完成：稳定对象 ID、房间
+归属、内部 anchor、支持动作、可用性与 animation binding 已冻结，并通过 Agent/固件一致性门禁。
+当前下一项是 3B P4 Object Runtime；对象级执行 Tool 尚未开放，冻结的 Device Protocol v1 /
+Tool Schema v1 未修改。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 已在 Phase 2 完成并通过实机证据验证。

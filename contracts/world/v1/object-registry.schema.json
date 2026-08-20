@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://p4home.local/contracts/world/v1/object-registry.schema.json",
+  "title": "P4 Home World Object Registry v1",
+  "type": "object",
+  "required": ["schema_version", "registry_id", "coordinate_space", "objects"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "registry_id": { "const": "p4home.object-registry/v1" },
+    "coordinate_space": { "const": "p4home.room-art/v1" },
+    "objects": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/object" }
+    }
+  },
+  "$defs": {
+    "roomId": {
+      "enum": [
+        "primary_bedroom",
+        "study",
+        "guest_room",
+        "entry",
+        "living_room",
+        "kitchen"
+      ]
+    },
+    "objectAction": {
+      "enum": ["go_to", "sit", "look_at", "interact"]
+    },
+    "animationBinding": {
+      "enum": ["cat_walk", "cat_sit", "cat_look", "cat_paw"]
+    },
+    "anchor": {
+      "type": "object",
+      "required": ["art_x", "floor_y", "facing"],
+      "additionalProperties": false,
+      "properties": {
+        "art_x": { "type": "integer", "minimum": 0, "maximum": 48 },
+        "floor_y": { "type": "integer", "minimum": 0, "maximum": 34 },
+        "facing": { "enum": ["left", "right"] }
+      }
+    },
+    "animationBindings": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "go_to": { "$ref": "#/$defs/animationBinding" },
+        "sit": { "$ref": "#/$defs/animationBinding" },
+        "look_at": { "$ref": "#/$defs/animationBinding" },
+        "interact": { "$ref": "#/$defs/animationBinding" }
+      }
+    },
+    "object": {
+      "type": "object",
+      "required": [
+        "object_id",
+        "room_id",
+        "anchor",
+        "supported_actions",
+        "default_available",
+        "animation_bindings"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "object_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+          "maxLength": 64
+        },
+        "room_id": { "$ref": "#/$defs/roomId" },
+        "anchor": { "$ref": "#/$defs/anchor" },
+        "supported_actions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/objectAction" }
+        },
+        "default_available": { "type": "boolean" },
+        "animation_bindings": { "$ref": "#/$defs/animationBindings" }
+      }
+    }
+  }
+}

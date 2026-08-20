@@ -23,7 +23,7 @@
 | M7.0 Baseline & Contract | `completed` | 可重复构建、实机资源基线、冻结协议 v1、Mock 合约测试 |
 | M7.1 Text Agent Runtime | `completed` | Ollama + 有限 Tool Loop + SQLite + eval |
 | M7.2 Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作闭环 |
-| M7.3 Cat Object World | `pending` | sofa/window/desk 等 Cat 对象级动作 |
+| M7.3 Cat Object World | `in_progress` | sofa/window/desk 等 Cat 对象级动作 |
 | M7.4 Robot HA & Multi-role | `pending` | Robot 受限 HA 工具、Human/Robot 语义分割 |
 | M7.5 Role-aware Voice | `pending` | 本地唤醒、STT、Router/Roles、TTS 闭环 |
 | M7.6 Role-aware Memory | `pending` | 评测共享、私有与混合角色记忆 |
@@ -54,7 +54,8 @@ Router 24/24、Human 8/8、Robot 8/8、Cat 18/18，且无综合分。2A、2B、2
 2026-08-20，2D 真实 WSS 软件链、P4 `agent_transport` 与硬件 harness 已通过软件回归和
 Agent-enabled 固件构建；实机 run `32262619021` 的 100 次动作、重连 snapshot、两小时 Agent 离线、
 资源与 8 FPS artifact 判定均通过。2A–2D 退出门禁已满足；2026-08-20 用户最终 review 通过，
-Phase 2 / M7.2 已完成并归档。M7.3 / Phase 3 保持 `pending`，等待用户明确启动。
+Phase 2 / M7.2 已完成并归档。2026-08-20，用户明确授权启动 M7.3 / Phase 3；3A Object Registry
+Contract 的对象注册表一致性门禁已通过，下一项是 3B P4 Object Runtime；对象执行 Tool 尚未开放。
 
 ## 5. 状态更新规则
 
