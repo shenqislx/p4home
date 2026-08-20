@@ -55,9 +55,12 @@ static const world_object_definition_t s_objects[WORLD_OBJECT_REGISTRY_CAPACITY]
     },
 };
 
+_Static_assert(sizeof(s_objects) / sizeof(s_objects[0]) == WORLD_OBJECT_REGISTRY_CAPACITY,
+               "object registry capacity must match its definitions");
+
 size_t world_object_registry_count(void)
 {
-    return WORLD_OBJECT_REGISTRY_CAPACITY;
+    return sizeof(s_objects) / sizeof(s_objects[0]);
 }
 
 const world_object_definition_t *world_object_registry_at(size_t index)

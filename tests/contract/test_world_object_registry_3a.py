@@ -78,11 +78,17 @@ class WorldObjectRegistryPhase3AContractTests(unittest.TestCase):
         self.assertEqual(list(ROOM_ENUMS), definitions["roomId"]["enum"])
         self.assertEqual(list(ACTION_ENUMS), definitions["objectAction"]["enum"])
         self.assertEqual(list(ANIMATION_ENUMS), definitions["animationBinding"]["enum"])
+        objects_schema = self.schema["properties"]["objects"]
+        self.assertEqual(len(self.registry["objects"]), objects_schema["minItems"])
+        self.assertEqual(len(self.registry["objects"]), objects_schema["maxItems"])
 
     def test_firmware_registry_matches_json_contract(self) -> None:
         header = REGISTRY_HEADER.read_text(encoding="utf-8")
         source = REGISTRY_SOURCE.read_text(encoding="utf-8")
-        self.assertRegex(header, r"WORLD_OBJECT_REGISTRY_CAPACITY\s+3U")
+        capacity = len(self.registry["objects"])
+        self.assertRegex(
+            header, rf"WORLD_OBJECT_REGISTRY_CAPACITY\s+{capacity}U"
+        )
 
         positions = [source.index(f'"{item["object_id"]}"') for item in self.registry["objects"]]
         self.assertEqual(sorted(positions), positions)
@@ -96,18 +102,36 @@ class WorldObjectRegistryPhase3AContractTests(unittest.TestCase):
             self.assertIn(
                 f'WORLD_OBJECT_FACING_{item["anchor"]["facing"].upper()}', block
             )
-            for action in item["supported_actions"]:
-                self.assertIn(ACTION_ENUMS[action], block)
-                self.assertIn(ANIMATION_ENUMS[item["animation_bindings"][action]], block)
+            for action, action_enum in ACTION_ENUMS.items():
+                action_mask = f"WORLD_OBJECT_ACTION_MASK({action_enum})"
+                binding_prefix = f"[{action_enum}] ="
+                if action in item["supported_actions"]:
+                    expected_animation = ANIMATION_ENUMS[
+                        item["animation_bindings"][action]
+                    ]
+                    self.assertIn(action_mask, block)
+                    self.assertIn(
+                        f"[{action_enum}] = {expected_animation}", block
+                    )
+                else:
+                    self.assertNotIn(action_mask, block)
+                    self.assertNotIn(binding_prefix, block)
 
     def test_agent_projection_explicitly_omits_execution_metadata(self) -> None:
         source = AGENT_SOURCE.read_text(encoding="utf-8")
-        projection_start = source.index("export function getWorldObjectCapabilities")
+        projection_start = source.index("export function projectWorldObjectCapabilities")
         projection = source[projection_start:]
         self.assertIn("object_id: object.object_id", projection)
-        self.assertIn("available: object.default_available", projection)
+        self.assertIn("available: liveAvailability.get(object.object_id)!", projection)
         self.assertNotIn("anchor:", projection)
         self.assertNotIn("animation_bindings:", projection)
+        self.assertNotIn("export function getWorldObjectRegistry", source)
+        self.assertNotIn("export function parseWorldObjectRegistry", source)
+
+    def test_phase_3_evidence_markdown_is_not_globally_ignored(self) -> None:
+        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("!evidence/agent-phase-3/", gitignore)
+        self.assertIn("!evidence/agent-phase-3/*.md", gitignore)
 
     def test_frozen_v1_tools_are_not_expanded_by_phase_3a(self) -> None:
         catalog = json.loads(

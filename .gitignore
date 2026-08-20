@@ -51,6 +51,9 @@ evidence/agent-phase-2/*
 !evidence/agent-phase-2/phase-2d-real-transport.md
 !evidence/agent-phase-2/qwen3.8-27b-role-eval-v1.json
 !evidence/agent-phase-2/qwen3.8-27b-role-eval-v2.json
+!evidence/agent-phase-3/
+evidence/agent-phase-3/*
+!evidence/agent-phase-3/*.md
 
 # Local ESP-IDF / component-manager caches under the firmware tree
 firmware/.cache/

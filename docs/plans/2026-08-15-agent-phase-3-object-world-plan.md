@@ -68,8 +68,10 @@
 ## 7. 当前进度
 
 2026-08-20，用户明确授权启动 Phase 3。3A 已建立 World Object Registry v1、无坐标 Agent projection、
-固件只读注册表和 JSON/TypeScript/C 一致性门禁。Node 24.19 strict typecheck、Agent 119/119、Python
-contract 47/47、C host 1/1 与 ESP-IDF v5.5.4 全量固件构建均通过；证据见
+固件只读注册表和 JSON/TypeScript/C 一致性门禁。代码审查后进一步收紧公共 API、实时可用性与
+动作-动画精确映射；Node 24.19 strict typecheck、Agent 120/120、Python contract 48/48、C host
+1/1，以及 ESP-IDF 固件对象编译和 ELF 增量链接均通过。3A 初始实现的全量固件构建已通过；本轮
+全量重跑受沙箱进程枚举权限限制，详见
 [Phase 3A Object Registry Contract Evidence](../../evidence/agent-phase-3/phase-3a-object-registry.md)。
 据此 3A 退出门禁满足，下一步进入 3B P4 Object Runtime；当前仍未向模型或真实 Device WebSocket
 公布对象级 Tool，也未修改冻结的 v1 契约。

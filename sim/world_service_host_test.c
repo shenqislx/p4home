@@ -94,6 +94,19 @@ int main(void)
     CHECK(!world_object_supports_action(desk, WORLD_OBJECT_ACTION_SIT));
     CHECK(world_object_animation_for(desk, WORLD_OBJECT_ACTION_SIT) ==
           WORLD_OBJECT_ANIMATION_NONE);
+    const world_object_definition_t *window =
+        world_object_registry_find("living_room.window");
+    CHECK(window != NULL);
+    CHECK(world_object_supports_action(window, WORLD_OBJECT_ACTION_GO_TO));
+    CHECK(!world_object_supports_action(window, WORLD_OBJECT_ACTION_SIT));
+    CHECK(world_object_animation_for(window, WORLD_OBJECT_ACTION_LOOK_AT) ==
+          WORLD_OBJECT_ANIMATION_CAT_LOOK);
+    CHECK(!world_object_supports_action(sofa, (world_object_action_t)-1));
+    CHECK(!world_object_supports_action(sofa, WORLD_OBJECT_ACTION_COUNT));
+    CHECK(world_object_animation_for(sofa, (world_object_action_t)-1) ==
+          WORLD_OBJECT_ANIMATION_NONE);
+    CHECK(world_object_animation_for(sofa, WORLD_OBJECT_ACTION_COUNT) ==
+          WORLD_OBJECT_ANIMATION_NONE);
     CHECK(world_object_registry_find("living_room.missing") == NULL);
     CHECK(world_object_registry_at(WORLD_OBJECT_REGISTRY_CAPACITY) == NULL);
 

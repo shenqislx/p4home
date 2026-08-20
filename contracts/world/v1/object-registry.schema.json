@@ -11,7 +11,8 @@
     "coordinate_space": { "const": "p4home.room-art/v1" },
     "objects": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 3,
+      "maxItems": 3,
       "items": { "$ref": "#/$defs/object" }
     }
   },
@@ -47,10 +48,18 @@
       "minProperties": 1,
       "additionalProperties": false,
       "properties": {
-        "go_to": { "$ref": "#/$defs/animationBinding" },
-        "sit": { "$ref": "#/$defs/animationBinding" },
-        "look_at": { "$ref": "#/$defs/animationBinding" },
-        "interact": { "$ref": "#/$defs/animationBinding" }
+        "go_to": {
+          "allOf": [{ "$ref": "#/$defs/animationBinding" }, { "const": "cat_walk" }]
+        },
+        "sit": {
+          "allOf": [{ "$ref": "#/$defs/animationBinding" }, { "const": "cat_sit" }]
+        },
+        "look_at": {
+          "allOf": [{ "$ref": "#/$defs/animationBinding" }, { "const": "cat_look" }]
+        },
+        "interact": {
+          "allOf": [{ "$ref": "#/$defs/animationBinding" }, { "const": "cat_paw" }]
+        }
       }
     },
     "object": {

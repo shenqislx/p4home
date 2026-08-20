@@ -12,6 +12,7 @@ Agent 可获得的 capability projection 只包含：
 - `supported_actions`
 - `available`
 
-`anchor` 与 `animation_bindings` 只供 P4 确定性执行和 UI 使用，禁止进入模型上下文。修改注册表必须
-同步通过 JSON Schema、TypeScript loader、固件只读注册表和三者一致性测试；不得原地扩大已冻结的
-Device Protocol v1 或 Tool Schema v1。
+其中 `available` 必须由 P4 当前运行状态完整提供，不得直接把 `default_available` 当作实时能力。
+TypeScript 公共 API 不导出原始注册表；`anchor` 与 `animation_bindings` 只供 P4 确定性执行和 UI
+使用，禁止进入模型上下文。修改注册表必须同步通过 JSON Schema、TypeScript loader、固件只读
+注册表和三者一致性测试；不得原地扩大已冻结的 Device Protocol v1 或 Tool Schema v1。
