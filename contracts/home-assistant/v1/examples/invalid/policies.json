@@ -1,0 +1,137 @@
+[
+  {
+    "name": "duplicate_alias",
+    "policy": {
+      "schema_version": 1,
+      "policy_id": "invalid.duplicate-alias",
+      "entities": [
+        {
+          "alias": "same_light",
+          "entity_id": "light.example_one",
+          "domain": "light",
+          "read": true,
+          "write_actions": ["turn_on"],
+          "projected_attributes": []
+        },
+        {
+          "alias": "same_light",
+          "entity_id": "light.example_two",
+          "domain": "light",
+          "read": true,
+          "write_actions": ["turn_off"],
+          "projected_attributes": []
+        }
+      ]
+    }
+  },
+  {
+    "name": "domain_mismatch",
+    "policy": {
+      "schema_version": 1,
+      "policy_id": "invalid.domain-mismatch",
+      "entities": [
+        {
+          "alias": "example_switch",
+          "entity_id": "light.example_switch",
+          "domain": "switch",
+          "read": true,
+          "write_actions": ["turn_on"],
+          "projected_attributes": []
+        }
+      ]
+    }
+  },
+  {
+    "name": "sensor_write",
+    "policy": {
+      "schema_version": 1,
+      "policy_id": "invalid.sensor-write",
+      "entities": [
+        {
+          "alias": "example_temperature",
+          "entity_id": "sensor.example_temperature",
+          "domain": "sensor",
+          "read": true,
+          "write_actions": ["turn_on"],
+          "projected_attributes": ["unit_of_measurement"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "scene_wrong_action",
+    "policy": {
+      "schema_version": 1,
+      "policy_id": "invalid.scene-action",
+      "entities": [
+        {
+          "alias": "example_scene",
+          "entity_id": "scene.example_scene",
+          "domain": "scene",
+          "read": true,
+          "write_actions": ["turn_on"],
+          "projected_attributes": []
+        }
+      ]
+    }
+  },
+  {
+    "name": "attribute_domain_mismatch",
+    "policy": {
+      "schema_version": 1,
+      "policy_id": "invalid.attribute-domain",
+      "entities": [
+        {
+          "alias": "example_switch",
+          "entity_id": "switch.example_switch",
+          "domain": "switch",
+          "read": true,
+          "write_actions": ["turn_on", "turn_off"],
+          "projected_attributes": ["current_temperature"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "non_canonical_order",
+    "policy": {
+      "schema_version": 1,
+      "policy_id": "invalid.order",
+      "entities": [
+        {
+          "alias": "z_light",
+          "entity_id": "light.example_z",
+          "domain": "light",
+          "read": true,
+          "write_actions": [],
+          "projected_attributes": []
+        },
+        {
+          "alias": "a_light",
+          "entity_id": "light.example_a",
+          "domain": "light",
+          "read": true,
+          "write_actions": [],
+          "projected_attributes": []
+        }
+      ]
+    }
+  },
+  {
+    "name": "forbidden_domain",
+    "policy": {
+      "schema_version": 1,
+      "policy_id": "invalid.lock",
+      "entities": [
+        {
+          "alias": "front_door",
+          "entity_id": "lock.front_door",
+          "domain": "lock",
+          "read": true,
+          "write_actions": ["turn_on"],
+          "projected_attributes": []
+        }
+      ]
+    }
+  }
+]

@@ -2,7 +2,7 @@
 
 > Status: `in_progress`
 > Started: 2026-08-20
-> Current Gate: 启动准备完成，下一项为 4A Robot HA Contract & Credential Boundary
+> Current Gate: 4A 实现与本地门禁完成，等待用户 review；4B 尚未启动
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 3 complete；HA 环境与隔离测试实体可用
 
@@ -44,18 +44,22 @@ Interaction 可以产生相互隔离的 Human 与 Robot Run，并由确定性 Re
 
 ## 4. 纵切 4A — Robot HA Contract & Credential Boundary
 
-- [ ] 建立 Agent 侧版本化 HA Tool/allowlist contract，使用稳定 alias 映射真实 `entity_id`，并明确
+- [x] 建立 Agent 侧版本化 HA Tool/allowlist contract，使用稳定 alias 映射真实 `entity_id`，并明确
   允许的 domain、读写能力、期望状态和敏感 attribute 投影；仓库只保存 schema 与脱敏示例；
-- [ ] 新建独立 HA transport adapter，覆盖 WebSocket auth、单调 request id、有界 pending 表、
+- [x] 新建独立 HA transport adapter，覆盖 WebSocket auth、单调 request id、有界 pending 表、
   `state_changed` 订阅、重连 snapshot 和 metrics；不复制 P4 C 实现，但保持已验证的协议语义；
-- [ ] 凭证入口固定为 URL、token file、policy file；token file 必须是普通文件且仅当前用户可读，
+- [x] 凭证入口固定为 URL、token file、policy file；token file 必须是普通文件且仅当前用户可读，
   token 不允许从 CLI 参数或模型可见环境投影进入 Runtime；
-- [ ] 为 fake HA transport 建立 auth invalid、协议异常、重复/乱序 result、事件洪水、断线与重连测试；
-- [ ] 建立 HA 连接与 policy 审计字段，但不得持久化 token、原始 auth frame 或未投影 attributes；
-- [ ] Robot RoleProfile 仍保持无 Tool，4A 不产生任何真实 HA 副作用。
+- [x] 为 fake HA transport 建立 auth invalid、协议异常、重复/乱序 result、事件洪水、断线与重连测试；
+- [x] 建立 HA 连接与 policy 审计字段，但不得持久化 token、原始 auth frame 或未投影 attributes；
+- [x] Robot RoleProfile 仍保持无 Tool，4A 不产生任何真实 HA 副作用。
 
 退出门禁：本地 schema/fake transport 能证明只加载 allowlist、凭证全链路脱敏、pending 有界、重连不
 重放写请求；非法配置在 socket 创建前失败；Human/Cat/Router 的工具集合不变。
+
+4A 实现与本地退出门禁已完成，证据见
+[Phase 4A HA Contract & Credential Boundary](../../evidence/agent-phase-4/phase-4a-ha-contract-credential.md)。
+当前停在 4A review gate；在用户明确通过前不得开始 4B。
 
 ## 5. 纵切 4B — Read-only Robot HA Tool
 

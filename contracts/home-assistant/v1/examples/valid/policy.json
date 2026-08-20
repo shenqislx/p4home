@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "policy_id": "phase4a.example-policy",
+  "entities": [
+    {
+      "alias": "living_room_main_light",
+      "entity_id": "light.example_living_room_main",
+      "domain": "light",
+      "read": true,
+      "write_actions": ["turn_on", "turn_off"],
+      "projected_attributes": ["brightness", "color_temp_kelvin"]
+    },
+    {
+      "alias": "study_temperature",
+      "entity_id": "sensor.example_study_temperature",
+      "domain": "sensor",
+      "read": true,
+      "write_actions": [],
+      "projected_attributes": ["unit_of_measurement", "device_class"]
+    }
+  ]
+}

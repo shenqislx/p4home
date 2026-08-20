@@ -1,9 +1,10 @@
 # P4 Home Agent Runtime
 
-Phase 1 建立、Phase 2 正在扩展的 TypeScript workspace。当前包含冻结契约、Ollama 原生 Tool
-Calling、有限文本 Agent Loop、Role Contract/Router、Cat Action Adapter 与真实 P4 Device
-WebSocket server；仍不连接真实 Home Assistant。确定性测试不要求 Ollama 服务，真实模型或 P4
-硬件回归必须显式启用。
+Phase 1 至 Phase 3 已关闭、Phase 4A 正在建立 Home Assistant 安全边界的 TypeScript workspace。
+当前包含冻结契约、Ollama 原生 Tool Calling、有限文本 Agent Loop、Role Contract/Router、Cat
+Action Adapter、真实 P4 Device WebSocket server，以及尚未暴露给 Robot 的 Home Assistant
+contract/transport。确定性测试不要求 Ollama 或 Home Assistant 服务，真实模型、P4 硬件或 HA
+回归必须显式启用。
 
 ## 环境
 
@@ -16,6 +17,8 @@ cd agent
 pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm validate:contracts
+pnpm validate:object-runtime
+pnpm validate:ha-runtime
 pnpm test
 ```
 
@@ -30,16 +33,18 @@ Node 主版本时产生假通过。
 - `apps/eval-cli`：中文黄金场景评测与单次文本调试入口；
 - `apps/device-harness`：Phase 2D 自托管实机门禁入口，使用一次性 TLS/设备凭据执行 100 次动作、
   主动重连与 snapshot 检查；
-- `packages/contracts`：AJV 加载并验证仓库根目录冻结的两份 v1 契约；
+- `packages/contracts`：AJV 加载并验证仓库根目录冻结的通用、对象运行时与 HA v1 契约；
 - `packages/core`：核心实体类型、取消、相对 timeout、最多四项的顺序 Tool Loop；
 - `packages/domain-p4home`：无需真实设备的五工具 Mock 与 allowlist；
 - `packages/provider-ollama`：原生 HTTP capability probe、generate、chat/tool calling、NDJSON
   stream、`AbortSignal` 取消和相对 timeout；
+- `packages/transport-ha`：凭证文件边界、HA WebSocket 鉴权/订阅、逐实体 REST 初始快照、
+  allowlist 状态投影与无网络 Fake Transport；4A 不向任何 Role 提供 HA Tool；
 - `packages/storage-sqlite`：基于 Node 24 内置 `node:sqlite` 的审计存储、schema migration 与关联查询。
 
-Phase 2A、2B、2C 已满足各自退出门禁；2D 的真实 WebSocket 软件链已通过本机网络集成测试并完成
-硬件 workflow 准备，尚待自托管 ESP32-P4 artifact 判定。任何阶段都不得把 token 暴露给模型、
-协议 JSON、日志或 artifact。
+Phase 1 至 Phase 3 已按各自证据门禁关闭。Phase 4A 只建立 HA contract、凭证与 transport
+边界，不启动 Robot Run、不调用 HA service，也不把 HA Tool 暴露给模型；4B 仍需独立 review
+授权。任何阶段都不得把 token 暴露给模型、协议 JSON、日志或 artifact。
 
 Role Router 不向模型提供 Tool，也不依赖 Ollama `format`：默认 27B 已实测会在部分分类样例中违反
 `format`。Router prompt 只允许三个精确 JSON，响应仍由 Runtime 使用 JSON Schema/AJV 本地复验；

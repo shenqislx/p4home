@@ -45,7 +45,9 @@ Device Protocol v1 / Tool Schema v1 未修改。
 2026-08-20，用户已明确授权启动 Phase 4，并要求先完成准备工作。Phase 4 已重构为 4A Robot HA
 Contract & Credential Boundary、4B Read-only Robot HA Tool、4C Low-risk Write & HA/P4 Convergence、
 4D Multi-assignment RoutePlan & Response Composer、4E Security/Eval/Real Environment Gate 五个纵切。
-当前准备边界与证据已冻结，下一项是 4A；真实 HA 凭证、连接和家居动作均尚未启用。
+准备边界已经 review 通过。4A 的版本化 HA contract、仓库外凭证文件边界、allowlist 状态投影、
+Fake/本地回环 WebSocket transport 与安全审计已实现并通过本地门禁，当前等待 4A review；Robot
+RoleProfile 仍无 HA Tool，真实 HA 凭证、连接和家居动作均尚未启用，4B 尚未启动。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 已在 Phase 2 完成并通过实机证据验证。

@@ -116,6 +116,15 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/transport-ha:
+    dependencies:
+      '@p4home/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
+
 packages:
 
   '@esbuild/aix-ppc64@0.28.2':

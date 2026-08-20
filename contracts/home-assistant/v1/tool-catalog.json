@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "namespace": "home",
+  "tools": [
+    {
+      "name": "home.get_entity",
+      "side_effect": false,
+      "parameters": {
+        "type": "object",
+        "required": ["alias"],
+        "properties": { "alias": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" } },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "home.turn_on",
+      "side_effect": true,
+      "parameters": {
+        "type": "object",
+        "required": ["alias"],
+        "properties": { "alias": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" } },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "home.turn_off",
+      "side_effect": true,
+      "parameters": {
+        "type": "object",
+        "required": ["alias"],
+        "properties": { "alias": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" } },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "home.activate_scene",
+      "side_effect": true,
+      "parameters": {
+        "type": "object",
+        "required": ["alias"],
+        "properties": { "alias": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" } },
+        "additionalProperties": false
+      }
+    }
+  ]
+}
