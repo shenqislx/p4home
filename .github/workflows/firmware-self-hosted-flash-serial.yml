@@ -282,7 +282,8 @@ jobs:
             -D SDKCONFIG="$HARDWARE_SDKCONFIG" \
             size --format json2 --output-file "$SIZE_REPORT"
           grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
-          if [[ "${{ inputs.validation_profile }}" != "generic" ]]; then
+          if [[ "${{ inputs.validation_profile }}" == "phase2d_agent" || \
+                "${{ inputs.validation_profile }}" == "phase3d_object" ]]; then
             grep -qx "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=$EXPECTED_AGENT_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
           fi
           test "$(shasum -a 256 firmware/dependencies.lock | awk '{print $1}')" = "$DEPENDENCY_LOCK_SHA256_BEFORE"

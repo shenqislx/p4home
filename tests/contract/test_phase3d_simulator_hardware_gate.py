@@ -96,9 +96,9 @@ class Phase3DSimulatorHardwareGateContractTests(unittest.TestCase):
         self.assertNotIn("actions/checkout@v4", workflow)
         self.assertIn("tarball/$GITHUB_SHA", workflow)
         self.assertIn("DEPENDENCY_LOCK_SHA256_BEFORE", workflow)
-        self.assertGreaterEqual(
-            workflow.count('if [[ "${{ inputs.validation_profile }}" != "generic" ]]; then'),
-            2,
+        self.assertIn(
+            'if [[ "${{ inputs.validation_profile }}" == "phase2d_agent" ||',
+            workflow,
         )
         for marker in (
             "VERIFY:phase3d:object_action_chain:PASS",

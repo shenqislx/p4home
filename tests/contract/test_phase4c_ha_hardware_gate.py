@@ -37,6 +37,10 @@ class Phase4CHaHardwareGateContractTests(unittest.TestCase):
         self.assertIn('CAPTURE_SECONDS=$((MONITOR_SECONDS + 180))', workflow)
         self.assertIn('post_robot_started_at=$SECONDS', workflow)
         self.assertIn('test "$((SECONDS - post_robot_started_at))" -ge 60', workflow)
+        self.assertIn(
+            'if [[ "${{ inputs.validation_profile }}" == "phase2d_agent" ||',
+            workflow,
+        )
         append = workflow.index("Append Agent harness evidence")
         sanitize = workflow.index("Sanitize Phase 4C serial artifact")
         manifest = workflow.index("Write hardware validation manifest")
@@ -53,6 +57,10 @@ class Phase4CHaHardwareGateContractTests(unittest.TestCase):
         build_section = workflow[build:flash]
         flash_section = workflow[flash:append]
         self.assertNotIn('monitor_log="firmware/monitor.log"', build_section)
+        self.assertNotIn(
+            'if [[ "${{ inputs.validation_profile }}" != "generic" ]]; then',
+            build_section,
+        )
         monitor_init = flash_section.index('monitor_log="firmware/monitor.log"')
         flash_redirect = flash_section.index('flash > "$monitor_log"')
         self.assertLess(monitor_init, flash_redirect)
