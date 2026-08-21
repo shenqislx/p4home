@@ -63,7 +63,9 @@ class Phase4CHaHardwareGateContractTests(unittest.TestCase):
         manifest = workflow.index("Write hardware validation manifest")
         self.assertLess(append, sanitize)
         self.assertLess(sanitize, manifest)
-        subscribed = workflow.index('grep -q "VERIFY:ha:subscribed:PASS"')
+        subscribed = workflow.index(
+            'grep -q "VERIFY:phase4c:p4_standalone:PASS"'
+        )
         gate = workflow.rindex("apps/runtime/src/phase4c-ha-gate.ts")
         self.assertLess(subscribed, gate)
         self.assertNotIn('test "$gate_exit_code" = "0"', workflow)
@@ -114,6 +116,10 @@ class Phase4CHaHardwareGateContractTests(unittest.TestCase):
         self.assertIn("VERIFY:phase4c:p4_ha_state:PASS state=%s", store)
         main = (ROOT / "firmware/main/app_main.c").read_text(encoding="utf-8")
         self.assertIn('log_verify_marker("phase4c", "p4_standalone"', main)
+        self.assertIn(
+            "board_support_ha_ready() && board_support_ha_subscription_ready()",
+            main,
+        )
         self.assertIn("!agent_snapshot.enabled && !agent_snapshot.connected", main)
 
     def test_robot_gate_is_non_admin_allowlisted_and_restores_state(self) -> None:
@@ -123,9 +129,18 @@ class Phase4CHaHardwareGateContractTests(unittest.TestCase):
         core = (
             ROOT / "agent/apps/runtime/src/phase4c-ha-gate-core.ts"
         ).read_text(encoding="utf-8")
+        identity = (
+            ROOT / "agent/apps/runtime/src/phase4c-ha-identity.ts"
+        ).read_text(encoding="utf-8")
         self.assertIn('requiredEnv("AGENT_HARNESS_RESULT_FILE")', gate)
         self.assertNotIn('requiredEnv("P4HOME_HARNESS_RESULT_FILE")', gate)
-        self.assertIn('type: "auth/current_user"', gate)
+        self.assertIn('type: "auth/current_user"', identity)
+        self.assertIn("const attempts = options.attempts ?? 3", identity)
+        self.assertIn('reason === "identity_transport"', identity)
+        self.assertIn('reason === "identity_timeout"', identity)
+        self.assertIn('socket.on("error", ignoreLateError)', identity)
+        self.assertIn('socket.once("close", complete)', identity)
+        self.assertIn("safeFailureReason(error, reason)", gate)
         self.assertIn("identity.is_admin === false && identity.is_owner === false", gate)
         self.assertIn('typeof record.is_admin !== "boolean"', core)
         self.assertIn('typeof record.is_owner !== "boolean"', core)

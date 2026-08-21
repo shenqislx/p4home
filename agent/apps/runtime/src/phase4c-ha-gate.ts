@@ -7,14 +7,12 @@ import {
   type RobotHaRuntimeConfig,
 } from "@p4home/transport-ha";
 import type { RobotHaWriteAction } from "@p4home/contracts";
-import WebSocket from "ws";
 
 import {
   dispatchCausalWrite,
-  parseRobotIdentity,
   restoreRobotState,
-  type RobotIdentity,
 } from "./phase4c-ha-gate-core.ts";
+import { readCurrentIdentity } from "./phase4c-ha-identity.ts";
 
 const HA_URL = requiredEnv("P4HOME_PHASE4C_HA_URL");
 const TOKEN_FILE = requiredEnv("P4HOME_PHASE4C_TOKEN_FILE");
@@ -49,75 +47,22 @@ function requiredEnv(name: string): string {
   return value;
 }
 
-function websocketUrl(url: string): string {
-  const parsed = new URL(url);
-  parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
-  parsed.pathname = "/api/websocket";
-  parsed.search = "";
-  parsed.hash = "";
-  return parsed.toString();
-}
-
-async function readCurrentIdentity(accessToken: string) {
-  return new Promise<RobotIdentity>((resolve, reject) => {
-    const socket = new WebSocket(websocketUrl(HA_URL), { perMessageDeflate: false });
-    let phase: "awaiting_auth_required" | "awaiting_auth_ok" | "awaiting_result" =
-      "awaiting_auth_required";
-    let settled = false;
-    const finish = (callback: () => void): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      socket.removeAllListeners();
-      try {
-        socket.close(1000, "identity complete");
-      } finally {
-        callback();
-      }
-    };
-    const timer = setTimeout(() => {
-      socket.terminate();
-      finish(() => reject(new Error("identity_timeout")));
-    }, 10_000);
-    socket.once("error", () => finish(() => reject(new Error("identity_transport"))));
-    socket.on("message", (raw, binary) => {
-      if (binary) {
-        finish(() => reject(new Error("identity_protocol")));
-        return;
-      }
-      let message: Record<string, unknown>;
-      try {
-        message = JSON.parse(raw.toString()) as Record<string, unknown>;
-      } catch {
-        finish(() => reject(new Error("identity_protocol")));
-        return;
-      }
-      if (message.type === "auth_required" && phase === "awaiting_auth_required") {
-        phase = "awaiting_auth_ok";
-        socket.send(JSON.stringify({ type: "auth", access_token: accessToken }));
-      } else if (message.type === "auth_invalid") {
-        finish(() => reject(new Error("identity_auth")));
-      } else if (message.type === "auth_ok" && phase === "awaiting_auth_ok") {
-        phase = "awaiting_result";
-        socket.send(JSON.stringify({ id: 1, type: "auth/current_user" }));
-      } else if (message.type === "result" && message.id === 1 && phase === "awaiting_result") {
-        if (message.success !== true) {
-          finish(() => reject(new Error("identity_protocol")));
-          return;
-        }
-        try {
-          const identity = parseRobotIdentity(message.result);
-          finish(() => resolve(identity));
-        } catch {
-          finish(() => reject(new Error("identity_protocol")));
-        }
-      } else {
-        finish(() => reject(new Error("identity_protocol")));
-      }
-    });
-  });
+function safeFailureReason(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) {
+    return fallback;
+  }
+  const stableReasons = new Set([
+    "identity_auth",
+    "identity_protocol",
+    "identity_timeout",
+    "identity_transport",
+    "policy_shape",
+    "robot_identity_privileged",
+    "unsafe_initial_state",
+    "target_not_observed",
+    "target_rejected",
+  ]);
+  return stableReasons.has(error.message) ? error.message : fallback;
 }
 
 async function writeResult(result: GateResult): Promise<void> {
@@ -168,7 +113,7 @@ async function main(): Promise<number> {
       allow_insecure_ws: HA_URL.startsWith("http://"),
     });
     policyEntities = config.policy.entities.length;
-    const identity = await readCurrentIdentity(config.access_token);
+    const identity = await readCurrentIdentity(HA_URL, config.access_token);
     robotNonAdmin = identity.is_admin === false && identity.is_owner === false;
     if (!robotNonAdmin) {
       reason = "robot_identity_privileged";
@@ -216,7 +161,8 @@ async function main(): Promise<number> {
       `VERIFY:phase4c:robot_write:PASS alias=${ALIAS} from=${initialState} to=${targetState} accepted=yes observed=yes`,
     );
     reason = "restore_pending";
-  } catch {
+  } catch (error) {
+    reason = safeFailureReason(error, reason);
     // The stable reason is reported after the restoration attempt.
   } finally {
     if (client !== null && config !== null && initialState !== null && targetAttempted) {

@@ -400,7 +400,7 @@ jobs:
             capture_pid=$!
             subscribed=no
             for ((attempt = 0; attempt < MONITOR_SECONDS * 5; attempt++)); do
-              if grep -q "VERIFY:ha:subscribed:PASS" "$monitor_log"; then
+              if grep -q "VERIFY:phase4c:p4_standalone:PASS" "$monitor_log"; then
                 subscribed=yes
                 break
               fi
