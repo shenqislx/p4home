@@ -4,10 +4,10 @@
 
 ## 当前结论
 
-4C coding 与独立 subagent bugs review 已完成。Robot revision v4 新增 alias 级
-`home.turn_on`、`home.turn_off` 与 `home.activate_scene`；当前没有读取真实 token、没有连接 Robot
-专用 HA 账号，也没有对真实设备执行动作。因此本文只证明本地实现和 Fake/回环门禁，不宣称 4C
-stage complete 或 Robot/P4 真实收敛通过。
+4C 已完成 coding、独立 subagent bugs review 与真实 HA/P4 门禁。Robot revision v4 只暴露 alias 级
+`home.turn_on`、`home.turn_off` 与 `home.activate_scene`；真实 run `32454798244` 使用仓库外专用
+非管理员 Robot 凭证，在 P4 应用离线和在线订阅两种情况下分别完成一次隔离低风险实体的切换与恢复。
+两次动作均由 HA accepted、因果 state observation 和最终独立读取共同证明，终态恢复为 `off`。
 
 ## 写侧边界
 
@@ -40,12 +40,12 @@ allowlist 投影，不改 transport cache。即使查询状态符合目标，也
 | 门禁 | coding done 结果 |
 |---|---:|
 | Node 24.19 strict typecheck | 通过 |
-| Phase 4C targeted tests | 20/20；加 transport 固定映射/reconciliation 共 21 项 |
-| Agent full suite | 192/192 |
+| Agent full suite | 206/206 |
 | Runtime validators | Device v1、Object v2、HA v1 全部通过 |
-| Python cross-stage contract / hardware helper | 58/58；4/4 |
+| Python cross-stage contract / hardware helper | 66/66 |
+| Phase 4C 私有配置固件构建 | 通过；app `0x169fa0`，最小 app 分区剩余 53% |
 | `git diff --check` | 通过 |
-| 真实 HA/P4 convergence | 待专用账号与隔离实体 |
+| 真实 HA/P4 convergence | run `32454798244` 通过 |
 
 定向覆盖 fixed `call_service`、完成回刷、already-satisfied no-op、reject、accepted-without-observation、
 发送后取消、断线、unknown 不重放、未授权实体、climate hard deny、多动作顺序/失败短路、高风险工具名
@@ -57,12 +57,29 @@ allowlist 投影，不改 transport cache。即使查询状态符合目标，也
 response rejection 挂接过晚、attempt/response request id 缺少运行期校验、write 审计来源/顺序错误，以及
 reconciliation checkbox 过度声明。第二轮发现并修复同步 dispatch-cancel 后的晚到 rejection 与
 already-satisfied 快路径取消竞态。补齐 reconciliation 后继续发现并修复审计失败导致二次查询、旧 adapter
-接口守卫不完整，以及查询中取消覆盖不足。最终代码复核为 no findings；证据计数同步为当前实际验证结果。
+接口守卫不完整，以及查询中取消覆盖不足。
 
-## 尚未关闭的退出门禁
+真实硬件首轮进一步暴露并修复 macOS launchd Runner 的局域网访问边界、身份 WebSocket close 生命周期、
+恢复写 unknown/回弹计数，以及 P4 HA 初始状态突发从非 LVGL 任务直接调用 `lv_async_call()` 导致的 TLSF
+free-list 损坏。最终固件统一在 BSP display recursive mutex 下投递 UI 回调，订阅成功后才拉白名单 REST
+快照，订阅 reject/timeout fail closed；控制卡片使用原子引用计数和预分配 task payload，关闭晚到结果 UAF
+与低内存 pending 卡死。最终独立复核为 no findings。
 
-- 使用 Robot 专用非管理员账号和仓库外凭证验证真实 allowlist 读写；
-- 在隔离 light/switch/scene 上证明单次服务请求、HA result、物理状态和 Robot observation；
-- 同时核对 P4 从 HA 订阅回刷到相同终态；
-- 验证 P4 离线时 Robot HA 可用、Agent/Robot 离线时 P4 ↔ HA 与触控 UI 不受影响；
-- 保存脱敏证据，并在进入 4D 前关闭真实写侧门禁。
+## 真实硬件证据
+
+- workflow：[run 32454798244](https://github.com/shenqislx/p4home/actions/runs/32454798244)，commit
+  `9fe3ab68e05fda4ebd1ee35547736ca7f90504e2`，profile `phase4c_ha`，串口
+  `/dev/cu.usbserial-210`，连续采集 480 秒；
+- manifest SHA-256：`5b57207e8045f9280053eb4bbbee3e067940d6edf27e11581528274bee18cff8`；
+  monitor SHA-256：`25d631225ccab95ed3d4353fb71fa137455ecfb155c2a2d38c46d4e39485e3fa`；
+- manifest 同时确认 Robot 非管理员、policy 仅 1 个 alias、P4 Agent transport disabled、policy/固件目标
+  binding verified、串口实体标识已脱敏；离线与在线 gate 均 `passed=true`，恢复 attempts=1，终态 `off`；
+- monitor artifact 包含采集后追加的两组 Robot harness `robot_identity/write/restore:PASS`；其中真正的
+  固件串口部分包含 4 条 P4 目标状态 `on/off/on/off` 回刷、持续 `p4_standalone:PASS` 和 54 条
+  `ui:8fps:PASS`。敏感 token/header、原始实体样式与 task watchdog/Guru Meditation 扫描均为零；
+- 冷启动 36 个白名单状态集中回刷时出现 1 条启动期 `ui:8fps:FAIL interval_ms=10060`，随后恢复且
+  Robot 关闭后的专用 suffix gate 持续通过。它不否定 4C 的 post-Robot 稳态门禁，但保留给 4E
+  长跑/冷启动性能回归继续观察，不据此宣称 Agent disabled 的全启动过程从无瞬时抖动。
+
+据此，4C 的自动化真实 HA/P4 收敛与 post-Robot 稳态门禁关闭，可以开始 4D；本 run 没有摄像/人工
+物理灯态观察，也没有实际触摸输入，二者已明确保留在 4E 最终环境门禁，Phase 4 整体仍未完成。

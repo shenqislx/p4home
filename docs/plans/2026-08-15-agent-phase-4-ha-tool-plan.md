@@ -2,7 +2,7 @@
 
 > Status: `in_progress`
 > Started: 2026-08-20
-> Current Gate: 4C coding 与独立 bugs review 完成；真实 HA 读写门禁尚待专用凭证与隔离实体
+> Current Gate: 4C 真实 HA/P4 门禁已通过；进入 4D Multi-assignment RoutePlan & Response Composer
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 3 complete；HA 环境与隔离测试实体可用
 
@@ -97,14 +97,22 @@ Interaction 可以产生相互隔离的 Human 与 Robot Run，并由确定性 Re
 - [x] 每次写请求先冻结 policy decision，再发送唯一 request id；HA `result` 后等待目标实体状态回刷，
   将 `accepted/completed/rejected/unknown` 分开审计和呈现；
 - [x] timeout、断线与取消后不自动重发；只允许一次只读状态查询协助判定，仍无法证明时保留 unknown；
-- [ ] 在隔离的低风险真实实体上验证单次写入、物理/HA 状态、Robot 观察与 P4 现有订阅最终一致；
-- [ ] 回归 P4 离线时 Robot 可工作、Agent/Robot 离线时 P4 ↔ HA 与触控 UI 不受影响。
+- [x] 在隔离的低风险真实实体上验证单次写入、HA 状态、Robot 观察与 P4 现有订阅最终一致；
+- [x] 回归 P4 应用离线时 Robot 可工作，以及 Robot 客户端关闭后 P4 ↔ HA、standalone 与稳态
+  UI 8 FPS 持续工作。
 
 4C coding done：Runtime 已把 policy、固定 request、HA accepted/rejected 与投影 state observation 分开，
 只有后续状态回刷能产生 completed；发送后的 timeout、取消或断线统一保留 unknown 且
 `replay_allowed=false`。本地实现证据见
 [Phase 4C Low-risk Write](../../evidence/agent-phase-4/phase-4c-low-risk-write.md)。独立 bugs review 已完成；
-真实 HA/P4 收敛与离线互不影响仍是不可替代的退出门禁。
+真实 HA/P4 收敛、P4 应用离线时 Robot 可用，以及 Robot 关闭后的 P4 稳态是不可替代的退出门禁，
+并已由下述专用 run 关闭。
+
+2026-08-21，真实 run `32454798244` 在 P4 应用离线与在线订阅两种状态下分别完成 Robot 非管理员
+身份校验、单次低风险切换、因果 observation 与恢复；P4 串口记录目标 `on/off/on/off` 回刷，Robot
+关闭后持续输出 `p4_standalone:PASS` 与 `ui:8fps:PASS`，且无 task watchdog。manifest 绑定 commit、
+profile、串口、Agent disabled、policy target 与脱敏状态；完整证据见
+[Phase 4C Low-risk Write](../../evidence/agent-phase-4/phase-4c-low-risk-write.md)。4C 退出门禁已关闭。
 
 退出门禁：未授权或高风险写入零执行；允许实体的真实动作可由 HA result 与后续 state change 共同
 证明，Robot/P4 最终一致；重复、超时和重连测试没有盲目重放或伪造完成。
@@ -140,6 +148,8 @@ Interaction 可以产生相互隔离的 Human 与 Robot Run，并由确定性 Re
 - [ ] 核对日志、SQLite、CI artifact、进程参数和 Git 历史均不含 token 或原始敏感 HA attributes；
 - [ ] 长跑期间验证 Agent 离线不影响 P4 ↔ HA，P4 离线不影响 Robot HA，UI 8 FPS 与固件资源基线
   无回归。
+- [ ] 在可独立观察设备时确认一次真实物理灯态变化与恢复，并执行实际触摸输入，证明触控交互而非仅
+  touch driver/indev 初始化与渲染帧率；没有该证据不得宣称物理状态或触控交互已验收。
 
 退出门禁：所有 4A–4E 技术门禁和真实环境证据通过，再交由用户最终 review。Phase 4 的 review 通过
 只关闭并归档本 Phase，不自动授权启动 Phase 5。

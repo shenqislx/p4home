@@ -1,7 +1,7 @@
 # P4 Home 当前工作计划
 
 > Current Focus: [P4 Home 本地 LLM Agent 化架构](../p4-local-agent-architecture.md)
-> Updated: 2026-08-20
+> Updated: 2026-08-21
 > Working Branch: `feature/agent-harness`
 
 ## 工作规则
@@ -45,9 +45,11 @@ Device Protocol v1 / Tool Schema v1 未修改。
 2026-08-20，用户已明确授权启动 Phase 4，并要求先完成准备工作。Phase 4 已重构为 4A Robot HA
 Contract & Credential Boundary、4B Read-only Robot HA Tool、4C Low-risk Write & HA/P4 Convergence、
 4D Multi-assignment RoutePlan & Response Composer、4E Security/Eval/Real Environment Gate 五个纵切。
-准备边界已经 review 通过。4A 的版本化 HA contract、仓库外凭证文件边界、allowlist 状态投影、
-Fake/本地回环 WebSocket transport 与安全审计已实现并通过本地门禁，当前等待 4A review；Robot
-RoleProfile 仍无 HA Tool，真实 HA 凭证、连接和家居动作均尚未启用，4B 尚未启动。
+准备边界与 4A/4B review 已通过。4C 完成低风险写侧、unknown 不重放、恢复对账和独立 bugs review；
+真实 run `32454798244` 已用专用非管理员 Robot 账号证明 P4 应用离线时 Robot 可用、在线时 Robot/P4
+从 HA 回刷到一致终态，并在 Robot 关闭后保持 P4 standalone 与稳态 UI 8 FPS。4C 自动化门禁已关闭，
+独立物理灯态和实际触摸输入保留给 4E；当前进入 4D Multi-assignment RoutePlan & Response Composer，
+Phase 4 整体仍为 `in_progress`。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 已在 Phase 2 完成并通过实机证据验证。

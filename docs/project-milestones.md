@@ -24,7 +24,7 @@
 | M7.1 Text Agent Runtime | `completed` | Ollama + 有限 Tool Loop + SQLite + eval |
 | M7.2 Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作闭环 |
 | M7.3 Cat Object World | `completed` | sofa/window/desk 等 Cat 对象级动作，实机门禁与最终 review 已通过 |
-| M7.4 Robot HA & Multi-role | `in_progress` | 4A 已通过；4B coding/review 完成；4C 低风险写侧 coding/review 完成，等待真实门禁 |
+| M7.4 Robot HA & Multi-role | `in_progress` | 4A–4C 已通过；4D Multi-assignment RoutePlan & Composer 推进中 |
 | M7.5 Role-aware Voice | `pending` | 本地唤醒、STT、Router/Roles、TTS 闭环 |
 | M7.6 Role-aware Memory | `pending` | 评测共享、私有与混合角色记忆 |
 | M7.7 Cat Autonomy | `pending` | Timer/HA 事件驱动、低优先级、可关闭 Cat 行为 |
@@ -64,7 +64,10 @@ run `32382940058` 已通过 manifest、对象动作链、重连 snapshot、取�
 审计的本地门禁并通过 review。4B 已完成只读 `home.get_entity(alias)`、确定性状态呈现、跨角色隔离与
 SQLite 关联审计的 coding 与独立 bugs review；review 发现的旧库迁移、断线竞态、拒绝审计、运行期
 投影校验问题均已关闭。4C 已完成固定低风险写映射、result/observation 收敛与 unknown 不重放的核心
-coding 和独立 bugs review（含单次只读 reconciliation）；尚未使用 Robot 专用账号连接真实 HA 或执行隔离实体动作。
+coding 和独立 bugs review（含单次只读 reconciliation）。真实 run `32454798244` 已用 Robot 专用
+非管理员账号完成 P4 离线/在线两次隔离低风险切换与恢复，P4 目标回刷、standalone、post-Robot
+稳态 UI 8 FPS、artifact 脱敏和无 watchdog 均通过专用门禁；独立物理灯态与实际触摸输入留在 4E，
+4C 自动化门禁已关闭，开始 4D 多 assignment 与确定性 composer。
 
 ## 5. 状态更新规则
 
