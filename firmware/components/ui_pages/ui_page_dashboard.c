@@ -10,6 +10,7 @@
 #include "ha_client.h"
 #include "sdkconfig.h"
 #include "time_service.h"
+#include "ui_async.h"
 #include "ui_card_action.h"
 #include "ui_card_binary.h"
 #include "ui_card_multiline.h"
@@ -297,7 +298,9 @@ static void ui_page_dashboard_store_observer(const panel_sensor_t *sensor, void 
         return;
     }
     *copy = *sensor;
-    lv_async_call(ui_page_dashboard_apply_on_lvgl, copy);
+    if (ui_async_call(ui_page_dashboard_apply_on_lvgl, copy) != LV_RESULT_OK) {
+        free(copy);
+    }
 }
 
 esp_err_t ui_page_dashboard_init(void)

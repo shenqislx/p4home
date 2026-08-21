@@ -34,6 +34,7 @@ static const char *TAG = "ha_client";
 #define HA_CLIENT_STOP_BIT          BIT5
 #define HA_CLIENT_CALL_DONE_BIT     BIT6
 #define HA_CLIENT_REQUEST_DONE_BIT  BIT7
+#define HA_CLIENT_SUB_FAILED_BIT    BIT8
 #define HA_CLIENT_MAX_INITIAL_ENTITIES CONFIG_P4HOME_HA_CLIENT_MAX_INITIAL_ENTITIES
 #define HA_CLIENT_ENTITY_ID_MAX_LEN 128U
 
@@ -533,11 +534,21 @@ static void ha_client_handle_result(cJSON *root)
 
     ha_pending_type_t pending_type = ha_client_take_pending((uint32_t)id_item->valuedouble);
     if (pending_type == HA_PENDING_SUBSCRIBE) {
+        cJSON *success = cJSON_GetObjectItemCaseSensitive(root, "success");
         taskENTER_CRITICAL(&s_ctx.lock);
-        s_ctx.subscription_ready = true;
-        s_ctx.sub_state = HA_SUB_STATE_STEADY;
+        if (cJSON_IsTrue(success)) {
+            s_ctx.subscription_ready = true;
+            s_ctx.sub_state = HA_SUB_STATE_STEADY;
+        } else {
+            s_ctx.subscription_ready = false;
+            s_ctx.sub_state = HA_SUB_STATE_IDLE;
+            ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
+            ha_client_set_error_locked("subscribe_failed");
+        }
         taskEXIT_CRITICAL(&s_ctx.lock);
-        xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_SUB_READY_BIT);
+        xEventGroupSetBits(s_ctx.event_group,
+                           cJSON_IsTrue(success) ? HA_CLIENT_SUB_READY_BIT
+                                                 : HA_CLIENT_SUB_FAILED_BIT);
         return;
     }
 
@@ -1026,7 +1037,7 @@ static void ha_client_worker(void *arg)
 {
     (void)arg;
     uint32_t backoff_ms = CONFIG_P4HOME_HA_CLIENT_RECONNECT_BASE_MS;
-    bool allow_one_shot = true;
+    bool allow_one_shot_retry = true;
     bool first_dial = true;
 
     while (true) {
@@ -1085,12 +1096,9 @@ static void ha_client_worker(void *arg)
             taskEXIT_CRITICAL(&s_ctx.lock);
             xEventGroupClearBits(s_ctx.event_group, HA_CLIENT_READY_BIT | HA_CLIENT_AUTH_FAIL_BIT |
                                                    HA_CLIENT_FATAL_ERROR_BIT | HA_CLIENT_SUB_READY_BIT |
-                                                   HA_CLIENT_INITIAL_DONE_BIT);
+                                                   HA_CLIENT_INITIAL_DONE_BIT | HA_CLIENT_SUB_FAILED_BIT);
 
-            if (allow_one_shot) {
-                ha_client_fetch_initial_states(url, token, verify_tls);
-            }
-
+            const char *subscription_error = NULL;
             esp_err_t start_err = ha_client_start_socket(s_ctx.normalized_url, verify_tls);
             if (start_err == ESP_OK) {
                 EventBits_t bits = xEventGroupWaitBits(s_ctx.event_group,
@@ -1099,41 +1107,49 @@ static void ha_client_worker(void *arg)
                                                        pdFALSE, pdFALSE,
                                                        pdMS_TO_TICKS(CONFIG_P4HOME_HA_CLIENT_HANDSHAKE_TIMEOUT_MS));
                 if ((bits & HA_CLIENT_READY_BIT) != 0U) {
-                    allow_one_shot = false;
+                    allow_one_shot_retry = false;
                     backoff_ms = CONFIG_P4HOME_HA_CLIENT_RECONNECT_BASE_MS;
                     EventBits_t sub_bits = xEventGroupWaitBits(s_ctx.event_group,
-                                                               HA_CLIENT_SUB_READY_BIT,
+                                                               HA_CLIENT_SUB_READY_BIT |
+                                                                   HA_CLIENT_SUB_FAILED_BIT,
                                                                pdFALSE, pdFALSE,
                                                                pdMS_TO_TICKS(CONFIG_P4HOME_HA_CLIENT_INITIAL_STATES_TIMEOUT_MS));
                     if ((sub_bits & HA_CLIENT_SUB_READY_BIT) != 0U) {
                         ha_client_fetch_initial_states(url, token, verify_tls);
-                    }
-
-                    while (!s_ctx.stop_requested) {
-                        stack_high_water = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
-                        taskENTER_CRITICAL(&s_ctx.lock);
-                        s_ctx.worker_stack_high_water_bytes = stack_high_water;
-                        bool connected = s_ctx.ws_connected && s_ctx.authenticated &&
-                                         s_ctx.state == HA_CLIENT_STATE_READY;
-                        taskEXIT_CRITICAL(&s_ctx.lock);
-                        if (!connected) {
-                            break;
+                        while (!s_ctx.stop_requested) {
+                            stack_high_water = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+                            taskENTER_CRITICAL(&s_ctx.lock);
+                            s_ctx.worker_stack_high_water_bytes = stack_high_water;
+                            bool connected = s_ctx.ws_connected && s_ctx.authenticated &&
+                                             s_ctx.state == HA_CLIENT_STATE_READY;
+                            taskEXIT_CRITICAL(&s_ctx.lock);
+                            if (!connected) {
+                                break;
+                            }
+                            vTaskDelay(pdMS_TO_TICKS(1000));
                         }
-                        vTaskDelay(pdMS_TO_TICKS(1000));
+
+                        ha_client_stop_socket();
+                        continue;
                     }
 
-                    ha_client_stop_socket();
-                    continue;
-                }
-                if ((bits & HA_CLIENT_FATAL_ERROR_BIT) != 0U) {
+                    subscription_error = (sub_bits & HA_CLIENT_SUB_FAILED_BIT) != 0U
+                                             ? "subscribe_failed"
+                                             : "subscribe_timeout";
+                    taskENTER_CRITICAL(&s_ctx.lock);
+                    ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
+                    ha_client_set_error_locked(subscription_error);
+                    taskEXIT_CRITICAL(&s_ctx.lock);
+                } else if ((bits & HA_CLIENT_FATAL_ERROR_BIT) != 0U) {
                     break;
+                } else {
+                    taskENTER_CRITICAL(&s_ctx.lock);
+                    ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
+                    if (s_ctx.last_error[0] == '\0' || strcmp(s_ctx.last_error, "idle") == 0) {
+                        ha_client_set_error_locked("ws_open_failed");
+                    }
+                    taskEXIT_CRITICAL(&s_ctx.lock);
                 }
-                taskENTER_CRITICAL(&s_ctx.lock);
-                ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
-                if (s_ctx.last_error[0] == '\0' || strcmp(s_ctx.last_error, "idle") == 0) {
-                    ha_client_set_error_locked("ws_open_failed");
-                }
-                taskEXIT_CRITICAL(&s_ctx.lock);
             } else {
                 taskENTER_CRITICAL(&s_ctx.lock);
                 ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
@@ -1142,14 +1158,20 @@ static void ha_client_worker(void *arg)
             }
 
             ha_client_stop_socket();
+            if (subscription_error != NULL) {
+                taskENTER_CRITICAL(&s_ctx.lock);
+                ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
+                ha_client_set_error_locked(subscription_error);
+                taskEXIT_CRITICAL(&s_ctx.lock);
+            }
         }
 
         if (s_ctx.retry_lockout || s_ctx.stop_requested) {
             break;
         }
 
-        if (allow_one_shot) {
-            allow_one_shot = false;
+        if (allow_one_shot_retry) {
+            allow_one_shot_retry = false;
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }

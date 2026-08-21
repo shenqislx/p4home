@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 #include "ha_client.h"
 #include "panel_data_store.h"
+#include "ui_async.h"
 #include "ui_fonts.h"
 #include "ui_pixel_theme.h"
 
@@ -38,12 +39,8 @@ typedef struct {
 
 typedef struct {
     size_t index;
-} ui_quick_mode_task_arg_t;
-
-typedef struct {
-    size_t index;
     esp_err_t result;
-} ui_quick_mode_result_t;
+} ui_quick_mode_task_arg_t;
 
 static const ui_quick_mode_def_t s_modes[UI_QUICK_MODE_COUNT] = {
     {
@@ -258,7 +255,7 @@ static void ui_page_quick_modes_refresh_buttons(void)
 
 static void ui_page_quick_modes_apply_result(void *user_data)
 {
-    ui_quick_mode_result_t *result = (ui_quick_mode_result_t *)user_data;
+    ui_quick_mode_task_arg_t *result = (ui_quick_mode_task_arg_t *)user_data;
     if (result == NULL || result->index >= UI_QUICK_MODE_COUNT) {
         free(result);
         return;
@@ -287,19 +284,15 @@ static void ui_page_quick_modes_task(void *arg)
     }
 
     size_t index = task_arg->index;
-    free(task_arg);
-    esp_err_t err = ha_client_call_entity_service("script", "turn_on",
-                                                  s_modes[index].entity_id, 0);
-    if (err != ESP_OK) {
+    task_arg->result = ha_client_call_entity_service("script", "turn_on",
+                                                     s_modes[index].entity_id, 0);
+    if (task_arg->result != ESP_OK) {
         ESP_LOGW(TAG, "quick mode failed entity=%s result=%s",
-                 s_modes[index].entity_id, esp_err_to_name(err));
+                 s_modes[index].entity_id, esp_err_to_name(task_arg->result));
     }
 
-    ui_quick_mode_result_t *result = calloc(1U, sizeof(*result));
-    if (result != NULL) {
-        result->index = index;
-        result->result = err;
-        lv_async_call(ui_page_quick_modes_apply_result, result);
+    if (ui_async_call(ui_page_quick_modes_apply_result, task_arg) != LV_RESULT_OK) {
+        free(task_arg);
     }
     vTaskDelete(NULL);
 }
@@ -451,7 +444,9 @@ static void ui_page_quick_modes_store_observer(const panel_sensor_t *sensor, voi
         return;
     }
     *copy = *sensor;
-    lv_async_call(ui_page_quick_modes_apply_sensor, copy);
+    if (ui_async_call(ui_page_quick_modes_apply_sensor, copy) != LV_RESULT_OK) {
+        free(copy);
+    }
 }
 
 static lv_obj_t *ui_page_quick_modes_create_button(lv_obj_t *parent, size_t index,

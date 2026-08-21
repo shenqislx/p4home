@@ -6,6 +6,7 @@
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "ui_async.h"
 #include "ui_card_climate.h"
 #include "ui_fonts.h"
 #include "ui_pixel_theme.h"
@@ -135,7 +136,9 @@ static void ui_page_climate_store_observer(const panel_sensor_t *sensor, void *u
         return;
     }
     *copy = *sensor;
-    lv_async_call(ui_page_climate_apply_on_lvgl, copy);
+    if (ui_async_call(ui_page_climate_apply_on_lvgl, copy) != LV_RESULT_OK) {
+        free(copy);
+    }
 }
 
 esp_err_t ui_page_climate_init(void)

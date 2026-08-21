@@ -15,6 +15,7 @@
 #include "freertos/task.h"
 #include "ha_client.h"
 #include "time_service.h"
+#include "ui_async.h"
 #include "ui_fonts.h"
 #include "ui_pixel_theme.h"
 
@@ -244,13 +245,17 @@ static void ui_page_energy_fetch_task(void *arg)
         snprintf(update->status, sizeof(update->status), "%s", "WAIT HA ENERGY");
         if (ha_client_wait_ready(70000) != ESP_OK) {
             snprintf(update->status, sizeof(update->status), "%s", "HA OFFLINE // RETRY");
-            lv_async_call(ui_page_energy_apply_update, update);
+            if (ui_async_call(ui_page_energy_apply_update, update) != LV_RESULT_OK) {
+                free(update);
+            }
             vTaskDelay(pdMS_TO_TICKS(60000));
             continue;
         }
         if (!time_service_is_synced()) {
             snprintf(update->status, sizeof(update->status), "%s", "WAIT CLOCK // RETRY");
-            lv_async_call(ui_page_energy_apply_update, update);
+            if (ui_async_call(ui_page_energy_apply_update, update) != LV_RESULT_OK) {
+                free(update);
+            }
             vTaskDelay(pdMS_TO_TICKS(30000));
             continue;
         }
@@ -269,7 +274,9 @@ static void ui_page_energy_fetch_task(void *arg)
         ha_client_free_json(prefs_json);
         if (source_count == 0U) {
             snprintf(update->status, sizeof(update->status), "%s", "NO GRID SOURCE IN HA");
-            lv_async_call(ui_page_energy_apply_update, update);
+            if (ui_async_call(ui_page_energy_apply_update, update) != LV_RESULT_OK) {
+                free(update);
+            }
             vTaskDelay(pdMS_TO_TICKS(300000));
             continue;
         }
@@ -292,7 +299,9 @@ static void ui_page_energy_fetch_task(void *arg)
                      : "NO ENERGY STATS // RETRY");
         cJSON_Delete(stats);
         ha_client_free_json(stats_json);
-        lv_async_call(ui_page_energy_apply_update, update);
+        if (ui_async_call(ui_page_energy_apply_update, update) != LV_RESULT_OK) {
+            free(update);
+        }
         vTaskDelay(pdMS_TO_TICKS(900000));
     }
 }

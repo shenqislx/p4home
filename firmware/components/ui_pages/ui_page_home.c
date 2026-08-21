@@ -9,6 +9,7 @@
 #include "sdkconfig.h"
 #include "ha_client.h"
 #include "panel_data_store.h"
+#include "ui_async.h"
 #include "ui_fonts.h"
 #include "ui_home_actor.h"
 #include "ui_home_rooms.h"
@@ -702,7 +703,7 @@ static void ui_page_home_queue_refresh(void)
         should_queue = true;
     }
     portEXIT_CRITICAL(&s_refresh_lock);
-    if (should_queue && lv_async_call(ui_page_home_refresh_async, NULL) != LV_RESULT_OK) {
+    if (should_queue && ui_async_call(ui_page_home_refresh_async, NULL) != LV_RESULT_OK) {
         portENTER_CRITICAL(&s_refresh_lock);
         s_refresh_queued = false;
         portEXIT_CRITICAL(&s_refresh_lock);

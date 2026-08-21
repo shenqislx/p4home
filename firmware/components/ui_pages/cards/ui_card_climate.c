@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -9,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ha_client.h"
+#include "ui_async.h"
 #include "ui_fonts.h"
 #include "ui_pixel_theme.h"
 
@@ -26,13 +28,8 @@ typedef struct {
     char service[24];
     char service_data[256];
     uint32_t binding_generation;
-} ui_card_climate_call_arg_t;
-
-typedef struct {
-    ui_card_climate_ctx_t *ctx;
-    uint32_t binding_generation;
     esp_err_t result;
-} ui_card_climate_call_result_t;
+} ui_card_climate_call_arg_t;
 
 struct ui_card_climate_ctx {
     lv_obj_t *title;
@@ -55,11 +52,25 @@ struct ui_card_climate_ctx {
     double min_raw;
     double max_raw;
     uint32_t binding_generation;
+    atomic_uint references;
     bool available;
     bool has_target;
     bool pending;
     bool deleted;
 };
+
+static void ui_card_climate_retain(ui_card_climate_ctx_t *ctx)
+{
+    atomic_fetch_add_explicit(&ctx->references, 1U, memory_order_relaxed);
+}
+
+static void ui_card_climate_release(ui_card_climate_ctx_t *ctx)
+{
+    if (ctx != NULL &&
+        atomic_fetch_sub_explicit(&ctx->references, 1U, memory_order_acq_rel) == 1U) {
+        free(ctx);
+    }
+}
 
 static const char *s_mode_names[] = {"cool", "heat", "dry", "fan_only"};
 static const char *s_mode_labels[] = {"制冷", "制热", "除湿", "送风"};
@@ -265,7 +276,7 @@ static void ui_card_climate_apply_labels(lv_obj_t *card, const panel_sensor_t *s
 
 static void ui_card_climate_apply_call_result(void *user_data)
 {
-    ui_card_climate_call_result_t *result = (ui_card_climate_call_result_t *)user_data;
+    ui_card_climate_call_arg_t *result = (ui_card_climate_call_arg_t *)user_data;
     if (result == NULL) {
         return;
     }
@@ -286,6 +297,7 @@ static void ui_card_climate_apply_call_result(void *user_data)
             }
         }
     }
+    ui_card_climate_release(ctx);
     free(result);
 }
 
@@ -302,7 +314,6 @@ static void ui_card_climate_call_task(void *arg)
     char service_data[sizeof(task_arg->service_data)];
     snprintf(service, sizeof(service), "%s", task_arg->service);
     snprintf(service_data, sizeof(service_data), "%s", task_arg->service_data);
-    free(task_arg);
 
     ha_client_call_service_request_t request = {
         .domain = "climate",
@@ -310,15 +321,14 @@ static void ui_card_climate_call_task(void *arg)
         .service_data_json = service_data,
         .timeout_ms = 0,
     };
-    esp_err_t err = ha_client_call_service(&request);
-    ESP_LOGI(TAG, "climate control service=%s result=%s", service, esp_err_to_name(err));
+    task_arg->result = ha_client_call_service(&request);
+    ESP_LOGI(TAG, "climate control service=%s result=%s", service,
+             esp_err_to_name(task_arg->result));
 
-    ui_card_climate_call_result_t *result = calloc(1U, sizeof(*result));
-    if (result != NULL) {
-        result->ctx = ctx;
-        result->binding_generation = generation;
-        result->result = err;
-        lv_async_call(ui_card_climate_apply_call_result, result);
+    task_arg->binding_generation = generation;
+    if (ui_async_call(ui_card_climate_apply_call_result, task_arg) != LV_RESULT_OK) {
+        ui_card_climate_release(ctx);
+        free(task_arg);
     }
     vTaskDelete(NULL);
 }
@@ -334,6 +344,7 @@ static void ui_card_climate_request(ui_card_climate_ctx_t *ctx, const char *serv
         return;
     }
     arg->ctx = ctx;
+    ui_card_climate_retain(ctx);
     arg->binding_generation = ctx->binding_generation;
     snprintf(arg->service, sizeof(arg->service), "%s", service);
     snprintf(arg->service_data, sizeof(arg->service_data), "%s", service_data);
@@ -347,6 +358,7 @@ static void ui_card_climate_request(ui_card_climate_ctx_t *ctx, const char *serv
         snprintf(ctx->last_error, sizeof(ctx->last_error), "%s", "failed");
         lv_label_set_text(ctx->meta, "控制失败");
         ui_card_climate_set_controls_disabled(ctx, false);
+        ui_card_climate_release(ctx);
         free(arg);
     }
 }
@@ -430,7 +442,7 @@ static void ui_card_climate_delete_event(lv_event_t *event)
     ui_card_climate_ctx_t *ctx = (ui_card_climate_ctx_t *)lv_event_get_user_data(event);
     if (ctx != NULL) {
         ctx->deleted = true;
-        free(ctx);
+        ui_card_climate_release(ctx);
     }
 }
 
@@ -440,6 +452,7 @@ lv_obj_t *ui_card_climate_create(lv_obj_t *parent, const panel_sensor_t *sensor)
     if (ctx == NULL) {
         return NULL;
     }
+    atomic_init(&ctx->references, 1U);
     lv_obj_t *card = lv_obj_create(parent);
     if (card == NULL) {
         free(ctx);

@@ -1,6 +1,7 @@
 #include "ui_card_binary.h"
 
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -8,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ha_client.h"
+#include "ui_async.h"
 #include "ui_fonts.h"
 #include "ui_pixel_theme.h"
 
@@ -28,6 +30,7 @@ typedef struct {
     char last_error[32];
     uint32_t binding_generation;
     uint32_t visual_key;
+    atomic_uint references;
     bool pending;
     bool deleted;
 } ui_card_binary_ctx_t;
@@ -39,16 +42,23 @@ typedef struct {
     char service[24];
     uint32_t binding_generation;
     bool target_on;
+    esp_err_t result;
 } ui_card_binary_call_task_arg_t;
 
-typedef struct {
-    ui_card_binary_ctx_t *ctx;
-    uint32_t binding_generation;
-    bool target_on;
-    esp_err_t result;
-} ui_card_binary_call_result_t;
-
 static void ui_card_binary_call_task(void *arg);
+
+static void ui_card_binary_retain(ui_card_binary_ctx_t *ctx)
+{
+    atomic_fetch_add_explicit(&ctx->references, 1U, memory_order_relaxed);
+}
+
+static void ui_card_binary_release(ui_card_binary_ctx_t *ctx)
+{
+    if (ctx != NULL &&
+        atomic_fetch_sub_explicit(&ctx->references, 1U, memory_order_acq_rel) == 1U) {
+        free(ctx);
+    }
+}
 
 static const char *ui_card_binary_safe_text(const char *text, const char *fallback)
 {
@@ -222,6 +232,7 @@ static void ui_card_binary_request_control(ui_card_binary_ctx_t *ctx, bool targe
         return;
     }
     task_arg->ctx = ctx;
+    ui_card_binary_retain(ctx);
     task_arg->target_on = target_on;
     task_arg->binding_generation = ctx->binding_generation;
     snprintf(task_arg->entity_id, sizeof(task_arg->entity_id), "%s", ctx->entity_id);
@@ -240,13 +251,14 @@ static void ui_card_binary_request_control(ui_card_binary_ctx_t *ctx, bool targe
         snprintf(ctx->last_error, sizeof(ctx->last_error), "Failed");
         lv_obj_remove_state(ctx->toggle, LV_STATE_DISABLED);
         ui_card_binary_set_text_if_changed(ctx->state, "ERR");
+        ui_card_binary_release(ctx);
         free(task_arg);
     }
 }
 
 static void ui_card_binary_apply_call_result_on_lvgl(void *user_data)
 {
-    ui_card_binary_call_result_t *result = (ui_card_binary_call_result_t *)user_data;
+    ui_card_binary_call_task_arg_t *result = (ui_card_binary_call_task_arg_t *)user_data;
     if (result == NULL) {
         return;
     }
@@ -270,6 +282,7 @@ static void ui_card_binary_apply_call_result_on_lvgl(void *user_data)
             }
         }
     }
+    ui_card_binary_release(ctx);
     free(result);
 }
 
@@ -290,19 +303,16 @@ static void ui_card_binary_call_task(void *arg)
     snprintf(domain, sizeof(domain), "%s", task_arg->domain);
     snprintf(service, sizeof(service), "%s", task_arg->service);
     snprintf(entity_id, sizeof(entity_id), "%s", task_arg->entity_id);
-    free(task_arg);
 
-    esp_err_t err = ha_client_call_entity_service(domain, service, entity_id, 0);
+    task_arg->result = ha_client_call_entity_service(domain, service, entity_id, 0);
     ESP_LOGI(TAG, "control call entity=%s service=%s.%s result=%s",
-             entity_id, domain, service, esp_err_to_name(err));
+             entity_id, domain, service, esp_err_to_name(task_arg->result));
 
-    ui_card_binary_call_result_t *result = calloc(1U, sizeof(*result));
-    if (result != NULL) {
-        result->ctx = ctx;
-        result->binding_generation = binding_generation;
-        result->target_on = target_on;
-        result->result = err;
-        lv_async_call(ui_card_binary_apply_call_result_on_lvgl, result);
+    task_arg->binding_generation = binding_generation;
+    task_arg->target_on = target_on;
+    if (ui_async_call(ui_card_binary_apply_call_result_on_lvgl, task_arg) != LV_RESULT_OK) {
+        ui_card_binary_release(ctx);
+        free(task_arg);
     }
     vTaskDelete(NULL);
 }
@@ -339,7 +349,7 @@ static void ui_card_binary_delete_cb(lv_event_t *event)
     ui_card_binary_ctx_t *ctx = (ui_card_binary_ctx_t *)lv_event_get_user_data(event);
     if (ctx != NULL) {
         ctx->deleted = true;
-        free(ctx);
+        ui_card_binary_release(ctx);
     }
 }
 
@@ -349,6 +359,7 @@ lv_obj_t *ui_card_binary_create(lv_obj_t *parent, const panel_sensor_t *sensor)
     if (ctx == NULL) {
         return NULL;
     }
+    atomic_init(&ctx->references, 1U);
 
     lv_obj_t *card = lv_obj_create(parent);
     if (card == NULL) {

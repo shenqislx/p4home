@@ -1,6 +1,7 @@
 #include "ui_card_action.h"
 
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -8,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ha_client.h"
+#include "ui_async.h"
 #include "ui_fonts.h"
 #include "ui_pixel_theme.h"
 
@@ -21,18 +23,31 @@ typedef struct {
     char entity_id[128];
     char domain[16];
     char service[24];
+    atomic_uint references;
     bool pending;
     bool deleted;
 } ui_card_action_ctx_t;
 
 typedef struct {
     ui_card_action_ctx_t *ctx;
+    char entity_id[128];
+    char domain[16];
+    char service[24];
+    esp_err_t result;
 } ui_card_action_task_arg_t;
 
-typedef struct {
-    ui_card_action_ctx_t *ctx;
-    esp_err_t result;
-} ui_card_action_result_t;
+static void ui_card_action_retain(ui_card_action_ctx_t *ctx)
+{
+    atomic_fetch_add_explicit(&ctx->references, 1U, memory_order_relaxed);
+}
+
+static void ui_card_action_release(ui_card_action_ctx_t *ctx)
+{
+    if (ctx != NULL &&
+        atomic_fetch_sub_explicit(&ctx->references, 1U, memory_order_acq_rel) == 1U) {
+        free(ctx);
+    }
+}
 
 static const char *ui_card_action_safe_text(const char *text, const char *fallback)
 {
@@ -56,7 +71,7 @@ static void ui_card_action_set_meta(ui_card_action_ctx_t *ctx, const panel_senso
 
 static void ui_card_action_apply_result_on_lvgl(void *user_data)
 {
-    ui_card_action_result_t *result = (ui_card_action_result_t *)user_data;
+    ui_card_action_task_arg_t *result = (ui_card_action_task_arg_t *)user_data;
     if (result == NULL) {
         return;
     }
@@ -66,6 +81,7 @@ static void ui_card_action_apply_result_on_lvgl(void *user_data)
         lv_obj_remove_state(ctx->button, LV_STATE_DISABLED);
         lv_label_set_text(ctx->meta, result->result == ESP_OK ? "Action | Sent" : "Action | Failed");
     }
+    ui_card_action_release(ctx);
     free(result);
 }
 
@@ -78,23 +94,20 @@ static void ui_card_action_task(void *arg)
     }
 
     ui_card_action_ctx_t *ctx = task_arg->ctx;
-    char entity_id[sizeof(ctx->entity_id)] = {0};
-    char domain[sizeof(ctx->domain)] = {0};
-    char service[sizeof(ctx->service)] = {0};
-    snprintf(entity_id, sizeof(entity_id), "%s", ctx->entity_id);
-    snprintf(domain, sizeof(domain), "%s", ctx->domain);
-    snprintf(service, sizeof(service), "%s", ctx->service);
-    free(task_arg);
+    char entity_id[sizeof(task_arg->entity_id)] = {0};
+    char domain[sizeof(task_arg->domain)] = {0};
+    char service[sizeof(task_arg->service)] = {0};
+    snprintf(entity_id, sizeof(entity_id), "%s", task_arg->entity_id);
+    snprintf(domain, sizeof(domain), "%s", task_arg->domain);
+    snprintf(service, sizeof(service), "%s", task_arg->service);
 
-    esp_err_t err = ha_client_call_entity_service(domain, service, entity_id, 0);
+    task_arg->result = ha_client_call_entity_service(domain, service, entity_id, 0);
     ESP_LOGI(TAG, "action call entity=%s service=%s.%s result=%s",
-             entity_id, domain, service, esp_err_to_name(err));
+             entity_id, domain, service, esp_err_to_name(task_arg->result));
 
-    ui_card_action_result_t *result = calloc(1U, sizeof(*result));
-    if (result != NULL) {
-        result->ctx = ctx;
-        result->result = err;
-        lv_async_call(ui_card_action_apply_result_on_lvgl, result);
+    if (ui_async_call(ui_card_action_apply_result_on_lvgl, task_arg) != LV_RESULT_OK) {
+        ui_card_action_release(ctx);
+        free(task_arg);
     }
     vTaskDelete(NULL);
 }
@@ -111,6 +124,10 @@ static void ui_card_action_click_cb(lv_event_t *event)
         return;
     }
     task_arg->ctx = ctx;
+    snprintf(task_arg->entity_id, sizeof(task_arg->entity_id), "%s", ctx->entity_id);
+    snprintf(task_arg->domain, sizeof(task_arg->domain), "%s", ctx->domain);
+    snprintf(task_arg->service, sizeof(task_arg->service), "%s", ctx->service);
+    ui_card_action_retain(ctx);
     ctx->pending = true;
     lv_obj_add_state(ctx->button, LV_STATE_DISABLED);
     lv_label_set_text(ctx->meta, "Action | Sending");
@@ -121,6 +138,7 @@ static void ui_card_action_click_cb(lv_event_t *event)
         ctx->pending = false;
         lv_obj_remove_state(ctx->button, LV_STATE_DISABLED);
         lv_label_set_text(ctx->meta, "Action | Failed");
+        ui_card_action_release(ctx);
         free(task_arg);
     }
 }
@@ -130,7 +148,7 @@ static void ui_card_action_delete_cb(lv_event_t *event)
     ui_card_action_ctx_t *ctx = (ui_card_action_ctx_t *)lv_event_get_user_data(event);
     if (ctx != NULL) {
         ctx->deleted = true;
-        free(ctx);
+        ui_card_action_release(ctx);
     }
 }
 
@@ -160,8 +178,13 @@ lv_obj_t *ui_card_action_create(lv_obj_t *parent, const panel_sensor_t *sensor)
     if (ctx == NULL) {
         return NULL;
     }
+    atomic_init(&ctx->references, 1U);
 
     lv_obj_t *card = lv_obj_create(parent);
+    if (card == NULL) {
+        ui_card_action_release(ctx);
+        return NULL;
+    }
     lv_obj_set_user_data(card, ctx);
     lv_obj_add_event_cb(card, ui_card_action_delete_cb, LV_EVENT_DELETE, ctx);
     lv_obj_set_size(card, 280, 120);
