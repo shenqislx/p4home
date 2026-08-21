@@ -11,6 +11,7 @@ import {
 } from "./role-audit.ts";
 import {
   assertContractId,
+  type RoleAssignment,
   type RoutePlan,
   type UserTextInteraction,
   validateRoutePlan,
@@ -39,12 +40,16 @@ export interface RunAssignedRoleOptions {
   readonly run_id: string;
   readonly interaction: UserTextInteraction;
   readonly plan: RoutePlan;
+  /** Required when the plan contains more than one assignment. */
+  readonly assignment_id?: string;
   readonly session: RoleSession;
   readonly provider: Pick<OllamaProvider, "chat">;
   readonly timeout_ms?: number;
   readonly signal?: AbortSignal;
   readonly audit?: RoleRunAuditOptions;
   readonly robot_ha?: RobotHaReadRuntime | RobotHaWriteRuntime;
+  /** Internal orchestration latch used to preserve unknown write outcomes. */
+  readonly on_side_effect_dispatched?: () => void;
 }
 
 export interface RoleRunError {
@@ -66,6 +71,16 @@ export interface RoleRunResult {
   readonly error: RoleRunError | null;
 }
 
+export class RoleRunAuditFinalizeError extends Error {
+  public readonly result: RoleRunResult;
+
+  public constructor(result: RoleRunResult, cause: unknown) {
+    super("role execution reached a terminal result but audit finalization failed", { cause });
+    this.name = "RoleRunAuditFinalizeError";
+    this.result = result;
+  }
+}
+
 type UserTextRoleInput = Extract<RoleInput, { readonly kind: "user_text" }>;
 
 function isAborted(signal: AbortSignal | undefined): boolean {
@@ -81,11 +96,16 @@ function isWriteRuntime(
     && typeof (runtime.client as { reconcileState?: unknown }).reconcileState === "function";
 }
 
-function roleInput(options: RunAssignedRoleOptions): UserTextRoleInput {
-  const assignment = options.plan.assignments[0];
+function roleInput(
+  options: RunAssignedRoleOptions,
+  assignment: RoleAssignment,
+): UserTextRoleInput {
   return {
     kind: "user_text",
-    text: options.interaction.text,
+    text: options.interaction.text.slice(
+      assignment.source_span.start,
+      assignment.source_span.end,
+    ),
     source_span: assignment.source_span,
     mode: assignment.mode,
   };
@@ -112,11 +132,19 @@ function failure(
   };
 }
 
-function validateOptions(options: RunAssignedRoleOptions): "human" | "robot" {
+function validateOptions(options: RunAssignedRoleOptions): RoleAssignment {
   assertContractId(options.run_id, "run_id");
   validateUserTextInteraction(options.interaction);
   validateRoutePlan(options.plan, options.interaction);
-  const roleId = options.plan.assignments[0].role_id;
+  const assignment = options.assignment_id === undefined
+    ? options.plan.assignments.length === 1
+      ? options.plan.assignments[0]
+      : undefined
+    : options.plan.assignments.find((candidate) => candidate.assignment_id === options.assignment_id);
+  if (assignment === undefined) {
+    throw new TypeError("assignment_id must identify exactly one assignment in the route plan");
+  }
+  const roleId = assignment.role_id;
   if (options.session.role_id !== roleId) {
     throw new TypeError(
       `assignment for ${roleId} cannot execute in ${options.session.role_id} session`,
@@ -128,7 +156,7 @@ function validateOptions(options: RunAssignedRoleOptions): "human" | "robot" {
   ) {
     throw new TypeError("timeout_ms must be an integer between 100 and 600000");
   }
-  return roleId;
+  return assignment;
 }
 
 async function executeAssignedRole(
@@ -169,6 +197,9 @@ async function executeAssignedRole(
             : { observation_timeout_ms: options.robot_ha.observation_timeout_ms }),
           ...(options.signal === undefined ? {} : { signal: options.signal }),
           ...(audit === undefined ? {} : { audit }),
+          ...(options.on_side_effect_dispatched === undefined
+            ? {}
+            : { on_side_effect_dispatched: options.on_side_effect_dispatched }),
         });
       } else {
         assertRoleToolAuthorization(options.session.profile, ["home.get_entity"]);
@@ -292,8 +323,9 @@ async function executeAssignedRole(
 export async function runAssignedRole(
   options: RunAssignedRoleOptions,
 ): Promise<RoleRunResult> {
-  const roleId = validateOptions(options);
-  const input = roleInput(options);
+  const assignment = validateOptions(options);
+  const roleId = assignment.role_id;
+  const input = roleInput(options, assignment);
   return await options.session.runExclusive(async () => {
     const audit = options.audit === undefined
       ? undefined
@@ -301,6 +333,7 @@ export async function runAssignedRole(
           options.run_id,
           options.interaction,
           options.plan,
+          assignment,
           options.session,
           options.audit,
         );
@@ -319,7 +352,11 @@ export async function runAssignedRole(
       }
       throw error;
     }
-    await audit?.finish(result);
+    try {
+      await audit?.finish(result);
+    } catch (error) {
+      throw new RoleRunAuditFinalizeError(result, error);
+    }
     if (
       result.status === "completed"
       && (roleId === "human" || options.robot_ha === undefined)

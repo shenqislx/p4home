@@ -32,6 +32,26 @@ function isAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
 }
 
+function abortedRunStatus(signal: AbortSignal | undefined): "cancelled" | "timed_out" {
+  const reasonName = typeof signal?.reason === "object"
+    && signal.reason !== null
+    && "name" in signal.reason
+    ? String(signal.reason.name)
+    : "";
+  return reasonName === "TimeoutError" ? "timed_out" : "cancelled";
+}
+
+function abortedError(signal: AbortSignal | undefined): {
+  readonly code: "CANCELLED" | "DEADLINE_EXCEEDED";
+  readonly message: string;
+  readonly status: "cancelled" | "timed_out";
+} {
+  const status = abortedRunStatus(signal);
+  return status === "timed_out"
+    ? { code: "DEADLINE_EXCEEDED", message: "HA read exceeded the interaction deadline", status }
+    : { code: "CANCELLED", message: "HA read was cancelled", status };
+}
+
 export const ROBOT_HA_OFFLINE_TEXT = "Home Assistant 当前不可用，这次没有读取或执行任何设备动作。";
 export const ROBOT_HA_READ_NOT_SELECTED_TEXT = "当前只支持查询明确的家居状态，不能执行控制动作。";
 
@@ -255,7 +275,8 @@ function compose(results: readonly ToolSuccessResult[]): string {
 
 export async function runRobotHaRead(options: RunRobotHaReadOptions): Promise<RobotHaReadExecution> {
   if (isAborted(options.signal)) {
-    return failure("runtime", "CANCELLED", "Robot run was cancelled before HA read", 0, [], "cancelled");
+    const aborted = abortedError(options.signal);
+    return failure("runtime", aborted.code, aborted.message, 0, [], aborted.status);
   }
   if (options.runtime.client.state !== "ready") {
     return {
@@ -298,7 +319,8 @@ export async function runRobotHaRead(options: RunRobotHaReadOptions): Promise<Ro
   }
   await options.audit?.modelCompleted(response.message, 1);
   if (isAborted(options.signal)) {
-    return failure("runtime", "CANCELLED", "Robot run was cancelled after model output", 1, [], "cancelled");
+    const aborted = abortedError(options.signal);
+    return failure("runtime", aborted.code, aborted.message, 1, [], aborted.status);
   }
   if ((response.message.thinking?.trim().length ?? 0) > 0) {
     return failure("model", "ROLE_POLICY_VIOLATION", "Robot returned thinking content", 1, [], "failed", true);
@@ -339,26 +361,28 @@ export async function runRobotHaRead(options: RunRobotHaReadOptions): Promise<Ro
     if (!allowed) {
       result = failedTool(call, "UNKNOWN_ENTITY", "entity alias is not allowlisted");
     } else if (isAborted(options.signal)) {
+      const aborted = abortedError(options.signal);
       result = {
         schema_version: 1,
         tool_call_id: call.tool_call_id,
         name: call.name,
         status: "error",
         result: null,
-        error: { code: "CANCELLED", message: "HA read was cancelled", retryable: false },
+        error: { code: aborted.code, message: aborted.message, retryable: false },
       };
     } else if (options.runtime.client.state !== "ready") {
       result = failedTool(call, "HA_OFFLINE", "Home Assistant disconnected before the read");
     } else {
       await options.audit?.haReadRequested(call.tool_call_id, alias);
       if (isAborted(options.signal)) {
+        const aborted = abortedError(options.signal);
         result = {
           schema_version: 1,
           tool_call_id: call.tool_call_id,
           name: call.name,
           status: "error",
           result: null,
-          error: { code: "CANCELLED", message: "HA read was cancelled", retryable: false },
+          error: { code: aborted.code, message: aborted.message, retryable: false },
         };
       } else if (options.runtime.client.state !== "ready") {
         result = failedTool(call, "HA_OFFLINE", "Home Assistant disconnected before the read");
@@ -380,7 +404,11 @@ export async function runRobotHaRead(options: RunRobotHaReadOptions): Promise<Ro
   }
   const failed = results.find((result) => result.status === "error");
   if (failed?.status === "error") {
-    const status = failed.error.code === "CANCELLED" ? "cancelled" : "failed";
+    const status = failed.error.code === "CANCELLED"
+      ? "cancelled"
+      : failed.error.code === "DEADLINE_EXCEEDED"
+        ? "timed_out"
+        : "failed";
     return failure(
       "tool",
       failed.error.code,

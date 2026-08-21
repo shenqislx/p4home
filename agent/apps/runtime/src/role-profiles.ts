@@ -203,8 +203,10 @@ export function buildRoleContext(
       throw new TypeError(`role ${profile.role_id} cannot receive original user text`);
     }
     if (
-      input.source_span.start !== 0
-      || input.source_span.end !== input.text.length
+      !Number.isSafeInteger(input.source_span.start)
+      || !Number.isSafeInteger(input.source_span.end)
+      || input.source_span.start < 0
+      || input.source_span.end - input.source_span.start !== input.text.length
       || input.text.trim().length === 0
     ) {
       throw new TypeError("role input span must cover non-empty user text exactly");

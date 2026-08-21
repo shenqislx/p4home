@@ -92,6 +92,8 @@ export interface RunRobotHaWriteOptions {
   readonly observation_timeout_ms?: number;
   readonly signal?: AbortSignal;
   readonly audit?: RobotHaWriteAudit;
+  /** Synchronous latch: beginWrite returned and a physical side effect may exist. */
+  readonly on_side_effect_dispatched?: () => void;
 }
 
 export interface RobotHaWriteRuntime {
@@ -116,6 +118,15 @@ export interface RobotHaWriteExecution {
 
 function isAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
+}
+
+function abortedRunStatus(signal: AbortSignal | undefined): "cancelled" | "timed_out" {
+  const reasonName = typeof signal?.reason === "object"
+    && signal.reason !== null
+    && "name" in signal.reason
+    ? String(signal.reason.name)
+    : "";
+  return reasonName === "TimeoutError" ? "timed_out" : "cancelled";
 }
 
 function observationTimeout(value: number | undefined): number {
@@ -511,7 +522,17 @@ function toolFailureText(result: ToolFailureResult): string {
 export async function runRobotHaWrite(options: RunRobotHaWriteOptions): Promise<RobotHaWriteExecution> {
   const observationTimeoutMs = observationTimeout(options.observation_timeout_ms);
   if (isAborted(options.signal)) {
-    return failure("runtime", "CANCELLED", "Robot run was cancelled before HA work", 0, [], "cancelled");
+    const status = abortedRunStatus(options.signal);
+    return failure(
+      "runtime",
+      status === "timed_out" ? "DEADLINE_EXCEEDED" : "CANCELLED",
+      status === "timed_out"
+        ? "Robot run exceeded the interaction deadline before HA work"
+        : "Robot run was cancelled before HA work",
+      0,
+      [],
+      status,
+    );
   }
   if (options.client.state !== "ready") {
     return {
@@ -548,7 +569,17 @@ export async function runRobotHaWrite(options: RunRobotHaWriteOptions): Promise<
   }
   await options.audit?.modelCompleted(response.message, 1);
   if (isAborted(options.signal)) {
-    return failure("runtime", "CANCELLED", "Robot run was cancelled after model output", 1, [], "cancelled");
+    const status = abortedRunStatus(options.signal);
+    return failure(
+      "runtime",
+      status === "timed_out" ? "DEADLINE_EXCEEDED" : "CANCELLED",
+      status === "timed_out"
+        ? "Robot run exceeded the interaction deadline after model output"
+        : "Robot run was cancelled after model output",
+      1,
+      [],
+      status,
+    );
   }
   if ((response.message.thinking?.trim().length ?? 0) > 0) {
     return failure("model", "ROLE_POLICY_VIOLATION", "Robot returned thinking content", 1, [], "failed", true);
@@ -700,6 +731,7 @@ export async function runRobotHaWrite(options: RunRobotHaWriteOptions): Promise<
         try {
           const rawAttempt: unknown = options.client.beginWrite(alias, writeAction);
           dispatchAttempted = true;
+          options.on_side_effect_dispatched?.();
           const possibleResponse = rawAttempt !== null && typeof rawAttempt === "object"
             ? (rawAttempt as Record<string, unknown>).response
             : null;
@@ -798,7 +830,7 @@ export async function runRobotHaWrite(options: RunRobotHaWriteOptions): Promise<
   }
 
   if (terminalFailure !== null) {
-    const status = isAborted(options.signal) ? "cancelled" : "failed";
+    const status = isAborted(options.signal) ? abortedRunStatus(options.signal) : "failed";
     return failure(
       "tool",
       terminalFailure.error.code,

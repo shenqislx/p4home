@@ -264,6 +264,15 @@ export class SynchronousSqliteAuditStore implements AuditStore, Disposable {
     this.#transaction(() => {
       const terminalRun = batch.run !== undefined
         && !["pending", "running"].includes(batch.run.status);
+      const createsTerminalRun = terminalRun
+        && this.#database.prepare("SELECT 1 FROM runs WHERE run_id = ?").get(batch.run?.run_id) === undefined;
+      if (createsTerminalRun && batch.run !== undefined) {
+        this.#writeRun({
+          ...batch.run,
+          status: "running",
+          completed_at_ms: null,
+        });
+      }
       if (batch.run !== undefined && !terminalRun) {
         this.#writeRun(batch.run);
       }

@@ -2,7 +2,7 @@
 
 > Status: `in_progress`
 > Started: 2026-08-20
-> Current Gate: 4C 真实 HA/P4 门禁已通过；进入 4D Multi-assignment RoutePlan & Response Composer
+> Current Gate: 4D Multi-assignment 与独立 review 已通过；进入 4E Security, Eval & Real Environment Gate
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 3 complete；HA 环境与隔离测试实体可用
 
@@ -121,16 +121,24 @@ profile、串口、Agent disabled、policy target 与脱敏状态；完整证据
 
 只有 4C review 通过后开始：
 
-- [ ] 新增显式版本的 RoutePlan，最多产生两个 assignment，目标只允许 Human/Robot；每个 assignment
+- [x] 新增显式版本的 RoutePlan，最多产生两个 assignment，目标只允许 Human/Robot；每个 assignment
   使用原始文本的 UTF-16 span，必须非空、顺序稳定、首尾连续覆盖全文、互不重叠且不能切开代理对；
-- [ ] 无法安全分割、输出遗漏/重叠/未知角色、Robot clarify 或 provider error 时，整体 fail closed 为
+- [x] 无法安全分割、输出遗漏/重叠/未知角色、Robot clarify 或 provider error 时，整体 fail closed 为
   单个 full-span Human clarification，不保留部分 Robot 执行；
-- [ ] 每个 assignment 只把自己的 `text.slice(start,end)` 送入独立 Role Session 和 Run；不得把完整
+- [x] 每个 assignment 只把自己的 `text.slice(start,end)` 送入独立 Role Session 和 Run；不得把完整
   用户文本、另一角色历史或 Tool observation 复制给另一个角色；
-- [ ] 保持有界调度和用户优先级，定义同一 Interaction 的取消、部分失败与完成时序；
-- [ ] 实现确定性 Response Composer，只消费各 Run 的结构化终态；Human 文本不能覆盖 Robot 的真实
+- [x] 保持有界调度和用户优先级，定义同一 Interaction 的取消、部分失败与完成时序；
+- [x] 实现确定性 Response Composer，只消费各 Run 的结构化终态；Human 文本不能覆盖 Robot 的真实
   accepted/completed/failed/unknown，Robot 也不能代替 Human 生成共情文本；
-- [ ] 增加单意图兼容、混合意图、标点/emoji span、holdout、路由注入、部分失败和审计还原测试。
+- [x] 增加单意图兼容、混合意图、标点/emoji span、holdout、路由注入、部分失败和审计还原测试。
+
+4D coding done：产品入口现在只生成显式 v2 RoutePlan，最多两个 Human/Robot assignment；Runtime 对
+UTF-16 span 做完整覆盖与 surrogate 边界校验，非法输出在任何 Robot Run 创建前整体回退。每个 Role
+只接收自己的精确 slice；确定性 Composer 按源顺序组合结构化终态，Human 文本无法伪造或覆盖 Robot
+结果。全局 deadline、外部取消、partial failure、post-dispatch unknown 与审计 deferred 分开建模；
+SQLite 在组合前核对每个 trace 的完整 correlation identity。实现与多轮独立 bugs review 证据见
+[Phase 4D Multi-assignment RoutePlan & Response Composer](../../evidence/agent-phase-4/phase-4d-multi-assignment.md)，
+最终复核为 no findings，4D 退出门禁已关闭。
 
 退出门禁：单 assignment 行为保持兼容；混合输入可稳定分段且全文无遗漏/重叠；任一非法 RoutePlan
 在创建 Robot Run 前 fail closed；SQLite 可从 Interaction 还原两个独立 Run 与最终组合结果。
@@ -160,7 +168,7 @@ profile、串口、Agent disabled、policy target 与脱敏状态；完整证据
 - [ ] Robot 与 P4 从 HA 回刷到最终一致状态；
 - [ ] 任意 `call_service(json)`、未授权实体与高风险动作不会到达 HA；
 - [ ] Human/Cat/Router 无法取得 Robot HA Tool，错误路由不能绕过 policy；
-- [ ] 混合输入可拆给 Human/Robot，全文 span、上下文、审计、文本和真实执行结果不串角色；
+- [x] 混合输入可拆给 Human/Robot，全文 span、上下文、审计、文本和真实执行结果不串角色；
 - [ ] 凭证和敏感 HA 数据不进入模型、日志、SQLite、Git 或 artifact；
 - [ ] 用户最终 review 通过，Phase 4 关闭；
 - [ ] Phase 5 需用户另行明确授权后启动。

@@ -15,6 +15,7 @@ export * from "./role-audit.ts";
 export * from "./role-orchestrator.ts";
 export * from "./role-profiles.ts";
 export * from "./role-response-policy.ts";
+export * from "./role-response-composer.ts";
 export * from "./role-router.ts";
 export * from "./robot-ha-read-runner.ts";
 export * from "./robot-ha-write-runner.ts";

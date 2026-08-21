@@ -14,6 +14,7 @@ import type { RobotHaObservationCursor } from "@p4home/transport-ha";
 import type { AuditStore } from "@p4home/storage-sqlite";
 
 import type {
+  RoleAssignment,
   RoutePlan,
   UserTextInteraction,
 } from "./role-contracts.ts";
@@ -32,6 +33,7 @@ export class RoleRunAuditTrail {
   readonly #runId: string;
   readonly #interaction: UserTextInteraction;
   readonly #plan: RoutePlan;
+  readonly #assignment: RoleAssignment;
   readonly #session: RoleSession;
   #auditSessionId: string;
   #sessionMigration: {
@@ -47,12 +49,14 @@ export class RoleRunAuditTrail {
     runId: string,
     interaction: UserTextInteraction,
     plan: RoutePlan,
+    assignment: RoleAssignment,
     session: RoleSession,
     options: RoleRunAuditOptions,
   ) {
     this.#runId = runId;
     this.#interaction = interaction;
     this.#plan = plan;
+    this.#assignment = assignment;
     this.#session = session;
     this.#auditSessionId = session.session_id;
     this.#store = options.store;
@@ -89,7 +93,7 @@ export class RoleRunAuditTrail {
       updated_at_ms: this.#startedAtMs,
     });
     const context = buildRoleContext(profile, input);
-    const assignment = this.#plan.assignments[0];
+    const assignment = this.#assignment;
     const correlation = {
       interaction_id: this.#interaction.interaction_id,
       route_plan_id: this.#plan.route_plan_id,
@@ -131,7 +135,7 @@ export class RoleRunAuditTrail {
   public async modelRequested(modelTurn: number): Promise<void> {
     await this.#store.appendEvent(this.#event("role.model.requested", {
       interaction_id: this.#interaction.interaction_id,
-      assignment_id: this.#plan.assignments[0].assignment_id,
+      assignment_id: this.#assignment.assignment_id,
       role_id: this.#session.role_id,
       model_turn: modelTurn,
     }));
@@ -145,7 +149,7 @@ export class RoleRunAuditTrail {
     });
     const event = this.#event("role.model.completed", {
       interaction_id: this.#interaction.interaction_id,
-      assignment_id: this.#plan.assignments[0].assignment_id,
+      assignment_id: this.#assignment.assignment_id,
       role_id: this.#session.role_id,
       model_turn: modelTurn,
       tool_call_count: message.tool_calls?.length ?? 0,
@@ -157,7 +161,7 @@ export class RoleRunAuditTrail {
   public async modelToolRejected(message: OllamaChatMessage, reason: string): Promise<void> {
     await this.#store.appendEvent(this.#event("role.ha.policy_rejected", {
       interaction_id: this.#interaction.interaction_id,
-      assignment_id: this.#plan.assignments[0].assignment_id,
+      assignment_id: this.#assignment.assignment_id,
       role_id: this.#session.role_id,
       attempt_id: `${this.#runId}:model-tool-rejection:1`,
       reason,
@@ -175,7 +179,7 @@ export class RoleRunAuditTrail {
       })),
       events: calls.map((call) => this.#event("role.tool.requested", {
         interaction_id: this.#interaction.interaction_id,
-        assignment_id: this.#plan.assignments[0].assignment_id,
+        assignment_id: this.#assignment.assignment_id,
         role_id: this.#session.role_id,
         model_turn: modelTurn,
         tool_call_id: call.tool_call_id,
@@ -192,7 +196,7 @@ export class RoleRunAuditTrail {
   ): Promise<void> {
     await this.#store.appendEvent(this.#event("role.ha.policy_decided", {
       interaction_id: this.#interaction.interaction_id,
-      assignment_id: this.#plan.assignments[0].assignment_id,
+      assignment_id: this.#assignment.assignment_id,
       role_id: this.#session.role_id,
       tool_call_id: toolCallId,
       alias,
@@ -204,7 +208,7 @@ export class RoleRunAuditTrail {
   public async haReadRequested(toolCallId: string, alias: string): Promise<void> {
     await this.#store.appendEvent(this.#event("role.ha.read.requested", {
       interaction_id: this.#interaction.interaction_id,
-      assignment_id: this.#plan.assignments[0].assignment_id,
+      assignment_id: this.#assignment.assignment_id,
       role_id: this.#session.role_id,
       tool_call_id: toolCallId,
       alias,
@@ -220,7 +224,7 @@ export class RoleRunAuditTrail {
   ): Promise<void> {
     await this.#store.appendEvent(this.#event("role.ha.write.dispatched", {
       interaction_id: this.#interaction.interaction_id,
-      assignment_id: this.#plan.assignments[0].assignment_id,
+      assignment_id: this.#assignment.assignment_id,
       role_id: this.#session.role_id,
       tool_call_id: toolCallId,
       alias,
@@ -240,7 +244,7 @@ export class RoleRunAuditTrail {
   ): Promise<void> {
     await this.#store.appendEvent(this.#event(`role.ha.write.${outcome}`, {
       interaction_id: this.#interaction.interaction_id,
-      assignment_id: this.#plan.assignments[0].assignment_id,
+      assignment_id: this.#assignment.assignment_id,
       role_id: this.#session.role_id,
       tool_call_id: toolCallId,
       alias,
@@ -262,7 +266,7 @@ export class RoleRunAuditTrail {
   ): Promise<void> {
     await this.#store.appendEvent(this.#event("role.ha.write.observed", {
       interaction_id: this.#interaction.interaction_id,
-      assignment_id: this.#plan.assignments[0].assignment_id,
+      assignment_id: this.#assignment.assignment_id,
       role_id: this.#session.role_id,
       tool_call_id: toolCallId,
       alias,
@@ -292,7 +296,7 @@ export class RoleRunAuditTrail {
           : "role.tool.completed",
       {
         interaction_id: this.#interaction.interaction_id,
-        assignment_id: this.#plan.assignments[0].assignment_id,
+        assignment_id: this.#assignment.assignment_id,
         role_id: this.#session.role_id,
         model_turn: modelTurn,
         tool_call_id: result.tool_call_id,
@@ -325,7 +329,7 @@ export class RoleRunAuditTrail {
     const event = this.#event(`role.run.${result.status}`, {
       interaction_id: this.#interaction.interaction_id,
       route_plan_id: this.#plan.route_plan_id,
-      assignment_id: this.#plan.assignments[0].assignment_id,
+      assignment_id: this.#assignment.assignment_id,
       role_id: result.role_id,
       status: result.status,
       outcome: result.outcome,
@@ -355,7 +359,7 @@ export class RoleRunAuditTrail {
     const event = this.#event("role.run.failed", {
       interaction_id: this.#interaction.interaction_id,
       route_plan_id: this.#plan.route_plan_id,
-      assignment_id: this.#plan.assignments[0].assignment_id,
+      assignment_id: this.#assignment.assignment_id,
       role_id: this.#session.role_id,
       status: "failed",
       outcome: "error",
@@ -438,7 +442,7 @@ export class RoleRunAuditTrail {
       }, result.name)),
       events: results.map((result) => this.#event("role.tool.failed", {
         interaction_id: this.#interaction.interaction_id,
-        assignment_id: this.#plan.assignments[0].assignment_id,
+        assignment_id: this.#assignment.assignment_id,
         role_id: this.#session.role_id,
         tool_call_id: result.tool_call_id,
         name: result.name,
