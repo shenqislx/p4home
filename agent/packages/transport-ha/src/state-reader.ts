@@ -1,4 +1,6 @@
 import type {
+  RobotHaCapability,
+  RobotHaDomain,
   RobotHaPolicyEntity,
   RobotHaProjectedAttribute,
 } from "@p4home/contracts";
@@ -11,6 +13,17 @@ import {
 } from "./types.ts";
 
 const MAX_ENTITY_STATE_BYTES = 65_536;
+
+const PROJECTED_ATTRIBUTES_BY_DOMAIN: Readonly<
+  Record<RobotHaDomain, readonly RobotHaProjectedAttribute[]>
+> = {
+  light: ["brightness", "color_temp_kelvin"],
+  switch: [],
+  scene: [],
+  climate: ["current_temperature", "temperature", "hvac_action"],
+  sensor: ["unit_of_measurement", "device_class"],
+  binary_sensor: ["device_class"],
+};
 
 async function readBoundedJson(response: Response): Promise<unknown> {
   const declaredLength = response.headers.get("content-length");
@@ -102,6 +115,89 @@ function safeAttribute(
   }
 }
 
+function safeState(domain: RobotHaDomain, value: unknown): string | null {
+  if (typeof value !== "string" || value.length < 1 || value.length > 128) {
+    return null;
+  }
+  const binaryState = ["on", "off", "unavailable", "unknown"].includes(value);
+  const climateState = [
+    "off",
+    "heat",
+    "cool",
+    "heat_cool",
+    "auto",
+    "dry",
+    "fan_only",
+    "unavailable",
+    "unknown",
+  ].includes(value);
+  const sensorState = /^-?\d+(?:\.\d+)?$/.test(value)
+    || value === "unavailable"
+    || value === "unknown";
+  const sceneTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
+  const sceneState = value === "unavailable"
+    || value === "unknown"
+    || (sceneTimestamp.test(value) && Number.isFinite(Date.parse(value)));
+  const accepted = domain === "light" || domain === "switch" || domain === "binary_sensor"
+    ? binaryState
+    : domain === "climate"
+      ? climateState
+      : domain === "scene"
+        ? sceneState
+        : sensorState;
+  return accepted ? value : null;
+}
+
+export function validateRobotHaProjectedState(
+  input: unknown,
+  capability: Pick<RobotHaCapability, "alias" | "domain">,
+): RobotHaProjectedState {
+  let snapshot: unknown;
+  try {
+    snapshot = structuredClone(input);
+  } catch {
+    throw new RobotHaTransportError("PROTOCOL_ERROR", "Robot HA projected state is not cloneable");
+  }
+  if (snapshot === null || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    throw new RobotHaTransportError("PROTOCOL_ERROR", "Robot HA projected state is invalid");
+  }
+  const state = snapshot as Record<string, unknown>;
+  const keys = Object.keys(state).sort();
+  const expectedKeys = ["alias", "attributes", "available", "domain", "state", "updated_at_ms"];
+  const projectedState = state.state === null ? null : safeState(capability.domain, state.state);
+  const expectedAvailable = projectedState !== null
+    && projectedState !== "unavailable"
+    && projectedState !== "unknown";
+  if (
+    keys.length !== expectedKeys.length
+    || !keys.every((key, index) => key === expectedKeys[index])
+    || state.alias !== capability.alias
+    || state.domain !== capability.domain
+    || (state.state !== null && projectedState === null)
+    || state.available !== expectedAvailable
+    || (
+      state.updated_at_ms !== null
+      && (!Number.isSafeInteger(state.updated_at_ms) || Number(state.updated_at_ms) < 0)
+    )
+    || state.attributes === null
+    || typeof state.attributes !== "object"
+    || Array.isArray(state.attributes)
+  ) {
+    throw new RobotHaTransportError("PROTOCOL_ERROR", "Robot HA projected state is invalid");
+  }
+  const attributes = state.attributes as Record<string, unknown>;
+  const allowedAttributes = PROJECTED_ATTRIBUTES_BY_DOMAIN[capability.domain];
+  for (const [name, value] of Object.entries(attributes)) {
+    if (
+      !allowedAttributes.includes(name as RobotHaProjectedAttribute)
+      || !Object.is(safeAttribute(name as RobotHaProjectedAttribute, value), value)
+    ) {
+      throw new RobotHaTransportError("PROTOCOL_ERROR", "Robot HA projected attributes are invalid");
+    }
+  }
+  return snapshot as RobotHaProjectedState;
+}
+
 export function projectRobotHaState(
   entity: RobotHaPolicyEntity,
   input: unknown,
@@ -123,39 +219,7 @@ export function projectRobotHaState(
   if (raw.entity_id !== entity.entity_id) {
     throw new RobotHaTransportError("PROTOCOL_ERROR", "Home Assistant state entity does not match policy");
   }
-  const rawState = raw.state;
-  let state: string | null = null;
-  if (typeof rawState === "string" && rawState.length >= 1 && rawState.length <= 128) {
-    const binaryState = ["on", "off", "unavailable", "unknown"].includes(rawState);
-    const climateState = [
-      "off",
-      "heat",
-      "cool",
-      "heat_cool",
-      "auto",
-      "dry",
-      "fan_only",
-      "unavailable",
-      "unknown",
-    ].includes(rawState);
-    const sensorState = /^-?\d+(?:\.\d+)?$/.test(rawState)
-      || rawState === "unavailable"
-      || rawState === "unknown";
-    const sceneTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
-    const sceneState = rawState === "unavailable"
-      || rawState === "unknown"
-      || (sceneTimestamp.test(rawState) && Number.isFinite(Date.parse(rawState)));
-    const accepted = entity.domain === "light"
-      || entity.domain === "switch"
-      || entity.domain === "binary_sensor"
-      ? binaryState
-      : entity.domain === "climate"
-        ? climateState
-        : entity.domain === "scene"
-          ? sceneState
-          : sensorState;
-    state = accepted ? rawState : null;
-  }
+  const state = safeState(entity.domain, raw.state);
   const rawAttributes = raw.attributes !== null
     && typeof raw.attributes === "object"
     && !Array.isArray(raw.attributes)

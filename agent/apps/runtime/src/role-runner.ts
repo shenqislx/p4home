@@ -2,6 +2,7 @@ import {
   OllamaProviderError,
   type OllamaProvider,
 } from "@p4home/provider-ollama";
+import type { ToolResult } from "@p4home/core";
 
 import { QWEN_THINKING_ENABLED } from "./model-config.ts";
 import {
@@ -15,7 +16,15 @@ import {
   validateRoutePlan,
   validateUserTextInteraction,
 } from "./role-contracts.ts";
-import type { RoleInput } from "./role-profiles.ts";
+import {
+  assertRoleToolAuthorization,
+  buildRoleContext,
+  type RoleInput,
+} from "./role-profiles.ts";
+import {
+  runRobotHaRead,
+  type RobotHaReadRuntime,
+} from "./robot-ha-read-runner.ts";
 import { assessHumanResponsePolicy } from "./role-response-policy.ts";
 import type { RoleSession } from "./role-session.ts";
 
@@ -31,10 +40,11 @@ export interface RunAssignedRoleOptions {
   readonly timeout_ms?: number;
   readonly signal?: AbortSignal;
   readonly audit?: RoleRunAuditOptions;
+  readonly robot_ha?: RobotHaReadRuntime;
 }
 
 export interface RoleRunError {
-  readonly source: "runtime" | "provider" | "model";
+  readonly source: "runtime" | "provider" | "model" | "tool";
   readonly code: string;
   readonly message: string;
   readonly retryable: boolean;
@@ -48,6 +58,7 @@ export interface RoleRunResult {
   readonly model_turns: 0 | 1;
   readonly capability_available: boolean;
   readonly outcome: "response" | "capability_unavailable" | "error";
+  readonly tool_results: readonly ToolResult[];
   readonly error: RoleRunError | null;
 }
 
@@ -73,6 +84,7 @@ function failure(
   status: Extract<RoleRunResult["status"], "failed" | "cancelled" | "timed_out">,
   error: RoleRunError,
   modelTurns: 0 | 1,
+  toolResults: readonly ToolResult[] = [],
 ): RoleRunResult {
   return {
     run_id: options.run_id,
@@ -82,6 +94,7 @@ function failure(
     model_turns: modelTurns,
     capability_available: roleId === "human",
     outcome: "error",
+    tool_results: toolResults,
     error,
   };
 }
@@ -109,6 +122,7 @@ async function executeAssignedRole(
   options: RunAssignedRoleOptions,
   roleId: "human" | "robot",
   input: UserTextRoleInput,
+  audit: RoleRunAuditTrail | undefined,
 ): Promise<RoleRunResult> {
   if (isAborted(options.signal)) {
     return failure(options, roleId, "cancelled", {
@@ -120,6 +134,27 @@ async function executeAssignedRole(
   }
 
   if (roleId === "robot") {
+    if (options.robot_ha !== undefined) {
+      assertRoleToolAuthorization(options.session.profile, ["home.get_entity"]);
+      const execution = await runRobotHaRead({
+        run_id: options.run_id,
+        // Robot HA observations are untrusted input. Do not let a prior
+        // deterministic observation re-enter a later model context through
+        // RoleSession history.
+        messages: buildRoleContext(options.session.profile, input),
+        profile: options.session.profile,
+        provider: options.provider,
+        runtime: options.robot_ha,
+        ...(options.timeout_ms === undefined ? {} : { timeout_ms: options.timeout_ms }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+        ...(audit === undefined ? {} : { audit }),
+      });
+      return {
+        run_id: options.run_id,
+        role_id: "robot",
+        ...execution,
+      };
+    }
     return {
       run_id: options.run_id,
       role_id: "robot",
@@ -128,6 +163,7 @@ async function executeAssignedRole(
       model_turns: 0,
       capability_available: false,
       outcome: "capability_unavailable",
+      tool_results: [],
       error: null,
     };
   }
@@ -214,6 +250,7 @@ async function executeAssignedRole(
     model_turns: 1,
     capability_available: true,
     outcome: "response",
+    tool_results: [],
     error: null,
   };
 }
@@ -236,7 +273,7 @@ export async function runAssignedRole(
     await audit?.start(input);
     let result: RoleRunResult;
     try {
-      result = await executeAssignedRole(options, roleId, input);
+      result = await executeAssignedRole(options, roleId, input, audit);
     } catch (error) {
       try {
         await audit?.fail(error);
@@ -249,7 +286,10 @@ export async function runAssignedRole(
       throw error;
     }
     await audit?.finish(result);
-    if (result.status === "completed") {
+    if (
+      result.status === "completed"
+      && (roleId === "human" || options.robot_ha === undefined)
+    ) {
       options.session.commitExchange(input, result.final_text);
     }
     return result;

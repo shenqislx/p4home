@@ -189,6 +189,7 @@ test("Robot returns a deterministic Phase 4 unavailable response without calling
     model_turns: 0,
     capability_available: false,
     outcome: "capability_unavailable",
+    tool_results: [],
     error: null,
   });
   assert.equal(sessions.get("robot").history().length, 2);

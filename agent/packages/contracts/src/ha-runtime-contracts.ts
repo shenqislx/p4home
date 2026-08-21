@@ -57,14 +57,16 @@ export interface RobotHaCapability {
   readonly write_actions: readonly RobotHaWriteAction[];
 }
 
+export interface RobotHaToolDefinition {
+  readonly name: string;
+  readonly side_effect: boolean;
+  readonly parameters: Readonly<Record<string, unknown>>;
+}
+
 interface HaToolCatalog {
   readonly schema_version: number;
   readonly namespace: string;
-  readonly tools: readonly {
-    readonly name: string;
-    readonly side_effect: boolean;
-    readonly parameters: AnySchema;
-  }[];
+  readonly tools: readonly RobotHaToolDefinition[];
 }
 
 interface InvalidPolicyFixture {
@@ -194,6 +196,12 @@ export function projectRobotHaCapabilities(policy: RobotHaPolicy): readonly Robo
     readable: true,
     write_actions: [...entity.write_actions],
   }));
+}
+
+export function getRobotHaToolDefinitions(): readonly RobotHaToolDefinition[] {
+  const catalog = readJson<HaToolCatalog>(`${HA_CONTRACT_ROOT}/tool-catalog.json`);
+  assertToolCatalog(catalog);
+  return structuredClone(catalog.tools);
 }
 
 function assertToolCatalog(catalog: HaToolCatalog): void {

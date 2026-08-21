@@ -73,6 +73,10 @@ export type ToolErrorCode =
   | "OBJECT_UNAVAILABLE"
   | "OBJECT_OCCUPIED"
   | "OBJECT_NOT_REACHED"
+  | "UNKNOWN_ENTITY"
+  | "HA_OFFLINE"
+  | "HA_STATE_MISSING"
+  | "HA_STATE_INVALID"
   | "INTERNAL";
 
 export interface ToolError {

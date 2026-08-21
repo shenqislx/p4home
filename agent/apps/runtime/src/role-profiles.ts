@@ -27,7 +27,7 @@ export const CAT_OBJECT_TOOLS = [
 export const CAT_WORLD_TOOLS = [...CAT_ROOM_TOOLS, ...CAT_OBJECT_TOOLS] as const;
 
 export interface RoleProfile {
-  readonly revision: "role-profile/v1" | "role-profile/v2";
+  readonly revision: "role-profile/v1" | "role-profile/v2" | "role-profile/v3";
   readonly role_id: RoleId;
   readonly accepts_user_text: boolean;
   readonly allowed_tools: readonly string[];
@@ -63,18 +63,17 @@ export type RoleInput =
 
 const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
   robot: {
-    revision: "role-profile/v1",
+    revision: "role-profile/v3",
     role_id: "robot",
     accepts_user_text: true,
-    // Real HA tools are intentionally absent until Phase 4.
-    allowed_tools: [],
+    allowed_tools: ["home.get_entity"],
     temperature: 0,
     num_ctx: 8_192,
     num_predict: 128,
     max_model_turns: 1,
     history_message_limit: 12,
     queue_priority: "user",
-    system_prompt: "你是 P4 Home 的 Robot。Phase 4 前没有 Home Assistant 执行能力；不得声称已执行设备动作。",
+    system_prompt: "你是 P4 Home 的 Robot。当前只能用 home.get_entity 查询给定 alias；不能写入、控制或声称执行了设备动作。",
   },
   human: {
     revision: "role-profile/v1",

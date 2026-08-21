@@ -1,8 +1,8 @@
 # P4 Home Agent Runtime
 
-Phase 1 至 Phase 3 已关闭、Phase 4A 正在建立 Home Assistant 安全边界的 TypeScript workspace。
+Phase 1 至 Phase 3 已关闭、Phase 4B 正在接入只读 Home Assistant Tool 的 TypeScript workspace。
 当前包含冻结契约、Ollama 原生 Tool Calling、有限文本 Agent Loop、Role Contract/Router、Cat
-Action Adapter、真实 P4 Device WebSocket server，以及尚未暴露给 Robot 的 Home Assistant
+Action Adapter、真实 P4 Device WebSocket server，以及只向 Robot 暴露 alias 读侧的 Home Assistant
 contract/transport。确定性测试不要求 Ollama 或 Home Assistant 服务，真实模型、P4 硬件或 HA
 回归必须显式启用。
 
@@ -39,12 +39,13 @@ Node 主版本时产生假通过。
 - `packages/provider-ollama`：原生 HTTP capability probe、generate、chat/tool calling、NDJSON
   stream、`AbortSignal` 取消和相对 timeout；
 - `packages/transport-ha`：凭证文件边界、HA WebSocket 鉴权/订阅、逐实体 REST 初始快照、
-  allowlist 状态投影与无网络 Fake Transport；4A 不向任何 Role 提供 HA Tool；
+  allowlist 状态投影与无网络 Fake Transport；4B 由 Runtime 只读消费投影缓存；
 - `packages/storage-sqlite`：基于 Node 24 内置 `node:sqlite` 的审计存储、schema migration 与关联查询。
 
-Phase 1 至 Phase 3 已按各自证据门禁关闭。Phase 4A 只建立 HA contract、凭证与 transport
-边界，不启动 Robot Run、不调用 HA service，也不把 HA Tool 暴露给模型；4B 仍需独立 review
-授权。任何阶段都不得把 token 暴露给模型、协议 JSON、日志或 artifact。
+Phase 1 至 Phase 3 已按各自证据门禁关闭。Phase 4A 已完成 HA contract、凭证与 transport 边界；
+Phase 4B 只向 Robot revision v3 开放 `home.get_entity(alias)`，不调用 HA service，不把真实 entity id、
+写动作或 observation 放进模型上下文。4B coding 与独立 bugs review 已完成，仍需真实 HA 读侧门禁。
+任何阶段都不得把 token 暴露给模型、协议 JSON、日志或 artifact。
 
 Role Router 不向模型提供 Tool，也不依赖 Ollama `format`：默认 27B 已实测会在部分分类样例中违反
 `format`。Router prompt 只允许三个精确 JSON，响应仍由 Runtime 使用 JSON Schema/AJV 本地复验；

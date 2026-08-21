@@ -15,6 +15,7 @@ import {
 } from "./role-runner.ts";
 import { RoleScheduler } from "./role-scheduler.ts";
 import { RoleSessionRegistry } from "./role-session.ts";
+import type { RobotHaReadRuntime } from "./robot-ha-read-runner.ts";
 
 export interface RunRoleInteractionOptions {
   readonly interaction: UserTextInteraction;
@@ -27,6 +28,7 @@ export interface RunRoleInteractionOptions {
   readonly signal?: AbortSignal;
   readonly audit?: RoleRunAuditOptions;
   readonly clock?: () => number;
+  readonly robot_ha?: RobotHaReadRuntime;
 }
 
 export interface RunRoleInteractionResult {
@@ -70,6 +72,7 @@ export async function runRoleInteraction(
       ...(options.timeout_ms === undefined ? {} : { timeout_ms: options.timeout_ms }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
       ...(options.audit === undefined ? {} : { audit: options.audit }),
+      ...(options.robot_ha === undefined ? {} : { robot_ha: options.robot_ha }),
     }),
   });
   return { routing, run };

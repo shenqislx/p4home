@@ -2,7 +2,7 @@
 
 > Status: `in_progress`
 > Started: 2026-08-20
-> Current Gate: 4A 实现与本地门禁完成，等待用户 review；4B 尚未启动
+> Current Gate: 4B coding 与独立 bugs review 完成；真实 HA 读侧门禁尚待专用凭证
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 3 complete；HA 环境与隔离测试实体可用
 
@@ -60,20 +60,27 @@ Interaction 可以产生相互隔离的 Human 与 Robot Run，并由确定性 Re
 4A 实现与本地退出门禁已完成，证据见
 [Phase 4A HA Contract & Credential Boundary](../../evidence/agent-phase-4/phase-4a-ha-contract-credential.md)。
 2026-08-21 已完成代码 review 并修复首事件/快照竞态、旧状态残留、REST 重定向、公开 policy
-泄漏、投影类型混淆和文件有界读取等问题。当前仍停在 4A review gate；在用户明确通过前不得开始 4B。
+泄漏、投影类型混淆和文件有界读取等问题。2026-08-21 用户 review 通过并明确授权继续推进 Phase 4，
+4B 已启动。
 
 ## 5. 纵切 4B — Read-only Robot HA Tool
 
 只有 4A review 通过后开始：
 
-- [ ] 先只向 Robot 的新 RoleProfile revision 开放 `home.get_entity(alias)`；模型不可传真实 entity id；
-- [ ] Robot 上下文只接收当前 assignment、必要的 allowlist capability 和最小状态投影；friendly name、
+- [x] 先只向 Robot 的新 RoleProfile revision 开放 `home.get_entity(alias)`；模型不可传真实 entity id；
+- [x] Robot 上下文只接收当前 assignment、必要的 allowlist capability 和最小状态投影；friendly name、
   attributes 与事件文本不能成为新的指令；
-- [ ] 将模型 ToolCall、policy 决策、HA request/result、状态 observation 与
+- [x] 将模型 ToolCall、policy 决策、HA request/result、状态 observation 与
   `interaction_id/route_plan_id/assignment_id/run_id/tool_call_id` 完整关联；
-- [ ] 增加未知 alias、未允许 domain、prompt injection、HA 离线、auth invalid、timeout、取消、重连和
+- [x] 增加未知 alias、未允许 domain、prompt injection、HA 离线、auth invalid、timeout、取消、重连和
   状态陈旧测试；
 - [ ] 用 Robot 专用非管理员 HA 账号在真实 HA 上完成 allowlist 读侧验证，不读取全量 `get_states`。
+
+4B coding done：Robot 只获得只读 alias Tool，Runtime 从 transport 的 allowlist 投影缓存确定性生成
+结果，不执行第二次模型调用，也不把 observation 写回 Robot 会话历史。实现证据见
+[Phase 4B Read-only Robot HA Tool](../../evidence/agent-phase-4/phase-4b-read-only-robot-ha.md)。当前按阶段
+流程完成独立 bugs review 并关闭全部发现；真实 HA 读侧仍是 4B 退出门禁的一部分，不能用 Fake/回环
+测试替代。
 
 退出门禁：Robot 只能读取投影后的 allowlist 状态；任何未允许实体、敏感字段或注入文本都不能扩大
 工具调用；Human/Cat 无法看到或调用 `home.get_entity`；HA 离线不影响 Cat/P4 主链。

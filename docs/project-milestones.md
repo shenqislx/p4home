@@ -1,6 +1,6 @@
 # P4 Home 当前里程碑
 
-> Updated: 2026-08-20
+> Updated: 2026-08-21
 > Current Architecture: [P4 Local Agent Architecture](./p4-local-agent-architecture.md)
 > Active Work: [Agent Phase Plans](./plans/README.md)
 
@@ -24,7 +24,7 @@
 | M7.1 Text Agent Runtime | `completed` | Ollama + 有限 Tool Loop + SQLite + eval |
 | M7.2 Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作闭环 |
 | M7.3 Cat Object World | `completed` | sofa/window/desk 等 Cat 对象级动作，实机门禁与最终 review 已通过 |
-| M7.4 Robot HA & Multi-role | `in_progress` | 4A contract/credential/transport 本地门禁完成，等待 review |
+| M7.4 Robot HA & Multi-role | `in_progress` | 4A 已通过；4B 只读 Robot HA coding/review 完成，等待真实 HA 读侧门禁 |
 | M7.5 Role-aware Voice | `pending` | 本地唤醒、STT、Router/Roles、TTS 闭环 |
 | M7.6 Role-aware Memory | `pending` | 评测共享、私有与混合角色记忆 |
 | M7.7 Cat Autonomy | `pending` | Timer/HA 事件驱动、低优先级、可关闭 Cat 行为 |
@@ -61,7 +61,9 @@ run `32382940058` 已通过 manifest、对象动作链、重连 snapshot、取�
 对象执行 Tool 仅加入 Cat RoleProfile。2026-08-20，用户明确授权启动 M7.4 / Phase 4 并先做准备；
 4A–4E 的独立门禁、Robot/P4 凭证隔离、HA 写侧 unknown 语义和多角色 span 边界已冻结。准备 review
 通过后，4A 已完成版本化 contract、凭证文件边界、allowlist 状态投影、Fake/回环 transport 和安全
-审计的本地门禁，当前等待 4A review。尚未连接真实 Robot HA、开放 Robot Tool 或启动 4B。
+审计的本地门禁并通过 review。4B 已完成只读 `home.get_entity(alias)`、确定性状态呈现、跨角色隔离与
+SQLite 关联审计的 coding 与独立 bugs review；review 发现的旧库迁移、断线竞态、拒绝审计、运行期
+投影校验问题均已关闭。尚未使用 Robot 专用账号连接真实 HA，写 Tool也未开放。
 
 ## 5. 状态更新规则
 

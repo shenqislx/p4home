@@ -39,9 +39,9 @@ Service、真实传输与实机门禁四个纵切均满足退出条件；Agent/P
 取消、Agent 离线释放、HA/UI、资源与 8 FPS artifact 判定。2026-08-20 用户最终 review 通过，
 Phase 3 已完成并归档；对象级 Tool 仅加入 Cat RoleProfile，冻结的 Device Protocol v1 / Tool
 Schema v1 未修改。2026-08-20 用户已授权启动 Phase 4 并先完成准备；4A–4E 独立门禁、Robot/P4
-凭证隔离、HA 写侧 unknown 语义与多角色 span 边界已冻结。准备 review 通过后，4A 的 HA contract、
-凭证文件边界、allowlist transport 与本地门禁已完成，当前等待 4A review；真实 Robot HA Tool 尚未
-开放，4B 尚未启动。
+凭证隔离、HA 写侧 unknown 语义与多角色 span 边界已冻结。4A 的 HA contract、凭证文件边界、
+allowlist transport 与 review 修复已完成并推送。4B 只读 Robot `home.get_entity(alias)` coding 与独立
+bugs review 已完成；真实 HA 专用账号读侧验证尚未完成，写 Tool 仍未开放。
 
 ## 工作规则
 

@@ -27,6 +27,7 @@
     "@p4home/provider-ollama": "workspace:*",
     "@p4home/runtime": "workspace:*",
     "@p4home/storage-sqlite": "workspace:*",
+    "@p4home/transport-ha": "workspace:*",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.1",
     "tsx": "^4.21.0",

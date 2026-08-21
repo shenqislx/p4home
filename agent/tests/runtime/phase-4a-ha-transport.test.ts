@@ -310,7 +310,7 @@ test("HA client authenticates in-band, subscribes, and loads only allowlisted pr
   assert.equal(subscriptionId > 0, true);
   assert.equal(lastFrames(socket).some((frame) => frame.type === "get_states"), false);
   assert.equal(lastFrames(socket).some((frame) => frame.type === "call_service"), false);
-  assert.deepEqual(getRoleProfile("robot").allowed_tools, []);
+  assert.deepEqual(getRoleProfile("robot").allowed_tools, ["home.get_entity"]);
   assert.deepEqual(getRoleProfile("human").allowed_tools, []);
 });
 
@@ -586,7 +586,7 @@ test("binary frames fail closed without changing role authorization", async (t) 
   socket.serverSend("binary", true);
   assert.equal(client.state, "error");
   assert.equal(client.metrics.protocol_errors, 1);
-  assert.deepEqual(getRoleProfile("robot").allowed_tools, []);
+  assert.deepEqual(getRoleProfile("robot").allowed_tools, ["home.get_entity"]);
   assert.deepEqual(getRoleProfile("cat").allowed_tools.includes("home.get_entity"), false);
 });
 
