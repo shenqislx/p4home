@@ -300,9 +300,7 @@ jobs:
         working-directory: agent
         run: |
           set -euo pipefail
-          corepack enable
-          corepack prepare pnpm@11.19.0 --activate
-          pnpm install --frozen-lockfile
+          npx --yes pnpm@11.19.0 install --frozen-lockfile
           export P4HOME_AGENT_DEVICE_ID="$AGENT_DEVICE_ID"
           export P4HOME_AGENT_DEVICE_TOKEN_FILE="$AGENT_TMP_DIR/device-token"
           export P4HOME_AGENT_TLS_KEY_FILE="$AGENT_TMP_DIR/agent-key.pem"
@@ -337,9 +335,7 @@ jobs:
         working-directory: agent
         run: |
           set -euo pipefail
-          corepack enable
-          corepack prepare pnpm@11.19.0 --activate
-          pnpm install --frozen-lockfile
+          npx --yes pnpm@11.19.0 install --frozen-lockfile
 
       - name: Validate Robot while P4 application is offline
         if: inputs.validation_profile == 'phase4c_ha'
