@@ -25,11 +25,15 @@ class Phase4CHaHardwareGateContractTests(unittest.TestCase):
         self.assertIn("PHASE4C_POST_ROBOT_OFFSET_FILE", workflow)
         self.assertIn("PHASE4C_RAW_MONITOR_LOG", workflow)
         self.assertIn("Sanitize Phase 4C serial artifact", workflow)
+        self.assertEqual(workflow.count('PNPM_BIN="$(command -v pnpm || true)"'), 2)
+        self.assertEqual(workflow.count("-x /opt/homebrew/bin/pnpm"), 2)
         self.assertEqual(
-            workflow.count("npx --yes pnpm@11.19.0 install --frozen-lockfile"),
+            workflow.count('test "$("$PNPM_BIN" --version)" = "11.19.0"'),
             2,
         )
+        self.assertEqual(workflow.count('"$PNPM_BIN" install --frozen-lockfile'), 2)
         self.assertNotIn("corepack enable", workflow)
+        self.assertNotIn("npx --yes pnpm", workflow)
         self.assertIn("scripts/prepare-phase4c-ha-profile.py", workflow)
         self.assertIn("--panel-entities firmware/components/panel_data_store/panel_entities.json", workflow)
         self.assertIn("scripts/sanitize-phase4c-monitor.py", workflow)
