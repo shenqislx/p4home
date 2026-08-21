@@ -34,6 +34,8 @@ interface GateResult {
   readonly target_observed: boolean;
   readonly restore_accepted: boolean;
   readonly restore_observed: boolean;
+  readonly restore_attempts: number;
+  readonly restore_error: "dispatch_unknown" | "reconcile_unknown" | null;
   readonly restored: boolean;
   readonly final_state: string | null;
   readonly state_change_events: number;
@@ -101,6 +103,8 @@ async function main(): Promise<number> {
   let targetAttempted = false;
   let restoreAccepted = false;
   let restoreObserved = false;
+  let restoreAttempts = 0;
+  let restoreError: "dispatch_unknown" | "reconcile_unknown" | null = null;
   let restored = false;
   let finalState: string | null = null;
   let stateChangeEvents = 0;
@@ -183,7 +187,9 @@ async function main(): Promise<number> {
         const restore = await restoreRobotState(restoreClient, ALIAS, initialState);
         restoreAccepted = restore.accepted;
         restoreObserved = restore.observed;
-        finalState = restore.final_state.state;
+        restoreAttempts = restore.attempts;
+        restoreError = restore.error;
+        finalState = restore.final_state?.state ?? null;
         restored = restore.restored;
       } catch {
         restored = false;
@@ -217,6 +223,8 @@ async function main(): Promise<number> {
     target_observed: targetObserved,
     restore_accepted: restoreAccepted,
     restore_observed: restoreObserved,
+    restore_attempts: restoreAttempts,
+    restore_error: restoreError,
     restored,
     final_state: finalState,
     state_change_events: stateChangeEvents,

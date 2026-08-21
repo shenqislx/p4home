@@ -18,8 +18,10 @@ export interface GateDispatchResult {
 export interface GateRestoreResult {
   readonly accepted: boolean;
   readonly observed: boolean;
+  readonly attempts: number;
+  readonly error: "dispatch_unknown" | "reconcile_unknown" | null;
   readonly restored: boolean;
-  readonly final_state: RobotHaProjectedState;
+  readonly final_state: RobotHaProjectedState | null;
 }
 
 export function parseRobotIdentity(result: unknown): RobotIdentity {
@@ -39,6 +41,7 @@ export async function dispatchCausalWrite(
   action: RobotHaWriteAction,
   expected: string,
   timeoutMs = 10_000,
+  onDispatched?: () => void,
 ): Promise<GateDispatchResult> {
   let cursor: { readonly connection_generation: number; readonly sequence: number } | null = null;
   const buffered: RobotHaStateObservation[] = [];
@@ -66,6 +69,7 @@ export async function dispatchCausalWrite(
   const unsubscribe = client.onObservation(acceptObservation);
   try {
     const attempt = client.beginWrite(alias, action);
+    onDispatched?.();
     cursor = structuredClone(attempt.dispatch_cursor);
     for (const observation of buffered) {
       acceptObservation(observation);
@@ -97,24 +101,103 @@ export async function restoreRobotState(
   alias: string,
   initialState: "on" | "off",
   observationTimeoutMs = 3_000,
-  settleMs = 500,
+  settleMs = 2_000,
 ): Promise<GateRestoreResult> {
   const action: RobotHaWriteAction = initialState === "on" ? "turn_on" : "turn_off";
-  const dispatch = await dispatchCausalWrite(
-    client,
-    alias,
-    action,
-    initialState,
-    observationTimeoutMs,
-  );
-  if (settleMs > 0) {
-    await new Promise((resolve) => setTimeout(resolve, settleMs));
+  let accepted = false;
+  let observed = false;
+  let attempts = 0;
+  const settle = async (): Promise<void> => {
+    if (settleMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, settleMs));
+    }
+  };
+  const dispatchRestore = async (): Promise<GateDispatchResult | null> => {
+    try {
+      return await dispatchCausalWrite(
+        client,
+        alias,
+        action,
+        initialState,
+        observationTimeoutMs,
+        () => {
+          attempts += 1;
+        },
+      );
+    } catch {
+      return null;
+    }
+  };
+  const reconcile = async (): Promise<RobotHaProjectedState | null> => {
+    try {
+      return await client.reconcileState(alias, AbortSignal.timeout(5_000));
+    } catch {
+      return null;
+    }
+  };
+
+  const firstDispatch = await dispatchRestore();
+  await settle();
+  let finalState = await reconcile();
+  if (firstDispatch === null) {
+    return {
+      accepted: false,
+      observed: false,
+      attempts,
+      error: "dispatch_unknown",
+      restored: false,
+      final_state: finalState,
+    };
   }
-  const finalState = await client.reconcileState(alias, AbortSignal.timeout(5_000));
+  accepted = firstDispatch.accepted;
+  observed = firstDispatch.observed;
+  if (finalState === null) {
+    return {
+      accepted,
+      observed,
+      attempts,
+      error: "reconcile_unknown",
+      restored: false,
+      final_state: null,
+    };
+  }
+  if (
+    firstDispatch.accepted
+    && finalState.available
+    && finalState.state !== initialState
+  ) {
+    const correction = await dispatchRestore();
+    await settle();
+    finalState = await reconcile();
+    if (correction === null) {
+      return {
+        accepted: false,
+        observed,
+        attempts,
+        error: "dispatch_unknown",
+        restored: false,
+        final_state: finalState,
+      };
+    }
+    accepted = accepted && correction.accepted;
+    observed = observed || correction.observed;
+    if (finalState === null) {
+      return {
+        accepted,
+        observed,
+        attempts,
+        error: "reconcile_unknown",
+        restored: false,
+        final_state: null,
+      };
+    }
+  }
   return {
-    accepted: dispatch.accepted,
-    observed: dispatch.observed,
-    restored: dispatch.accepted && finalState.available && finalState.state === initialState,
+    accepted,
+    observed,
+    attempts,
+    error: null,
+    restored: accepted && finalState.available && finalState.state === initialState,
     final_state: finalState,
   };
 }

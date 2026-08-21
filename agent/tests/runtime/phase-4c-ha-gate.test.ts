@@ -108,8 +108,210 @@ test("restoration always dispatches and performs an independent final read", asy
   assert.equal(reconciliations, 1);
   assert.equal(result.accepted, true);
   assert.equal(result.observed, false);
+  assert.equal(result.attempts, 1);
+  assert.equal(result.error, null);
   assert.equal(result.restored, true);
-  assert.equal(result.final_state.state, "off");
+  assert.equal(result.final_state?.state, "off");
+});
+
+test("restoration performs one bounded correction after a confirmed rebound", async () => {
+  let writes = 0;
+  let reconciliations = 0;
+  let listener: ((observation: RobotHaStateObservation) => void) | null = null;
+  const client = {
+    onObservation(candidate: (observation: RobotHaStateObservation) => void) {
+      listener = candidate;
+      return () => {
+        listener = null;
+      };
+    },
+    beginWrite() {
+      writes += 1;
+      const sequence = writes * 2;
+      queueMicrotask(() => listener?.({
+        connection_generation: 1,
+        sequence: sequence + 1,
+        source: "subscribed_state_changed",
+        state: projected("off"),
+      }));
+      return {
+        request_id: writes,
+        dispatch_cursor: { connection_generation: 1, sequence },
+        response: Promise.resolve({ request_id: writes, accepted: true }),
+      };
+    },
+    async reconcileState() {
+      reconciliations += 1;
+      return projected(reconciliations === 1 ? "on" : "off");
+    },
+  } as unknown as RobotHaWriteClient;
+
+  const result = await restoreRobotState(client, alias, "off", 5, 0);
+  assert.equal(writes, 2);
+  assert.equal(reconciliations, 2);
+  assert.equal(result.attempts, 2);
+  assert.equal(result.accepted, true);
+  assert.equal(result.observed, true);
+  assert.equal(result.error, null);
+  assert.equal(result.restored, true);
+  assert.equal(result.final_state?.state, "off");
+});
+
+test("restoration never retries a rejected compensation", async () => {
+  let writes = 0;
+  let reconciliations = 0;
+  const client = {
+    onObservation() {
+      return () => undefined;
+    },
+    beginWrite() {
+      writes += 1;
+      return {
+        request_id: writes,
+        dispatch_cursor: { connection_generation: 1, sequence: writes },
+        response: Promise.resolve({ request_id: writes, accepted: false }),
+      };
+    },
+    async reconcileState() {
+      reconciliations += 1;
+      return projected("on");
+    },
+  } as unknown as RobotHaWriteClient;
+
+  const result = await restoreRobotState(client, alias, "off", 5, 0);
+  assert.equal(writes, 1);
+  assert.equal(reconciliations, 1);
+  assert.equal(result.attempts, 1);
+  assert.equal(result.accepted, false);
+  assert.equal(result.restored, false);
+});
+
+test("restoration never corrects an unavailable final state", async () => {
+  let writes = 0;
+  let reconciliations = 0;
+  const client = {
+    onObservation() {
+      return () => undefined;
+    },
+    beginWrite() {
+      writes += 1;
+      return {
+        request_id: writes,
+        dispatch_cursor: { connection_generation: 1, sequence: writes },
+        response: Promise.resolve({ request_id: writes, accepted: true }),
+      };
+    },
+    async reconcileState() {
+      reconciliations += 1;
+      return { ...projected("on"), available: false };
+    },
+  } as unknown as RobotHaWriteClient;
+
+  const result = await restoreRobotState(client, alias, "off", 5, 0);
+  assert.equal(writes, 1);
+  assert.equal(reconciliations, 1);
+  assert.equal(result.attempts, 1);
+  assert.equal(result.error, null);
+  assert.equal(result.restored, false);
+});
+
+test("restoration records a dispatched first response that becomes unknown", async () => {
+  let writes = 0;
+  const client = {
+    onObservation() {
+      return () => undefined;
+    },
+    beginWrite() {
+      writes += 1;
+      return {
+        request_id: writes,
+        dispatch_cursor: { connection_generation: 1, sequence: writes },
+        response: Promise.reject(new Error("disconnect")),
+      };
+    },
+    async reconcileState() {
+      return projected("off");
+    },
+  } as unknown as RobotHaWriteClient;
+
+  const result = await restoreRobotState(client, alias, "off", 5, 0);
+  assert.equal(writes, 1);
+  assert.equal(result.attempts, 1);
+  assert.equal(result.error, "dispatch_unknown");
+  assert.equal(result.final_state?.state, "off");
+  assert.equal(result.restored, false);
+});
+
+test("restoration records a dispatched correction response that becomes unknown", async () => {
+  let writes = 0;
+  let reconciliations = 0;
+  let listener: ((observation: RobotHaStateObservation) => void) | null = null;
+  const client = {
+    onObservation(candidate: (observation: RobotHaStateObservation) => void) {
+      listener = candidate;
+      return () => {
+        listener = null;
+      };
+    },
+    beginWrite() {
+      writes += 1;
+      const requestId = writes;
+      const sequence = requestId * 2;
+      if (requestId === 1) {
+        queueMicrotask(() => listener?.({
+          connection_generation: 1,
+          sequence: sequence + 1,
+          source: "subscribed_state_changed",
+          state: projected("off"),
+        }));
+      }
+      return {
+        request_id: requestId,
+        dispatch_cursor: { connection_generation: 1, sequence },
+        response: requestId === 1
+          ? Promise.resolve({ request_id: requestId, accepted: true })
+          : Promise.reject(new Error("disconnect")),
+      };
+    },
+    async reconcileState() {
+      reconciliations += 1;
+      return projected(reconciliations === 1 ? "on" : "off");
+    },
+  } as unknown as RobotHaWriteClient;
+
+  const result = await restoreRobotState(client, alias, "off", 5, 0);
+  assert.equal(writes, 2);
+  assert.equal(reconciliations, 2);
+  assert.equal(result.attempts, 2);
+  assert.equal(result.error, "dispatch_unknown");
+  assert.equal(result.restored, false);
+});
+
+test("restoration records attempts when final reconciliation is unknown", async () => {
+  let writes = 0;
+  const client = {
+    onObservation() {
+      return () => undefined;
+    },
+    beginWrite() {
+      writes += 1;
+      return {
+        request_id: writes,
+        dispatch_cursor: { connection_generation: 1, sequence: writes },
+        response: Promise.resolve({ request_id: writes, accepted: true }),
+      };
+    },
+    async reconcileState() {
+      throw new Error("rest transport failed");
+    },
+  } as unknown as RobotHaWriteClient;
+
+  const result = await restoreRobotState(client, alias, "off", 5, 0);
+  assert.equal(writes, 1);
+  assert.equal(result.attempts, 1);
+  assert.equal(result.error, "reconcile_unknown");
+  assert.equal(result.final_state, null);
+  assert.equal(result.restored, false);
 });
 
 async function withIdentityServer(
