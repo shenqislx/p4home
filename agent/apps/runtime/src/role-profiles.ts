@@ -27,7 +27,7 @@ export const CAT_OBJECT_TOOLS = [
 export const CAT_WORLD_TOOLS = [...CAT_ROOM_TOOLS, ...CAT_OBJECT_TOOLS] as const;
 
 export interface RoleProfile {
-  readonly revision: "role-profile/v1" | "role-profile/v2" | "role-profile/v3";
+  readonly revision: "role-profile/v1" | "role-profile/v2" | "role-profile/v3" | "role-profile/v4";
   readonly role_id: RoleId;
   readonly accepts_user_text: boolean;
   readonly allowed_tools: readonly string[];
@@ -63,17 +63,17 @@ export type RoleInput =
 
 const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
   robot: {
-    revision: "role-profile/v3",
+    revision: "role-profile/v4",
     role_id: "robot",
     accepts_user_text: true,
-    allowed_tools: ["home.get_entity"],
+    allowed_tools: ["home.get_entity", "home.turn_on", "home.turn_off", "home.activate_scene"],
     temperature: 0,
     num_ctx: 8_192,
     num_predict: 128,
     max_model_turns: 1,
     history_message_limit: 12,
     queue_priority: "user",
-    system_prompt: "你是 P4 Home 的 Robot。当前只能用 home.get_entity 查询给定 alias；不能写入、控制或声称执行了设备动作。",
+    system_prompt: "你是 P4 Home 的 Robot。只能原样选择 Runtime 给出的 home.* alias Tool；不得构造 entity id、domain、service/data，不得把 accepted 或 unknown 声称为完成。",
   },
   human: {
     revision: "role-profile/v1",

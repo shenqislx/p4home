@@ -3,6 +3,7 @@ import type {
   RobotHaDomain,
   RobotHaPolicyEntity,
   RobotHaProjectedAttribute,
+  RobotHaWriteAction,
 } from "@p4home/contracts";
 
 import type { RobotHaRuntimeConfig } from "./config.ts";
@@ -114,4 +115,32 @@ export interface RobotHaClientView {
   readonly metrics: RobotHaMetrics;
   getState(alias: string): RobotHaProjectedState | null;
   listStates(): readonly RobotHaProjectedState[];
+}
+
+export interface RobotHaWriteResponse {
+  readonly request_id: number;
+  readonly accepted: boolean;
+}
+
+export interface RobotHaObservationCursor {
+  readonly connection_generation: number;
+  readonly sequence: number;
+}
+
+export interface RobotHaStateObservation extends RobotHaObservationCursor {
+  readonly source: "subscribed_state_changed";
+  readonly state: RobotHaProjectedState;
+}
+
+export interface RobotHaWriteAttempt {
+  readonly request_id: number;
+  readonly dispatch_cursor: RobotHaObservationCursor;
+  readonly response: Promise<RobotHaWriteResponse>;
+}
+
+export interface RobotHaWriteClient extends RobotHaClientView {
+  beginWrite(alias: string, action: RobotHaWriteAction): RobotHaWriteAttempt;
+  reconcileState(alias: string, signal: AbortSignal): Promise<RobotHaProjectedState>;
+  onState(listener: (state: RobotHaProjectedState) => void): () => void;
+  onObservation(listener: (observation: RobotHaStateObservation) => void): () => void;
 }

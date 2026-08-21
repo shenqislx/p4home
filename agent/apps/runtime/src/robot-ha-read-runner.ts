@@ -115,10 +115,7 @@ function modelTools(): readonly OllamaToolDefinition[] {
   }];
 }
 
-function readCapabilities(client: RobotHaClientView): readonly Pick<
-  RobotHaCapability,
-  "alias" | "domain" | "readable"
->[] {
+export function readRobotHaCapabilities(client: RobotHaClientView): readonly RobotHaCapability[] {
   const writesByDomain: Readonly<Record<RobotHaDomain, readonly RobotHaWriteAction[]>> = {
     light: ["turn_on", "turn_off"],
     switch: ["turn_on", "turn_off"],
@@ -150,21 +147,16 @@ function readCapabilities(client: RobotHaClientView): readonly Pick<
     return new Set(item.write_actions).size === item.write_actions.length
       && item.write_actions.every((action) => allowedWrites.includes(action));
   });
-  const capabilities = snapshot.map(({ alias, domain, readable }) => ({
-    alias,
-    domain,
-    readable,
-  }));
   if (
-    capabilities.length < 1
-    || capabilities.length > 64
+    snapshot.length < 1
+    || snapshot.length > 64
     || !valid
-    || new Set(capabilities.map((item) => item.alias)).size !== capabilities.length
-    || capabilities.some((item) => item.readable !== true)
+    || new Set(snapshot.map((item) => item.alias)).size !== snapshot.length
+    || snapshot.some((item) => item.readable !== true)
   ) {
     throw new TypeError("Robot HA read capabilities are invalid");
   }
-  return capabilities;
+  return snapshot;
 }
 
 function withCapabilities(
@@ -276,7 +268,9 @@ export async function runRobotHaRead(options: RunRobotHaReadOptions): Promise<Ro
       error: null,
     };
   }
-  const capabilities = readCapabilities(options.runtime.client);
+  const capabilities = readRobotHaCapabilities(options.runtime.client).map(
+    ({ alias, domain, readable }) => ({ alias, domain, readable }),
+  );
   await options.audit?.modelRequested(1);
   let response;
   try {

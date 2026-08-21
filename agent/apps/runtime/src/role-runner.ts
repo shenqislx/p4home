@@ -25,6 +25,10 @@ import {
   runRobotHaRead,
   type RobotHaReadRuntime,
 } from "./robot-ha-read-runner.ts";
+import {
+  runRobotHaWrite,
+  type RobotHaWriteRuntime,
+} from "./robot-ha-write-runner.ts";
 import { assessHumanResponsePolicy } from "./role-response-policy.ts";
 import type { RoleSession } from "./role-session.ts";
 
@@ -40,7 +44,7 @@ export interface RunAssignedRoleOptions {
   readonly timeout_ms?: number;
   readonly signal?: AbortSignal;
   readonly audit?: RoleRunAuditOptions;
-  readonly robot_ha?: RobotHaReadRuntime;
+  readonly robot_ha?: RobotHaReadRuntime | RobotHaWriteRuntime;
 }
 
 export interface RoleRunError {
@@ -66,6 +70,15 @@ type UserTextRoleInput = Extract<RoleInput, { readonly kind: "user_text" }>;
 
 function isAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
+}
+
+function isWriteRuntime(
+  runtime: RobotHaReadRuntime | RobotHaWriteRuntime,
+): runtime is RobotHaWriteRuntime {
+  return typeof (runtime.client as { beginWrite?: unknown }).beginWrite === "function"
+    && typeof (runtime.client as { onState?: unknown }).onState === "function"
+    && typeof (runtime.client as { onObservation?: unknown }).onObservation === "function"
+    && typeof (runtime.client as { reconcileState?: unknown }).reconcileState === "function";
 }
 
 function roleInput(options: RunAssignedRoleOptions): UserTextRoleInput {
@@ -135,20 +148,41 @@ async function executeAssignedRole(
 
   if (roleId === "robot") {
     if (options.robot_ha !== undefined) {
-      assertRoleToolAuthorization(options.session.profile, ["home.get_entity"]);
-      const execution = await runRobotHaRead({
-        run_id: options.run_id,
-        // Robot HA observations are untrusted input. Do not let a prior
-        // deterministic observation re-enter a later model context through
-        // RoleSession history.
-        messages: buildRoleContext(options.session.profile, input),
-        profile: options.session.profile,
-        provider: options.provider,
-        runtime: options.robot_ha,
-        ...(options.timeout_ms === undefined ? {} : { timeout_ms: options.timeout_ms }),
-        ...(options.signal === undefined ? {} : { signal: options.signal }),
-        ...(audit === undefined ? {} : { audit }),
-      });
+      const context = buildRoleContext(options.session.profile, input);
+      let execution;
+      if (isWriteRuntime(options.robot_ha)) {
+        assertRoleToolAuthorization(options.session.profile, [
+          "home.get_entity",
+          "home.turn_on",
+          "home.turn_off",
+          "home.activate_scene",
+        ]);
+        execution = await runRobotHaWrite({
+          run_id: options.run_id,
+          messages: context,
+          profile: options.session.profile,
+          provider: options.provider,
+          client: options.robot_ha.client,
+          ...(options.timeout_ms === undefined ? {} : { timeout_ms: options.timeout_ms }),
+          ...(options.robot_ha.observation_timeout_ms === undefined
+            ? {}
+            : { observation_timeout_ms: options.robot_ha.observation_timeout_ms }),
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+          ...(audit === undefined ? {} : { audit }),
+        });
+      } else {
+        assertRoleToolAuthorization(options.session.profile, ["home.get_entity"]);
+        execution = await runRobotHaRead({
+          run_id: options.run_id,
+          messages: context,
+          profile: options.session.profile,
+          provider: options.provider,
+          runtime: options.robot_ha,
+          ...(options.timeout_ms === undefined ? {} : { timeout_ms: options.timeout_ms }),
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+          ...(audit === undefined ? {} : { audit }),
+        });
+      }
       return {
         run_id: options.run_id,
         role_id: "robot",

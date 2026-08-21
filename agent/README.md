@@ -1,6 +1,6 @@
 # P4 Home Agent Runtime
 
-Phase 1 至 Phase 3 已关闭、Phase 4B 正在接入只读 Home Assistant Tool 的 TypeScript workspace。
+Phase 1 至 Phase 3 已关闭、Phase 4C 正在接入低风险 Home Assistant 写 Tool 的 TypeScript workspace。
 当前包含冻结契约、Ollama 原生 Tool Calling、有限文本 Agent Loop、Role Contract/Router、Cat
 Action Adapter、真实 P4 Device WebSocket server，以及只向 Robot 暴露 alias 读侧的 Home Assistant
 contract/transport。确定性测试不要求 Ollama 或 Home Assistant 服务，真实模型、P4 硬件或 HA
@@ -44,7 +44,9 @@ Node 主版本时产生假通过。
 
 Phase 1 至 Phase 3 已按各自证据门禁关闭。Phase 4A 已完成 HA contract、凭证与 transport 边界；
 Phase 4B 只向 Robot revision v3 开放 `home.get_entity(alias)`，不调用 HA service，不把真实 entity id、
-写动作或 observation 放进模型上下文。4B coding 与独立 bugs review 已完成，仍需真实 HA 读侧门禁。
+4B coding 与独立 bugs review 已完成。4C 只开放 alias 级 `turn_on/turn_off/activate_scene`，固定
+domain/service/target 映射，并以 HA result + 后续投影状态回刷判完成；accepted、rejected、unknown
+不会混写，unknown 禁止自动重放。4C coding 与独立 review 已完成，等待真实 HA/P4 门禁。
 任何阶段都不得把 token 暴露给模型、协议 JSON、日志或 artifact。
 
 Role Router 不向模型提供 Tool，也不依赖 Ollama `format`：默认 27B 已实测会在部分分类样例中违反

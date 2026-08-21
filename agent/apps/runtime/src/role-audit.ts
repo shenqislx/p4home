@@ -9,6 +9,8 @@ import type {
   ToolResult,
 } from "@p4home/core";
 import type { OllamaChatMessage } from "@p4home/provider-ollama";
+import type { RobotHaWriteAction } from "@p4home/contracts";
+import type { RobotHaObservationCursor } from "@p4home/transport-ha";
 import type { AuditStore } from "@p4home/storage-sqlite";
 
 import type {
@@ -210,6 +212,69 @@ export class RoleRunAuditTrail {
     }));
   }
 
+  public async haWriteDispatched(
+    toolCallId: string,
+    alias: string,
+    action: RobotHaWriteAction,
+    requestId: number,
+  ): Promise<void> {
+    await this.#store.appendEvent(this.#event("role.ha.write.dispatched", {
+      interaction_id: this.#interaction.interaction_id,
+      assignment_id: this.#plan.assignments[0].assignment_id,
+      role_id: this.#session.role_id,
+      tool_call_id: toolCallId,
+      alias,
+      action,
+      request_id: requestId,
+      replay_allowed: false,
+    }));
+  }
+
+  public async haWriteOutcome(
+    toolCallId: string,
+    alias: string,
+    action: RobotHaWriteAction,
+    requestId: number | null,
+    outcome: "accepted" | "completed" | "rejected" | "unknown",
+    accepted: boolean | null,
+  ): Promise<void> {
+    await this.#store.appendEvent(this.#event(`role.ha.write.${outcome}`, {
+      interaction_id: this.#interaction.interaction_id,
+      assignment_id: this.#plan.assignments[0].assignment_id,
+      role_id: this.#session.role_id,
+      tool_call_id: toolCallId,
+      alias,
+      action,
+      request_id: requestId,
+      accepted,
+      outcome,
+      replay_allowed: false,
+    }));
+  }
+
+  public async haWriteObservation(
+    toolCallId: string,
+    alias: string,
+    action: RobotHaWriteAction,
+    requestId: number | null,
+    source: "subscribed_state_changed" | "already_satisfied_cache" | "reconciliation_read",
+    cursor: RobotHaObservationCursor | null,
+  ): Promise<void> {
+    await this.#store.appendEvent(this.#event("role.ha.write.observed", {
+      interaction_id: this.#interaction.interaction_id,
+      assignment_id: this.#plan.assignments[0].assignment_id,
+      role_id: this.#session.role_id,
+      tool_call_id: toolCallId,
+      alias,
+      action,
+      request_id: requestId,
+      observation_source: source,
+      connection_generation: cursor?.connection_generation ?? null,
+      observation_sequence: cursor?.sequence ?? null,
+      replay_allowed: false,
+    }));
+  }
+
   public async toolResult(result: ToolResult, modelTurn: number): Promise<void> {
     const completedAtMs = this.#now();
     const message = this.#message("tool", JSON.stringify(result), {
@@ -218,8 +283,13 @@ export class RoleRunAuditTrail {
       tool_call_id: result.tool_call_id,
       status: result.status,
     }, result.name);
+    const isReadObservation = result.status === "success" && result.name === "home.get_entity";
     const event = this.#event(
-      result.status === "success" ? "role.ha.observation" : "role.tool.failed",
+      result.status === "error"
+        ? "role.tool.failed"
+        : isReadObservation
+          ? "role.ha.observation"
+          : "role.tool.completed",
       {
         interaction_id: this.#interaction.interaction_id,
         assignment_id: this.#plan.assignments[0].assignment_id,
@@ -229,7 +299,7 @@ export class RoleRunAuditTrail {
         name: result.name,
         status: result.status,
         error_code: result.error?.code ?? null,
-        observation_source: result.status === "success" ? "allowlisted_cache" : null,
+        observation_source: isReadObservation ? "allowlisted_cache" : null,
       },
     );
     await this.#store.writeBatch({
@@ -407,7 +477,11 @@ export class RoleRunAuditTrail {
     if (!Number.isSafeInteger(value) || value < 0) {
       throw new TypeError("role audit clock must return a non-negative safe integer");
     }
-    this.#lastTime = Math.max(this.#lastTime, value);
+    const next = Math.max(value, this.#lastTime + 1);
+    if (!Number.isSafeInteger(next)) {
+      throw new TypeError("role audit clock exhausted the safe integer range");
+    }
+    this.#lastTime = next;
     return this.#lastTime;
   }
 }

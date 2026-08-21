@@ -2,6 +2,7 @@ import {
   projectRobotHaCapabilities,
   validateRobotHaPolicy,
   type RobotHaPolicyEntity,
+  type RobotHaWriteAction,
 } from "@p4home/contracts";
 
 import {
@@ -21,6 +22,9 @@ import {
   type RobotHaMetrics,
   type RobotHaProjectedState,
   type RobotHaSocket,
+  type RobotHaStateObservation,
+  type RobotHaWriteAttempt,
+  type RobotHaWriteClient,
 } from "./types.ts";
 import { createRobotHaWebSocket } from "./ws-socket.ts";
 
@@ -67,7 +71,7 @@ function sanitizedReason(reason: string): string {
   return clean.length === 0 ? "unspecified" : clean;
 }
 
-export class RobotHaClient implements RobotHaClientView {
+export class RobotHaClient implements RobotHaClientView, RobotHaWriteClient {
   readonly #config: RobotHaRuntimeConfig;
   readonly #socketFactory;
   readonly #stateReader;
@@ -78,10 +82,12 @@ export class RobotHaClient implements RobotHaClientView {
   readonly #maxPending: number;
   readonly #maxFrameBytes: number;
   readonly #entityById = new Map<string, RobotHaPolicyEntity>();
+  readonly #entityByAlias = new Map<string, RobotHaPolicyEntity>();
   readonly #states = new Map<string, RobotHaProjectedState>();
   readonly #snapshotEvents = new Map<string, RobotHaProjectedState>();
   readonly #pending = new Map<number, PendingRequest>();
   readonly #stateListeners = new Set<(state: RobotHaProjectedState) => void>();
+  readonly #observationListeners = new Set<(observation: RobotHaStateObservation) => void>();
   readonly #metrics: MutableMetrics = {
     connection_attempts: 0,
     successful_connections: 0,
@@ -98,6 +104,8 @@ export class RobotHaClient implements RobotHaClientView {
   #socketUnsubscribers: (() => void)[] = [];
   #snapshotController: AbortController | null = null;
   #nextRequestId = 1;
+  #connectionGeneration = 0;
+  #observationSequence = 0;
   #subscriptionId: number | null = null;
   #authSent = false;
   #handshakeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -143,6 +151,7 @@ export class RobotHaClient implements RobotHaClientView {
     );
     for (const entity of policy.entities) {
       this.#entityById.set(entity.entity_id, entity);
+      this.#entityByAlias.set(entity.alias, entity);
     }
   }
 
@@ -178,6 +187,11 @@ export class RobotHaClient implements RobotHaClientView {
     return () => this.#stateListeners.delete(listener);
   }
 
+  public onObservation(listener: (observation: RobotHaStateObservation) => void): () => void {
+    this.#observationListeners.add(listener);
+    return () => this.#observationListeners.delete(listener);
+  }
+
   public connect(): Promise<void> {
     if (this.#state === "closed") {
       return Promise.reject(new RobotHaTransportError("CLOSED", "Robot HA client is closed"));
@@ -191,6 +205,10 @@ export class RobotHaClient implements RobotHaClientView {
         : Promise.reject(new RobotHaTransportError("PROTOCOL_ERROR", "Robot HA connection is already active"));
     }
     this.#clearSocketListeners();
+    if (!Number.isSafeInteger(this.#connectionGeneration + 1)) {
+      return Promise.reject(new RobotHaTransportError("PROTOCOL_ERROR", "Robot HA connection generation is exhausted"));
+    }
+    this.#connectionGeneration += 1;
     this.#snapshotController?.abort();
     this.#snapshotController = new AbortController();
     this.#invalidateStates();
@@ -243,6 +261,59 @@ export class RobotHaClient implements RobotHaClientView {
       throw new RobotHaTransportError("DISCONNECTED", "Robot HA client is not ready");
     }
     await this.#sendRequest({ type: "ping" }, "pong");
+  }
+
+  public beginWrite(alias: string, action: RobotHaWriteAction): RobotHaWriteAttempt {
+    if (this.#state !== "ready") {
+      throw new RobotHaTransportError("DISCONNECTED", "Robot HA client is not ready");
+    }
+    const entity = this.#entityByAlias.get(alias);
+    if (
+      entity === undefined
+      || !entity.write_actions.includes(action)
+      || !["light", "switch", "scene"].includes(entity.domain)
+      || (action === "activate_scene") !== (entity.domain === "scene")
+    ) {
+      throw new RobotHaTransportError("PROTOCOL_ERROR", "Robot HA write is not allowlisted");
+    }
+    const service = action === "activate_scene" ? "turn_on" : action;
+    const dispatchCursor = {
+      connection_generation: this.#connectionGeneration,
+      sequence: this.#observationSequence,
+    };
+    const { id, response } = this.#sendRequestWithId({
+      type: "call_service",
+      domain: entity.domain,
+      service,
+      target: { entity_id: entity.entity_id },
+    }, "result");
+    return {
+      request_id: id,
+      dispatch_cursor: dispatchCursor,
+      response: response.then((message) => ({
+        request_id: id,
+        accepted: message.success === true,
+      })),
+    };
+  }
+
+  public async reconcileState(alias: string, signal: AbortSignal): Promise<RobotHaProjectedState> {
+    if (this.#state === "closed") {
+      throw new RobotHaTransportError("CLOSED", "Robot HA client is closed");
+    }
+    const entity = this.#entityByAlias.get(alias);
+    if (entity === undefined) {
+      throw new RobotHaTransportError("PROTOCOL_ERROR", "Robot HA reconciliation alias is not allowlisted");
+    }
+    const rawStates = await this.#stateReader.read(this.#config, [entity], signal);
+    if (
+      rawStates.size !== 1
+      || !rawStates.has(entity.entity_id)
+      || [...rawStates.keys()].some((entityId) => entityId !== entity.entity_id)
+    ) {
+      throw new RobotHaTransportError("STATE_LOAD_FAILED", "Robot HA reconciliation returned an invalid entity set");
+    }
+    return structuredClone(projectRobotHaState(entity, rawStates.get(entity.entity_id)));
   }
 
   public close(): void {
@@ -568,6 +639,20 @@ export class RobotHaClient implements RobotHaClientView {
   #storeState(state: RobotHaProjectedState, notify: boolean): void {
     this.#states.set(state.alias, structuredClone(state));
     if (notify) {
+      if (!Number.isSafeInteger(this.#observationSequence + 1)) {
+        const socket = this.#socket;
+        if (socket !== null) {
+          this.#fatalProtocol(socket, "Robot HA observation sequence is exhausted");
+        }
+        return;
+      }
+      this.#observationSequence += 1;
+      const observation: RobotHaStateObservation = {
+        connection_generation: this.#connectionGeneration,
+        sequence: this.#observationSequence,
+        source: "subscribed_state_changed",
+        state: structuredClone(state),
+      };
       this.#emitAudit("ha.state.changed", {
         alias: state.alias,
         domain: state.domain,
@@ -578,6 +663,13 @@ export class RobotHaClient implements RobotHaClientView {
           listener(structuredClone(state));
         } catch {
           // A local observer cannot change transport state or suppress other observers.
+        }
+      }
+      for (const listener of this.#observationListeners) {
+        try {
+          listener(structuredClone(observation));
+        } catch {
+          // A local observer cannot change transport state or suppress others.
         }
       }
     }

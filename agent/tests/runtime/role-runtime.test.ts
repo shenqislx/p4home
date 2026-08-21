@@ -49,9 +49,14 @@ test("role profiles keep user text and tool namespaces isolated", () => {
   const cat = getRoleProfile("cat");
 
   assert.deepEqual(human.allowed_tools, []);
-  assert.deepEqual(robot.allowed_tools, ["home.get_entity"]);
+  assert.deepEqual(robot.allowed_tools, [
+    "home.get_entity",
+    "home.turn_on",
+    "home.turn_off",
+    "home.activate_scene",
+  ]);
   assert.deepEqual(cat.allowed_tools, CAT_WORLD_TOOLS);
-  assert.equal(robot.allowed_tools.some((tool) => tool !== "home.get_entity"), false);
+  assert.equal(robot.allowed_tools.every((tool) => tool.startsWith("home.")), true);
   assert.equal(human.allowed_tools.length, 0);
   assert.equal(cat.allowed_tools.some((tool) => tool.startsWith("home.")), false);
   assert.equal(cat.accepts_user_text, false);

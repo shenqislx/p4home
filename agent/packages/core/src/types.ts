@@ -77,6 +77,9 @@ export type ToolErrorCode =
   | "HA_OFFLINE"
   | "HA_STATE_MISSING"
   | "HA_STATE_INVALID"
+  | "UNAUTHORIZED_HA_ACTION"
+  | "HA_REJECTED"
+  | "HA_OUTCOME_UNKNOWN"
   | "INTERNAL";
 
 export interface ToolError {

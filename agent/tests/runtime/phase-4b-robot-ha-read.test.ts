@@ -265,19 +265,24 @@ test("Phase 4B migrates an existing Robot audit session without rewriting its v1
   assert.ok(trace !== null);
   assert.notEqual(trace.run.session_id, "session:phase4b:robot");
   const migratedProfile = await store.getSessionAgentProfile(trace.run.session_id);
-  assert.equal(migratedProfile?.agent_profile_id, "role-profile-v3:robot");
-  assert.deepEqual(migratedProfile?.allowed_tools, ["home.get_entity"]);
+  assert.equal(migratedProfile?.agent_profile_id, "role-profile-v4:robot");
+  assert.deepEqual(migratedProfile?.allowed_tools, [
+    "home.get_entity",
+    "home.turn_on",
+    "home.turn_off",
+    "home.activate_scene",
+  ]);
   assert.equal(trace.events[0]?.type, "role.audit.session_migrated");
   assert.deepEqual(trace.events[0]?.payload, {
     from_session_id: "session:phase4b:robot",
     from_agent_profile_id: "role-profile-v1:robot",
     to_session_id: trace.run.session_id,
-    to_agent_profile_id: "role-profile-v3:robot",
-    role_profile_revision: "role-profile/v3",
+    to_agent_profile_id: "role-profile-v4:robot",
+    role_profile_revision: "role-profile/v4",
   });
   assert.equal(
     trace.events.find((event) => event.type === "role.run.started")?.payload.role_profile_revision,
-    "role-profile/v3",
+    "role-profile/v4",
   );
 });
 

@@ -2,7 +2,7 @@
 
 > Status: `in_progress`
 > Started: 2026-08-20
-> Current Gate: 4B coding 与独立 bugs review 完成；真实 HA 读侧门禁尚待专用凭证
+> Current Gate: 4C coding 与独立 bugs review 完成；真实 HA 读写门禁尚待专用凭证与隔离实体
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 3 complete；HA 环境与隔离测试实体可用
 
@@ -89,16 +89,22 @@ Interaction 可以产生相互隔离的 Human 与 Robot Run，并由确定性 Re
 
 只有 4B review 通过后开始：
 
-- [ ] 仅向 Robot 增加 `home.turn_on(alias)`、`home.turn_off(alias)` 和
+- [x] 仅向 Robot 增加 `home.turn_on(alias)`、`home.turn_off(alias)` 和
   `home.activate_scene(alias)`；首批 domain 限于显式 allowlist 的 `light/switch/scene`，若加入
   `climate.turn_on/turn_off` 必须逐实体显式授权；
-- [ ] `lock`、`alarm_control_panel`、门禁、购买、删除、任意 service/data、温度设定与温控极值在
+- [x] `lock`、`alarm_control_panel`、门禁、购买、删除、任意 service/data、温度设定与温控极值在
   Phase 4 硬拒绝，不以 prompt 或“确认文本”代替执行层策略；
-- [ ] 每次写请求先冻结 policy decision，再发送唯一 request id；HA `result` 后等待目标实体状态回刷，
+- [x] 每次写请求先冻结 policy decision，再发送唯一 request id；HA `result` 后等待目标实体状态回刷，
   将 `accepted/completed/rejected/unknown` 分开审计和呈现；
-- [ ] timeout、断线与取消后不自动重发；只允许一次只读状态查询协助判定，仍无法证明时保留 unknown；
+- [x] timeout、断线与取消后不自动重发；只允许一次只读状态查询协助判定，仍无法证明时保留 unknown；
 - [ ] 在隔离的低风险真实实体上验证单次写入、物理/HA 状态、Robot 观察与 P4 现有订阅最终一致；
 - [ ] 回归 P4 离线时 Robot 可工作、Agent/Robot 离线时 P4 ↔ HA 与触控 UI 不受影响。
+
+4C coding done：Runtime 已把 policy、固定 request、HA accepted/rejected 与投影 state observation 分开，
+只有后续状态回刷能产生 completed；发送后的 timeout、取消或断线统一保留 unknown 且
+`replay_allowed=false`。本地实现证据见
+[Phase 4C Low-risk Write](../../evidence/agent-phase-4/phase-4c-low-risk-write.md)。独立 bugs review 已完成；
+真实 HA/P4 收敛与离线互不影响仍是不可替代的退出门禁。
 
 退出门禁：未授权或高风险写入零执行；允许实体的真实动作可由 HA result 与后续 state change 共同
 证明，Robot/P4 最终一致；重复、超时和重连测试没有盲目重放或伪造完成。

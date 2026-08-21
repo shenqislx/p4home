@@ -16,6 +16,7 @@ import {
 import { RoleScheduler } from "./role-scheduler.ts";
 import { RoleSessionRegistry } from "./role-session.ts";
 import type { RobotHaReadRuntime } from "./robot-ha-read-runner.ts";
+import type { RobotHaWriteRuntime } from "./robot-ha-write-runner.ts";
 
 export interface RunRoleInteractionOptions {
   readonly interaction: UserTextInteraction;
@@ -28,7 +29,7 @@ export interface RunRoleInteractionOptions {
   readonly signal?: AbortSignal;
   readonly audit?: RoleRunAuditOptions;
   readonly clock?: () => number;
-  readonly robot_ha?: RobotHaReadRuntime;
+  readonly robot_ha?: RobotHaReadRuntime | RobotHaWriteRuntime;
 }
 
 export interface RunRoleInteractionResult {

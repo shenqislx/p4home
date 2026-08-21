@@ -17,6 +17,7 @@ export * from "./role-profiles.ts";
 export * from "./role-response-policy.ts";
 export * from "./role-router.ts";
 export * from "./robot-ha-read-runner.ts";
+export * from "./robot-ha-write-runner.ts";
 export * from "./role-runner.ts";
 export * from "./role-scheduler.ts";
 export * from "./role-session.ts";
