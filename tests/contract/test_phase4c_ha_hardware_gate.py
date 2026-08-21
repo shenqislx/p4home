@@ -34,6 +34,14 @@ class Phase4CHaHardwareGateContractTests(unittest.TestCase):
         self.assertEqual(workflow.count('"$PNPM_BIN" install --frozen-lockfile'), 2)
         self.assertNotIn("corepack enable", workflow)
         self.assertNotIn("npx --yes pnpm", workflow)
+        self.assertIn('test "$("$phase4c_node_bin" --version)" = "v24.19.0"', workflow)
+        self.assertIn('echo "PHASE4C_NODE_BIN=$phase4c_node_bin" >> "$GITHUB_ENV"', workflow)
+        self.assertEqual(
+            workflow.count(
+                '"$PHASE4C_NODE_BIN" --import tsx apps/runtime/src/phase4c-ha-gate.ts'
+            ),
+            2,
+        )
         self.assertIn("scripts/prepare-phase4c-ha-profile.py", workflow)
         self.assertIn("--panel-entities firmware/components/panel_data_store/panel_entities.json", workflow)
         self.assertIn("scripts/sanitize-phase4c-monitor.py", workflow)
@@ -62,10 +70,19 @@ class Phase4CHaHardwareGateContractTests(unittest.TestCase):
         self.assertIn('if: always() && inputs.validation_profile != \'generic\'', workflow)
         self.assertIn('"phase4c_validation_enabled": phase4c_validation_enabled', workflow)
         build = workflow.index("- name: Build firmware")
+        runtime_harness = workflow.index("- name: Start Agent Runtime harness")
+        install = workflow.index("- name: Install Phase 4C gate dependencies")
+        offline = workflow.index("- name: Validate Robot while P4 application is offline")
         flash = workflow.index("- name: Flash firmware and capture serial")
         build_section = workflow[build:flash]
+        runtime_harness_section = workflow[runtime_harness:install]
+        install_section = workflow[install:offline]
+        offline_section = workflow[offline:flash]
         flash_section = workflow[flash:append]
         self.assertNotIn('monitor_log="firmware/monitor.log"', build_section)
+        self.assertNotIn("PHASE4C_NODE_BIN", runtime_harness_section)
+        self.assertIn('echo "PHASE4C_NODE_BIN=$phase4c_node_bin"', install_section)
+        self.assertNotIn("shell: zsh {0}", offline_section)
         self.assertNotIn(
             'if [[ "${{ inputs.validation_profile }}" != "generic" ]]; then',
             build_section,

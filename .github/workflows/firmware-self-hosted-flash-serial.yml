@@ -341,6 +341,10 @@ jobs:
         working-directory: agent
         run: |
           set -euo pipefail
+          phase4c_node_bin="$(command -v node)"
+          test -x "$phase4c_node_bin"
+          test "$("$phase4c_node_bin" --version)" = "v24.19.0"
+          echo "PHASE4C_NODE_BIN=$phase4c_node_bin" >> "$GITHUB_ENV"
           PNPM_BIN="$(command -v pnpm || true)"
           if [[ -z "$PNPM_BIN" && -x /opt/homebrew/bin/pnpm ]]; then
             PNPM_BIN=/opt/homebrew/bin/pnpm
@@ -351,7 +355,6 @@ jobs:
 
       - name: Validate Robot while P4 application is offline
         if: inputs.validation_profile == 'phase4c_ha'
-        shell: zsh {0}
         run: |
           set -euo pipefail
           . scripts/activate-idf-v5.5.4.sh
@@ -365,7 +368,7 @@ jobs:
           (
             cd agent
             AGENT_HARNESS_RESULT_FILE="$PHASE4C_OFFLINE_RESULT_FILE" \
-              node --import tsx apps/runtime/src/phase4c-ha-gate.ts
+              "$PHASE4C_NODE_BIN" --import tsx apps/runtime/src/phase4c-ha-gate.ts
           ) > "$PHASE4C_OFFLINE_LOG" 2>&1
           offline_exit_code=$?
           set -e
@@ -411,7 +414,7 @@ jobs:
               set +e
               (
                 cd agent
-                node --import tsx apps/runtime/src/phase4c-ha-gate.ts
+                "$PHASE4C_NODE_BIN" --import tsx apps/runtime/src/phase4c-ha-gate.ts
               ) > "$AGENT_HARNESS_LOG" 2>&1
               gate_exit_code=$?
               set -e
