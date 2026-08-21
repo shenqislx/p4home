@@ -18,6 +18,10 @@ import { SqliteAuditStore } from "@p4home/storage-sqlite";
 
 import { evaluateToolCalling } from "./evaluator.ts";
 import {
+  assessPhase4EvalGate,
+  evaluatePhase4Runtime,
+} from "./phase4-evaluator.ts";
+import {
   assessRoleEvalGate,
   evaluateRoleRuntime,
   ROLE_EVAL_TOTAL_CASES_PER_REPEAT,
@@ -100,9 +104,54 @@ Eval:
 Phase 2 role eval (separate Router/Human/Robot/Cat reports, no aggregate score):
   pnpm eval:roles -- --model ${DEFAULT_OLLAMA_MODEL} [--repeat 2] [--output FILE]
 
+Phase 4 eval (separate Router span/Robot policy/Human/Composer reports):
+  pnpm eval:phase4 -- --model ${DEFAULT_OLLAMA_MODEL} [--output FILE]
+
 Debug one text run:
   pnpm debug:agent -- --model ${DEFAULT_OLLAMA_MODEL} --text "去书房" [--database :memory:]
 `);
+}
+
+async function phase4EvalCommand(argumentsValue: ParsedArguments): Promise<void> {
+  assertKnownOptions(argumentsValue, new Set(["--model", "--output", "--timeout-ms"]));
+  const model = value(argumentsValue, "--model", process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL);
+  if (model === undefined || model.trim().length === 0) {
+    throw new Error("--model is required");
+  }
+  const timeoutMs = integer(argumentsValue, "--timeout-ms", 120_000, 100, 600_000);
+  const provider = new OllamaHttpProvider({ model, requestTimeoutMs: timeoutMs });
+  const capabilities = await provider.probe();
+  if (!capabilities.modelAvailable || !capabilities.toolCalling) {
+    throw new Error(`model ${model} is unavailable or does not declare tool calling`);
+  }
+  const report = await evaluatePhase4Runtime({
+    model,
+    provider,
+    timeout_ms: timeoutMs,
+    on_case(section, id, pass): void {
+      process.stderr.write(`[${section}] ${id} ${pass ? "pass" : "fail"}\n`);
+    },
+  });
+  const artifact = {
+    generated_at: new Date().toISOString(),
+    runtime: { node: process.version, platform: process.platform, arch: process.arch },
+    ...report,
+  };
+  const encoded = `${JSON.stringify(artifact, null, 2)}\n`;
+  const output = value(argumentsValue, "--output");
+  if (output !== undefined) {
+    const outputPath = resolve(output);
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(outputPath, encoded, { encoding: "utf8", mode: 0o600 });
+    chmodSync(outputPath, 0o600);
+    process.stderr.write(`phase4 eval report: ${outputPath}\n`);
+  }
+  process.stdout.write(encoded);
+  const gate = assessPhase4EvalGate(report);
+  if (!gate.passed) {
+    process.stderr.write(`phase4 eval gate failed: ${gate.failures.join(", ")}\n`);
+    process.exitCode = 2;
+  }
 }
 
 async function roleEvalCommand(argumentsValue: ParsedArguments): Promise<void> {
@@ -339,6 +388,10 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   }
   if (argumentsValue.command === "roles") {
     await roleEvalCommand(argumentsValue);
+    return;
+  }
+  if (argumentsValue.command === "phase4") {
+    await phase4EvalCommand(argumentsValue);
     return;
   }
   if (argumentsValue.command === "help") {

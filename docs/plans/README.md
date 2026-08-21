@@ -50,8 +50,10 @@ Contract & Credential Boundary、4B Read-only Robot HA Tool、4C Low-risk Write 
 从 HA 回刷到一致终态，并在 Robot 关闭后保持 P4 standalone 与稳态 UI 8 FPS。4C 自动化门禁已关闭，
 独立物理灯态和实际触摸输入保留给 4E。4D 已完成显式 v2 RoutePlan、UTF-16 全文分割、独立
 Human/Robot Run、确定性 Response Composer、deadline/partial/deferred 语义与 SQLite 三 Run 还原，
-并在多轮独立 bugs review 后以 no findings 关闭；当前进入 4E Security, Eval & Real Environment Gate，
-Phase 4 整体仍为 `in_progress`。
+并在多轮独立 bugs review 后以 no findings 关闭。4E 已完成四分项真实模型评测、security holdout、
+Git/运行产物/SQLite/进程参数敏感审计和十一轮独立 bugs review，最终为 no findings；当前等待当前
+commit 的 P4 长稳 artifact，以及有人在设备旁完成物理灯态与实际触摸观察。Phase 4 整体仍为
+`in_progress`。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 已在 Phase 2 完成并通过实机证据验证。

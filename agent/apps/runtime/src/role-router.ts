@@ -20,44 +20,34 @@ import {
 export const ROLE_ROUTER_SYSTEM_PROMPT = [
   "你是 P4 Home 的 Role Router，只切分和分类，不回答用户，也没有任何工具。",
   "Home Assistant 家居查询或控制属于 robot；普通对话、知识问答、情绪表达属于 human。",
-  "输出一个或两个 assignment，start/end 是原始用户文本的 JavaScript UTF-16 半开区间。",
-  "assignment 必须按原文顺序、非空、无重叠无遗漏地覆盖全文，不能切开 emoji 等 UTF-16 代理对；标点和连接词也必须归入相邻一段。",
-  "单意图也输出一个 assignment；end 必须填写原始文本 length 的整数值，不能填写说明文字。",
-  "混合意图最多输出一段 human 和一段 robot；不能安全切分、含糊目标、否定或条件式命令时只输出 {\"role\":\"clarify\"}。",
+  "输出一个或两个 assignment；text 必须逐字复制对应的原始用户文本子串，不能改写、增删或规范化字符。",
+  "assignment 必须按原文顺序、非空、无重叠无遗漏地覆盖全文；标点、空格、连接词和 emoji 也必须归入相邻一段。",
+  "单意图也输出一个 assignment，text 必须等于完整原始文本。",
+  "混合意图最多输出一段 human 和一段 robot；不能安全切分、含糊目标、否定或条件式命令时输出唯一 full-span clarify assignment。",
+  "唯一允许的 JSON 形状是 {\"assignments\":[{\"role\":\"human|robot|clarify\",\"text\":\"原文精确子串\"}]}，不得输出自然语言。",
   "禁止 Cat、第三段、Markdown、解释、工具调用、thinking 或其他字段。",
 ].join("");
 
 export const ROLE_ROUTER_DECISION_SCHEMA = {
-  oneOf: [
-    {
-      type: "object",
-      required: ["role"],
-      properties: { role: { enum: ["human", "robot", "clarify"] } },
-      additionalProperties: false,
-    },
-    {
-      type: "object",
-      required: ["assignments"],
-      properties: {
-        assignments: {
-          type: "array",
-          minItems: 1,
-          maxItems: 2,
-          items: {
-            type: "object",
-            required: ["role", "start", "end"],
-            properties: {
-              role: { enum: ["human", "robot"] },
-              start: { type: "integer", minimum: 0, maximum: 1_024 },
-              end: { type: "integer", minimum: 0, maximum: 1_024 },
-            },
-            additionalProperties: false,
-          },
+  type: "object",
+  required: ["assignments"],
+  properties: {
+    assignments: {
+      type: "array",
+      minItems: 1,
+      maxItems: 2,
+      items: {
+        type: "object",
+        required: ["role", "text"],
+        properties: {
+          role: { enum: ["human", "robot", "clarify"] },
+          text: { type: "string", minLength: 1, maxLength: 1_024 },
         },
+        additionalProperties: false,
       },
-      additionalProperties: false,
     },
-  ],
+  },
+  additionalProperties: false,
 } as const;
 
 export const ROLE_ROUTER_MODEL_OPTIONS = {
@@ -67,19 +57,14 @@ export const ROLE_ROUTER_MODEL_OPTIONS = {
   num_predict: 128,
 } as const;
 
-interface LegacyRouterDecision {
-  readonly role: "human" | "robot" | "clarify";
-}
-
 interface SpanRouterDecision {
   readonly assignments: readonly {
-    readonly role: UserRoutableRoleId;
-    readonly start: number;
-    readonly end: number;
+    readonly role: UserRoutableRoleId | "clarify";
+    readonly text: string;
   }[];
 }
 
-type RouterDecision = LegacyRouterDecision | SpanRouterDecision;
+type RouterDecision = SpanRouterDecision;
 
 export interface RouteInteractionOptions {
   readonly interaction: UserTextInteraction;
@@ -163,6 +148,7 @@ export async function routeInteraction(
         { role: "user", content: options.interaction.text },
       ],
       options: ROLE_ROUTER_MODEL_OPTIONS,
+      format: ROLE_ROUTER_DECISION_SCHEMA,
       think: QWEN_THINKING_ENABLED,
       ...(options.timeout_ms === undefined ? {} : { timeout_ms: options.timeout_ms }),
     }, options.signal);
@@ -191,22 +177,38 @@ export async function routeInteraction(
   }
   let plan: RoutePlanV2;
   try {
-    if ("role" in decision) {
-      const role = decision.role;
-      plan = role === "clarify"
-        ? makePlan(options, [{
-            role_id: "human",
-            source_span: { start: 0, end: options.interaction.text.length },
-          }], "model_clarify", "clarify")
-        : makePlan(options, [{
-            role_id: role,
-            source_span: { start: 0, end: options.interaction.text.length },
-          }], role === "robot" ? "model_robot" : "model_human");
+    const clarify = decision.assignments.find((assignment) => assignment.role === "clarify");
+    if (clarify !== undefined) {
+      if (
+        decision.assignments.length !== 1
+        || clarify.text !== options.interaction.text
+      ) {
+        throw new TypeError("clarify must be the only full-span assignment");
+      }
+      plan = makePlan(options, [{
+        role_id: "human",
+        source_span: { start: 0, end: options.interaction.text.length },
+      }], "model_clarify", "clarify");
     } else {
-      const assignments = decision.assignments.map((assignment) => ({
-        role_id: assignment.role,
-        source_span: { start: assignment.start, end: assignment.end },
-      }));
+      let offset = 0;
+      const assignments = decision.assignments.map((assignment) => {
+        if (assignment.role === "clarify") {
+          throw new TypeError("clarify cannot be mixed with another assignment");
+        }
+        const start = offset;
+        const end = start + assignment.text.length;
+        if (options.interaction.text.slice(start, end) !== assignment.text) {
+          throw new TypeError("assignment text must be an exact ordered source substring");
+        }
+        offset = end;
+        return {
+          role_id: assignment.role,
+          source_span: { start, end },
+        };
+      });
+      if (offset !== options.interaction.text.length) {
+        throw new TypeError("assignment text must cover the complete source interaction");
+      }
       const reason: RouteReason = assignments.length === 2
         ? "model_mixed"
         : assignments[0]?.role_id === "robot"

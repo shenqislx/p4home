@@ -11,11 +11,18 @@ import type {
   OllamaChatResult,
 } from "@p4home/provider-ollama";
 
+function routerDecision(text: string): string {
+  const scenario = ROUTER_EVAL_SCENARIOS.find((item) => item.text === text);
+  assert.ok(scenario !== undefined);
+  return scenario.expected_mode === "clarify"
+    ? JSON.stringify({ assignments: [{ role: "clarify", text }] })
+    : JSON.stringify({ assignments: [{
+        role: scenario.expected_role,
+        text,
+      }] });
+}
+
 test("role evaluator emits four separate reports without an aggregate score", async () => {
-  const expectedRoutes = new Map(ROUTER_EVAL_SCENARIOS.map((scenario) => [
-    scenario.text,
-    scenario.expected_mode === "clarify" ? "clarify" : scenario.expected_role,
-  ]));
   const requests: OllamaChatRequest[] = [];
   let tick = 0;
   const report = await evaluateRoleRuntime({
@@ -27,7 +34,7 @@ test("role evaluator emits four separate reports without an aggregate score", as
         const text = request.messages.at(-1)?.content ?? "";
         const router = request.messages[0]?.content.includes("Role Router") === true;
         const content = router
-          ? JSON.stringify({ role: expectedRoutes.get(text) })
+          ? routerDecision(text)
           : text.includes("顺便")
             ? "你希望我先回应心情，还是说明要处理的设备？"
             : "这是一个简短且没有工具调用的 Human 回复。";
@@ -115,10 +122,6 @@ test("router fallbacks and Human policy failures stay in their own summaries", a
 });
 
 test("Human textual execution claims fail both runtime policy and the role gate", async () => {
-  const expectedRoutes = new Map(ROUTER_EVAL_SCENARIOS.map((scenario) => [
-    scenario.text,
-    scenario.expected_mode === "clarify" ? "clarify" : scenario.expected_role,
-  ]));
   const report = await evaluateRoleRuntime({
     model: "fake-claiming-role-model",
     repeat: 1,
@@ -131,7 +134,7 @@ test("Human textual execution claims fail both runtime policy and the role gate"
           message: {
             role: "assistant",
             content: router
-              ? JSON.stringify({ role: expectedRoutes.get(text) })
+              ? routerDecision(text)
               : "空调已经打开了。",
           },
         };

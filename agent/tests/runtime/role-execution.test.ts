@@ -8,6 +8,7 @@ import type {
 import { OllamaProviderError } from "@p4home/provider-ollama";
 import { SqliteAuditStore } from "@p4home/storage-sqlite";
 import {
+  assessHumanResponsePolicy,
   ROBOT_CAPABILITY_UNAVAILABLE_TEXT,
   RoleScheduler,
   RoleSessionRegistry,
@@ -123,7 +124,7 @@ test("product role entrypoint composes routing, bounded scheduling and the assig
         requests.push(request);
         const router = request.messages[0]?.content.includes("Role Router") === true;
         return router
-          ? { model: "fake", message: { role: "assistant", content: '{"role":"human"}' } }
+          ? { model: "fake", message: { role: "assistant", content: '{"assignments":[{"role":"human","text":"今天好累"}]}' } }
           : { model: "fake", message: { role: "assistant", content: "辛苦了，先休息一下吧。" } };
       },
     },
@@ -241,9 +242,38 @@ test("Human rejects textual device execution claims and counts the attempted mod
   for (const [index, claim] of [
     "空调已经打开了。",
     "我把空调打开了。",
+    "我打开了客厅灯。",
+    "我关闭了空调。",
+    "我刚才打开了客厅灯。",
+    "我刚替你关闭了空调。",
+    "我刚才按你的要求打开客厅灯。",
+    "我刚才按你的要求打开客厅灯，是否还要关闭？",
+    "我刚才按你的要求打开客厅灯，然后想问是否还要关闭？",
+    "已经按计划把客厅灯打开，是否恢复？",
+    "我打开过客厅灯。",
+    "客厅灯我打开过。",
+    "我曾经关闭空调。",
+    "成功将客厅灯打开。",
+    "完成了客厅灯关闭。",
+    "我已经打开客厅灯是否需要恢复？",
+    "客厅灯亮了是否需要关闭？",
+    "我没有犹豫就打开了客厅灯。",
+    "我不打算关闭空调但已经打开客厅灯。",
+    "我想了想然后打开了客厅灯。",
+    "我没想到竟然打开了客厅灯。",
+    "我没有丝毫犹豫便打开了客厅灯。",
+    "我不打算关闭空调接着已经打开客厅灯。",
+    "我想了想又打开了客厅灯。",
+    "我之前就关闭空调。",
+    "我刚才便打开客厅灯。",
+    "我刚才竟然打开客厅灯。",
+    "已把客厅灯打开。",
+    "已经把空调关闭。",
+    "我已把客厅灯打开。",
     "已为你关闭客厅灯。",
     "客厅灯关了。",
     "I've turned on the air conditioner.",
+    "I just turned on the light.",
   ].entries()) {
     const sessions = registry();
     const value = interaction(`interaction:human:false-claim:${index + 1}`, "陪我聊聊");
@@ -266,6 +296,75 @@ test("Human rejects textual device execution claims and counts the attempted mod
     assert.equal(result.error?.code, "ROLE_POLICY_VIOLATION");
     assert.equal(result.model_turns, 1);
     assert.deepEqual(sessions.get("human").history(), []);
+  }
+});
+
+test("Human clarification can name a requested device action without claiming it executed", async () => {
+  const sessions = registry();
+  const value = interaction("interaction:human:clarify-action", "请说明要处理哪个设备");
+  const result = await runAssignedRole({
+    run_id: "run:human:clarify-action",
+    interaction: value,
+    plan: plan(value, "human", "clarify"),
+    session: sessions.get("human"),
+    provider: {
+      async chat(): Promise<OllamaChatResult> {
+        return {
+          model: "qwen3.8:27b-mlx",
+          message: {
+            role: "assistant",
+            content: "请告诉我您想要控制或查询的具体设备名称。",
+          },
+        };
+      },
+    },
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.error, null);
+});
+
+test("Human intent and future-tense clarifications are not execution claims", async () => {
+  for (const [index, clarification] of [
+    "我会打开哪个灯？",
+    "我刚才想打开哪个灯？",
+  ].entries()) {
+    const sessions = registry();
+    const value = interaction(`interaction:human:clarify-intent:${index}`, "请说明要处理哪个设备");
+    const result = await runAssignedRole({
+      run_id: `run:human:clarify-intent:${index}`,
+      interaction: value,
+      plan: plan(value, "human", "clarify"),
+      session: sessions.get("human"),
+      provider: {
+        async chat(): Promise<OllamaChatResult> {
+          return {
+            model: "qwen3.8:27b-mlx",
+            message: { role: "assistant", content: clarification },
+          };
+        },
+      },
+    });
+    assert.equal(result.status, "completed");
+    assert.equal(result.error, null);
+  }
+});
+
+test("Human negated device statements are not execution claims", () => {
+  for (const statement of [
+    "我刚才没有打开客厅灯。",
+    "我刚才并未关闭空调。",
+    "我并没有成功打开客厅灯。",
+    "空调未成功关闭。",
+    "我没有按照你的要求成功打开客厅灯。",
+    "客厅灯不亮了。",
+    "客厅灯不再亮了。",
+    "客厅灯没再亮了。",
+    "我曾经打开过哪个灯？",
+  ]) {
+    assert.deepEqual(assessHumanResponsePolicy(statement, "respond"), {
+      compliant: true,
+      violation: null,
+    });
   }
 });
 

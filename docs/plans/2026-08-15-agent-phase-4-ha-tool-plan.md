@@ -147,17 +147,28 @@ SQLite 在组合前核对每个 trace 的完整 correlation identity。实现与
 
 只有 4D review 通过后开始：
 
-- [ ] 分别报告 Router span、Robot ToolCall/policy、Human 文本与 Composer 的指标和失败样本，不生成
+- [x] 分别报告 Router span、Robot ToolCall/policy、Human 文本与 Composer 的指标和失败样本，不生成
   掩盖单项失败的综合分；
-- [ ] 加入未参与提示词调优的“我好累，打开空调”等混合意图 holdout，以及越权、prompt injection、
+- [x] 加入未参与提示词调优的“我好累，打开空调”等混合意图 holdout，以及越权、prompt injection、
   HA/P4 任一离线、auth 失效、超时、取消、重连与进程恢复场景；
 - [ ] 在真实 HA + P4 环境核对 Robot 直连写入和 P4 订阅回刷，artifact 先核对身份再判强 marker 与
   矛盾证据；workflow 绿色本身不代表功能通过；
-- [ ] 核对日志、SQLite、CI artifact、进程参数和 Git 历史均不含 token 或原始敏感 HA attributes；
+- [x] 核对日志、SQLite、CI artifact、进程参数和 Git 历史均不含 token 或原始敏感 HA attributes；
 - [ ] 长跑期间验证 Agent 离线不影响 P4 ↔ HA，P4 离线不影响 Robot HA，UI 8 FPS 与固件资源基线
   无回归。
 - [ ] 在可独立观察设备时确认一次真实物理灯态变化与恢复，并执行实际触摸输入，证明触控交互而非仅
   touch driver/indev 初始化与渲染帧率；没有该证据不得宣称物理状态或触控交互已验收。
+
+4E 本地 coding 已完成：新增无 aggregate score 的四分项真实模型评测、精确原文子串到 UTF-16 span 的
+确定性边界、Robot/Human/Composer security holdout，以及对 Git objects、运行产物、SQLite 和进程参数的
+fail-closed 敏感信息审计。证据见
+[Phase 4E Security, Eval & Real Environment Gate](../../evidence/agent-phase-4/phase-4e-security-eval-real-environment.md)。
+Git all-object 门禁核对本次真实专用 token；仓库既有的 36 个 P4 panel whitelist entity ID 是已知受跟踪
+例外，4E 不新增，也不把“Git 中没有 entity ID”作为完成条件。运行产物、SQLite 和对话输出仍要求原始
+entity ID 与敏感 attribute 零命中。
+独立 bugs review 已用十一轮动态反例关闭 Human 文本声明、Router span 和敏感文件边界问题，最终结论为
+no findings。当前等待当前 commit 对应的真实 P4 长稳 run；物理灯态与实际触摸仍需有人在设备旁独立
+观察，未用自动 marker 冒充完成。
 
 退出门禁：所有 4A–4E 技术门禁和真实环境证据通过，再交由用户最终 review。Phase 4 的 review 通过
 只关闭并归档本 Phase，不自动授权启动 Phase 5。

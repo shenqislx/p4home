@@ -146,8 +146,8 @@ function mixedHaProvider(value: UserTextInteraction, split: number) {
     async chat(request: OllamaChatRequest): Promise<OllamaChatResult> {
       if (request.messages[0]?.content.includes("Role Router") === true) {
         return { model: "fake", message: { role: "assistant", content: JSON.stringify({ assignments: [
-          { role: "robot", start: 0, end: split },
-          { role: "human", start: split, end: value.text.length },
+          { role: "robot", text: value.text.slice(0, split) },
+          { role: "human", text: value.text.slice(split) },
         ] }) } };
       }
       if (request.tools !== undefined) {
@@ -276,8 +276,8 @@ test("invalid mixed model output fails closed before any Robot run is created", 
               message: {
                 role: "assistant",
                 content: JSON.stringify({ assignments: [
-                  { role: "human", start: 0, end: split },
-                  { role: "robot", start: split + 1, end: value.text.length },
+                  { role: "human", text: value.text.slice(0, split) },
+                  { role: "robot", text: value.text.slice(split + 1) },
                 ] }),
               },
             }
@@ -308,8 +308,8 @@ test("Human then Robot receive only their exact slices and compose in source ord
   const sessions = registry("human-robot");
   const scheduler = new RoleScheduler(2);
   const routeJson = JSON.stringify({ assignments: [
-    { role: "human", start: 0, end: split },
-    { role: "robot", start: split, end: value.text.length },
+    { role: "human", text: value.text.slice(0, split) },
+    { role: "robot", text: value.text.slice(split) },
   ] });
   const result = await runRoleInteraction({
     interaction: value,
@@ -345,8 +345,8 @@ test("Robot then Human preserves source order and blocks cross-role prompt injec
   const sessions = registry("robot-human");
   const scheduler = new RoleScheduler(2);
   const routeJson = JSON.stringify({ assignments: [
-    { role: "robot", start: 0, end: split },
-    { role: "human", start: split, end: value.text.length },
+    { role: "robot", text: value.text.slice(0, split) },
+    { role: "human", text: value.text.slice(split) },
   ] });
   const result = await runRoleInteraction({
     interaction: value,
@@ -380,8 +380,8 @@ test("one assignment timing out yields explicit partial success without cancelli
     sessions: registry("partial"),
     scheduler,
     provider: providerForMixed(JSON.stringify({ assignments: [
-      { role: "human", start: 0, end: split },
-      { role: "robot", start: split, end: value.text.length },
+      { role: "human", text: value.text.slice(0, split) },
+      { role: "robot", text: value.text.slice(split) },
     ] }), requests, new OllamaProviderError("TIMEOUT", "timed out", { retryable: true })),
     clock: () => 1_001,
   });
@@ -412,8 +412,8 @@ test("one interaction deadline bounds active and queued assignments", async () =
           return {
             model: "fake",
             message: { role: "assistant", content: JSON.stringify({ assignments: [
-              { role: "human", start: 0, end: split },
-              { role: "robot", start: split, end: value.text.length },
+              { role: "human", text: value.text.slice(0, split) },
+              { role: "robot", text: value.text.slice(split) },
             ] }) },
           };
         }
@@ -502,8 +502,8 @@ test("deadline after Robot dispatch waits for unknown truth before composing and
         modelCalls += 1;
         if (request.messages[0]?.content.includes("Role Router") === true) {
           return { model: "fake", message: { role: "assistant", content: JSON.stringify({ assignments: [
-            { role: "robot", start: 0, end: split },
-            { role: "human", start: split, end: value.text.length },
+            { role: "robot", text: value.text.slice(0, split) },
+            { role: "human", text: value.text.slice(split) },
           ] }) } };
         }
         assert.ok(request.tools !== undefined);
@@ -718,8 +718,8 @@ test("interaction cancellation prevents both queued assignments from entering a 
         return {
           model: "fake",
           message: { role: "assistant", content: JSON.stringify({ assignments: [
-            { role: "human", start: 0, end: split },
-            { role: "robot", start: split, end: value.text.length },
+            { role: "human", text: value.text.slice(0, split) },
+            { role: "robot", text: value.text.slice(split) },
           ] }) },
         };
       },
@@ -747,8 +747,8 @@ test("multi-assignment audit reconstructs two isolated runs and the deterministi
     sessions: registry("audit"),
     scheduler,
     provider: providerForMixed(JSON.stringify({ assignments: [
-      { role: "human", start: 0, end: split },
-      { role: "robot", start: split, end: value.text.length },
+      { role: "human", text: value.text.slice(0, split) },
+      { role: "robot", text: value.text.slice(split) },
     ] }), requests),
     audit: { store, clock: () => 1_100 },
     clock: () => 1_001,
@@ -788,8 +788,8 @@ test("scheduler rejection persists two synthetic terminal role runs before compo
     sessions: registry("scheduler-audit"),
     scheduler,
     provider: providerForMixed(JSON.stringify({ assignments: [
-      { role: "human", start: 0, end: split },
-      { role: "robot", start: split, end: value.text.length },
+      { role: "human", text: value.text.slice(0, split) },
+      { role: "robot", text: value.text.slice(split) },
     ] }), requests),
     audit: { store, clock: () => 1_100 },
     clock: () => 1_001,
@@ -842,8 +842,8 @@ test("a role audit start that ignores cancellation is bounded and replaced by te
     timeout_ms: 100,
     audit_finalize_timeout_ms: 500,
     provider: providerForMixed(JSON.stringify({ assignments: [
-      { role: "human", start: 0, end: split },
-      { role: "robot", start: split, end: value.text.length },
+      { role: "human", text: value.text.slice(0, split) },
+      { role: "robot", text: value.text.slice(split) },
     ] }), []),
     audit: { store: delayedStore, clock: () => 1_100 },
     clock: () => 1_001,
@@ -902,7 +902,7 @@ test("a failed role terminal write is repaired before the Composer Run is create
       async chat(): Promise<OllamaChatResult> {
         calls += 1;
         return calls === 1
-          ? { model: "fake", message: { role: "assistant", content: '{"role":"human"}' } }
+          ? { model: "fake", message: { role: "assistant", content: '{"assignments":[{"role":"human","text":"今天有点累"}]}' } }
           : { model: "fake", message: { role: "assistant", content: "先休息一下吧。" } };
       },
     },
@@ -970,7 +970,7 @@ test("run-id collision cannot repair or compose a different interaction trace", 
       async chat(): Promise<OllamaChatResult> {
         calls += 1;
         return calls === 1
-          ? { model: "fake", message: { role: "assistant", content: '{"role":"human"}' } }
+          ? { model: "fake", message: { role: "assistant", content: '{"assignments":[{"role":"human","text":"今天有点累"}]}' } }
           : { model: "fake", message: { role: "assistant", content: "先休息一下吧。" } };
       },
     },
@@ -1030,8 +1030,8 @@ test("composition audit reports deferred while a bounded late terminal batch fin
     timeout_ms: 300,
     audit_finalize_timeout_ms: 100,
     provider: providerForMixed(JSON.stringify({ assignments: [
-      { role: "human", start: 0, end: split },
-      { role: "robot", start: split, end: value.text.length },
+      { role: "human", text: value.text.slice(0, split) },
+      { role: "robot", text: value.text.slice(split) },
     ] }), []),
     audit: { store: hangingStore, clock: () => 1_100 },
     clock: () => 1_001,
@@ -1075,7 +1075,7 @@ test("single Robot routing remains compatible and composer preserves structured 
     provider: {
       async chat(): Promise<OllamaChatResult> {
         providerCalls += 1;
-        return { model: "fake", message: { role: "assistant", content: '{"role":"robot"}' } };
+        return { model: "fake", message: { role: "assistant", content: '{"assignments":[{"role":"robot","text":"打开书房灯"}]}' } };
       },
     },
     clock: () => 1_001,

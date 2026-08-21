@@ -9,6 +9,7 @@ import {
 import {
   CAT_WORLD_TOOLS,
   QWEN_THINKING_ENABLED,
+  ROLE_ROUTER_DECISION_SCHEMA,
   buildRoleContext,
   getRoleProfile,
   routeInteraction,
@@ -100,7 +101,7 @@ test("router emits one full-span Robot assignment without exposing tools", async
   const result = await routeInteraction({
     interaction: INTERACTION,
     route_plan_id: "route-001",
-    provider: providerReturning('{"role":"robot"}', {}, (request) => {
+    provider: providerReturning('{"assignments":[{"role":"robot","text":"打开客厅灯"}]}', {}, (request) => {
       captured = request;
     }),
     clock: () => 1_001,
@@ -116,7 +117,7 @@ test("router emits one full-span Robot assignment without exposing tools", async
   }]);
   validateRoutePlan(result.plan, INTERACTION);
   assert.equal(captured?.tools, undefined);
-  assert.equal(captured?.format, undefined);
+  assert.deepEqual(captured?.format, ROLE_ROUTER_DECISION_SCHEMA);
   assert.equal(captured?.think, QWEN_THINKING_ENABLED);
   assert.equal(captured?.options?.temperature, 0);
 });
@@ -125,13 +126,13 @@ test("human and clarify decisions can never create Cat or Robot fallback work", 
   const human = await routeInteraction({
     interaction: { ...INTERACTION, text: "今天好累" },
     route_plan_id: "route-human",
-    provider: providerReturning('{"role":"human"}'),
+    provider: providerReturning('{"assignments":[{"role":"human","text":"今天好累"}]}'),
     clock: () => 1_002,
   });
   const clarify = await routeInteraction({
     interaction: { ...INTERACTION, text: "我好累，顺便打开空调" },
     route_plan_id: "route-clarify",
-    provider: providerReturning('{"role":"clarify"}'),
+    provider: providerReturning('{"assignments":[{"role":"clarify","text":"我好累，顺便打开空调"}]}'),
     clock: () => 1_003,
   });
 
