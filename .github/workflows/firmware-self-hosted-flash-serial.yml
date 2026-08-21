@@ -11,6 +11,7 @@ on:
           - generic
           - phase2d_agent
           - phase3d_object
+          - phase4c_ha
         default: generic
       serial_port:
         description: macOS serial device path
@@ -96,12 +97,12 @@ jobs:
           if not 10 <= seconds <= 7200:
               raise SystemExit("monitor_seconds must be between 10 and 7200")
           profile = os.environ["VALIDATION_PROFILE"]
-          if profile not in {"generic", "phase2d_agent", "phase3d_object"}:
+          if profile not in {"generic", "phase2d_agent", "phase3d_object", "phase4c_ha"}:
               raise SystemExit("unsupported validation_profile")
           port = int(os.environ["AGENT_PORT"])
           if not 1 <= port <= 65535:
               raise SystemExit("agent_port must be between 1 and 65535")
-          if profile != "generic":
+          if profile in {"phase2d_agent", "phase3d_object"}:
               host = os.environ["AGENT_HOST"]
               if not host or re.fullmatch(r"[A-Za-z0-9.-]+", host) is None:
                   raise SystemExit("Agent profiles require a safe runner LAN agent_host")
@@ -110,6 +111,8 @@ jobs:
                   raise SystemExit("phase2d_agent requires monitor_seconds=7200")
           if profile == "phase3d_object" and seconds < 120:
               raise SystemExit("phase3d_object requires monitor_seconds>=120")
+          if profile == "phase4c_ha" and seconds < 120:
+              raise SystemExit("phase4c_ha requires monitor_seconds>=120")
           PY
           test -f scripts/activate-idf-v5.5.4.sh
           test -s firmware/dependencies.lock
@@ -122,6 +125,8 @@ jobs:
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 300))" >> "$GITHUB_ENV"
           elif [[ "$VALIDATION_PROFILE" == "phase3d_object" ]]; then
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 120))" >> "$GITHUB_ENV"
+          elif [[ "$VALIDATION_PROFILE" == "phase4c_ha" ]]; then
+            echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 180))" >> "$GITHUB_ENV"
           else
             echo "CAPTURE_SECONDS=$MONITOR_SECONDS" >> "$GITHUB_ENV"
           fi
@@ -179,7 +184,7 @@ jobs:
           fi
 
       - name: Prepare ephemeral Agent profile
-        if: inputs.validation_profile != 'generic'
+        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object'
         run: |
           set -euo pipefail
           mkdir -p "$AGENT_TMP_DIR"
@@ -211,6 +216,55 @@ jobs:
           echo "AGENT_HARNESS_RESULT_FILE=$AGENT_TMP_DIR/result.json" >> "$GITHUB_ENV"
           echo "AGENT_HARNESS_STATUS_FILE=$AGENT_TMP_DIR/status" >> "$GITHUB_ENV"
 
+      - name: Prepare Phase 4C HA profile
+        if: inputs.validation_profile == 'phase4c_ha'
+        run: |
+          set -euo pipefail
+          ROBOT_CONFIG_DIR="$HOME/.config/p4home"
+          ROBOT_TOKEN_FILE="$ROBOT_CONFIG_DIR/robot-ha.token"
+          ROBOT_POLICY_FILE="$ROBOT_CONFIG_DIR/robot-ha-policy.json"
+          ROBOT_URL_FILE="$ROBOT_CONFIG_DIR/robot-ha.url"
+          test -s "$ROBOT_TOKEN_FILE"
+          test -s "$ROBOT_POLICY_FILE"
+          test -s "$ROBOT_URL_FILE"
+          test "$(stat -f '%Lp' "$ROBOT_TOKEN_FILE")" = "600"
+          test "$(stat -f '%Lp' "$ROBOT_POLICY_FILE")" = "600"
+          test "$(stat -f '%Lp' "$ROBOT_URL_FILE")" = "600"
+          P4HOME_PHASE4C_HA_URL="$(head -n 1 "$ROBOT_URL_FILE")"
+          case "$P4HOME_PHASE4C_HA_URL" in
+            http://*|https://*) ;;
+            *) echo "Robot HA URL must use http or https" >&2; exit 1 ;;
+          esac
+          mkdir -p "$AGENT_TMP_DIR"
+          chmod 700 "$AGENT_TMP_DIR"
+          FROZEN_ROBOT_TOKEN_FILE="$AGENT_TMP_DIR/robot-ha.token"
+          FROZEN_ROBOT_POLICY_FILE="$AGENT_TMP_DIR/robot-ha-policy.json"
+          cp "$ROBOT_TOKEN_FILE" "$FROZEN_ROBOT_TOKEN_FILE"
+          cp "$ROBOT_POLICY_FILE" "$FROZEN_ROBOT_POLICY_FILE"
+          chmod 400 "$FROZEN_ROBOT_TOKEN_FILE" "$FROZEN_ROBOT_POLICY_FILE"
+          PHASE4C_ENTITY_FILE="$AGENT_TMP_DIR/phase4c-entity-id"
+          python3 scripts/prepare-phase4c-ha-profile.py \
+            --sdkconfig "$HARDWARE_SDKCONFIG" \
+            --policy "$FROZEN_ROBOT_POLICY_FILE" \
+            --panel-entities firmware/components/panel_data_store/panel_entities.json \
+            --entity-output "$PHASE4C_ENTITY_FILE" \
+            --binding-output "$AGENT_TMP_DIR/phase4c-policy-binding"
+          grep -qx "CONFIG_P4HOME_PHASE4C_VALIDATION=y" "$HARDWARE_SDKCONFIG"
+          echo "P4HOME_PHASE4C_HA_URL=$P4HOME_PHASE4C_HA_URL" >> "$GITHUB_ENV"
+          echo "P4HOME_PHASE4C_TOKEN_FILE=$FROZEN_ROBOT_TOKEN_FILE" >> "$GITHUB_ENV"
+          echo "P4HOME_PHASE4C_POLICY_FILE=$FROZEN_ROBOT_POLICY_FILE" >> "$GITHUB_ENV"
+          echo "PHASE4C_ENTITY_FILE=$PHASE4C_ENTITY_FILE" >> "$GITHUB_ENV"
+          echo "PHASE4C_BINDING_STATUS_FILE=$AGENT_TMP_DIR/phase4c-policy-binding" >> "$GITHUB_ENV"
+          echo "AGENT_HARNESS_LOG=$AGENT_TMP_DIR/agent-harness.log" >> "$GITHUB_ENV"
+          echo "AGENT_HARNESS_RESULT_FILE=$AGENT_TMP_DIR/result.json" >> "$GITHUB_ENV"
+          echo "AGENT_HARNESS_STATUS_FILE=$AGENT_TMP_DIR/status" >> "$GITHUB_ENV"
+          echo "PHASE4C_OFFLINE_LOG=$AGENT_TMP_DIR/p4-offline.log" >> "$GITHUB_ENV"
+          echo "PHASE4C_OFFLINE_RESULT_FILE=$AGENT_TMP_DIR/p4-offline-result.json" >> "$GITHUB_ENV"
+          echo "PHASE4C_OFFLINE_STATUS_FILE=$AGENT_TMP_DIR/p4-offline-status" >> "$GITHUB_ENV"
+          echo "PHASE4C_POST_ROBOT_OFFSET_FILE=$AGENT_TMP_DIR/post-robot-offset" >> "$GITHUB_ENV"
+          echo "PHASE4C_SANITIZED_STATUS_FILE=$AGENT_TMP_DIR/serial-sanitized" >> "$GITHUB_ENV"
+          echo "PHASE4C_RAW_MONITOR_LOG=$AGENT_TMP_DIR/raw-monitor.log" >> "$GITHUB_ENV"
+
       - name: Build firmware
         run: |
           set -euo pipefail
@@ -240,7 +294,7 @@ jobs:
           node-version: 24.19.0
 
       - name: Start Agent Runtime harness
-        if: inputs.validation_profile != 'generic'
+        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object'
         shell: zsh {0}
         working-directory: agent
         run: |
@@ -276,32 +330,129 @@ jobs:
           echo "Agent Runtime harness did not become ready" >&2
           exit 1
 
+      - name: Install Phase 4C gate dependencies
+        if: inputs.validation_profile == 'phase4c_ha'
+        shell: zsh {0}
+        working-directory: agent
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@11.19.0 --activate
+          pnpm install --frozen-lockfile
+
+      - name: Validate Robot while P4 application is offline
+        if: inputs.validation_profile == 'phase4c_ha'
+        shell: zsh {0}
+        run: |
+          set -euo pipefail
+          . scripts/activate-idf-v5.5.4.sh
+          python -m esptool \
+            --chip esp32p4 \
+            --port "$SERIAL_PORT" \
+            --before default_reset \
+            --after no_reset \
+            chip_id > /dev/null
+          set +e
+          (
+            cd agent
+            AGENT_HARNESS_RESULT_FILE="$PHASE4C_OFFLINE_RESULT_FILE" \
+              node --import tsx apps/runtime/src/phase4c-ha-gate.ts
+          ) > "$PHASE4C_OFFLINE_LOG" 2>&1
+          offline_exit_code=$?
+          set -e
+          echo "$offline_exit_code" > "$PHASE4C_OFFLINE_STATUS_FILE"
+
       - name: Flash firmware and capture serial
         run: |
           set -euo pipefail
           . scripts/activate-idf-v5.5.4.sh
+          monitor_log="firmware/monitor.log"
+          if [[ "$VALIDATION_PROFILE" == "phase4c_ha" ]]; then
+            monitor_log="$PHASE4C_RAW_MONITOR_LOG"
+            rm -f firmware/monitor.log
+          fi
           idf.py \
             -C firmware \
             -B "$BUILD_DIR" \
             -D IDF_TARGET=esp32p4 \
             -D SDKCONFIG="$HARDWARE_SDKCONFIG" \
             -p "$SERIAL_PORT" \
-            flash > firmware/monitor.log 2>&1
-          python scripts/capture-esp-serial.py \
-            --port "$SERIAL_PORT" \
-            --seconds "$CAPTURE_SECONDS" \
-            --output firmware/monitor.log \
-            --append \
-            --reset
+            flash > "$monitor_log" 2>&1
+          if [[ "$VALIDATION_PROFILE" == "phase4c_ha" ]]; then
+            python scripts/capture-esp-serial.py \
+              --port "$SERIAL_PORT" \
+              --seconds "$CAPTURE_SECONDS" \
+              --output "$monitor_log" \
+              --append \
+              --reset &
+            capture_pid=$!
+            subscribed=no
+            for ((attempt = 0; attempt < MONITOR_SECONDS * 5; attempt++)); do
+              if grep -q "VERIFY:ha:subscribed:PASS" "$monitor_log"; then
+                subscribed=yes
+                break
+              fi
+              if ! kill -0 "$capture_pid" 2>/dev/null; then
+                break
+              fi
+              sleep 0.2
+            done
+            gate_exit_code=1
+            if [[ "$subscribed" == "yes" ]]; then
+              set +e
+              (
+                cd agent
+                node --import tsx apps/runtime/src/phase4c-ha-gate.ts
+              ) > "$AGENT_HARNESS_LOG" 2>&1
+              gate_exit_code=$?
+              set -e
+            else
+              printf 'VERIFY:phase4c:robot_write:FAIL reason=p4_not_subscribed\n' \
+                > "$AGENT_HARNESS_LOG"
+            fi
+            echo "$gate_exit_code" > "$AGENT_HARNESS_STATUS_FILE"
+            post_robot_started_at=$SECONDS
+            wc -c < "$monitor_log" > "$PHASE4C_POST_ROBOT_OFFSET_FILE"
+            wait "$capture_pid"
+            test "$((SECONDS - post_robot_started_at))" -ge 60
+          else
+            python scripts/capture-esp-serial.py \
+              --port "$SERIAL_PORT" \
+              --seconds "$CAPTURE_SECONDS" \
+              --output firmware/monitor.log \
+              --append \
+              --reset
+          fi
 
       - name: Append Agent harness evidence
         if: always() && inputs.validation_profile != 'generic'
         run: |
           set -euo pipefail
-          if [[ -s "$AGENT_HARNESS_LOG" ]]; then
-            printf '\n$ agent-hardware-harness profile=%s\n' "$VALIDATION_PROFILE" >> firmware/monitor.log
-            tee -a firmware/monitor.log < "$AGENT_HARNESS_LOG" > /dev/null
+          if [[ "$VALIDATION_PROFILE" == "phase4c_ha" && -s "$PHASE4C_OFFLINE_LOG" ]]; then
+            printf '\n$ phase4c-robot-gate p4_application=offline\n' >> "$PHASE4C_RAW_MONITOR_LOG"
+            tee -a "$PHASE4C_RAW_MONITOR_LOG" < "$PHASE4C_OFFLINE_LOG" > /dev/null
           fi
+          if [[ -s "$AGENT_HARNESS_LOG" ]]; then
+            if [[ "$VALIDATION_PROFILE" == "phase4c_ha" ]]; then
+              harness_monitor_log="$PHASE4C_RAW_MONITOR_LOG"
+            else
+              harness_monitor_log="firmware/monitor.log"
+            fi
+            printf '\n$ agent-hardware-harness profile=%s\n' "$VALIDATION_PROFILE" >> "$harness_monitor_log"
+            tee -a "$harness_monitor_log" < "$AGENT_HARNESS_LOG" > /dev/null
+          fi
+
+      - name: Sanitize Phase 4C serial artifact
+        if: always() && inputs.validation_profile == 'phase4c_ha'
+        run: |
+          set -euo pipefail
+          test -s "$PHASE4C_ENTITY_FILE"
+          test -f "$PHASE4C_RAW_MONITOR_LOG"
+          python3 scripts/sanitize-phase4c-monitor.py \
+            --log "$PHASE4C_RAW_MONITOR_LOG" \
+            --output firmware/monitor.log \
+            --entity-file "$PHASE4C_ENTITY_FILE" \
+            --status-file "$PHASE4C_SANITIZED_STATUS_FILE"
 
       - name: Write hardware validation manifest
         if: always()
@@ -323,10 +474,46 @@ jobs:
           harness_status_path = pathlib.Path(
               os.environ.get("AGENT_HARNESS_STATUS_FILE", "")
           )
+          offline_result_path = pathlib.Path(
+              os.environ.get("PHASE4C_OFFLINE_RESULT_FILE", "")
+          )
+          offline_status_path = pathlib.Path(
+              os.environ.get("PHASE4C_OFFLINE_STATUS_FILE", "")
+          )
+          post_robot_offset_path = pathlib.Path(
+              os.environ.get("PHASE4C_POST_ROBOT_OFFSET_FILE", "")
+          )
+          sanitized_status_path = pathlib.Path(
+              os.environ.get("PHASE4C_SANITIZED_STATUS_FILE", "")
+          )
+          binding_status_path = pathlib.Path(
+              os.environ.get("PHASE4C_BINDING_STATUS_FILE", "")
+          )
           main_stack_prefix = "CONFIG_ESP_MAIN_TASK_STACK_SIZE="
           agent_stack_prefix = "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK="
+          agent_transport_enabled_prefix = "CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED="
+          agent_transport_disabled_line = "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set"
+          phase4c_validation_prefix = "CONFIG_P4HOME_PHASE4C_VALIDATION="
           main_stack_size = None
           agent_stack_size = None
+          phase4c_validation_enabled = False
+          phase4c_agent_transport_disabled = False
+          phase4c_post_robot_p4_standalone = False
+          phase4c_post_robot_ui_8fps = False
+          monitor_path = pathlib.Path("firmware/monitor.log")
+          if post_robot_offset_path.is_file() and monitor_path.is_file():
+              offset = int(post_robot_offset_path.read_text(encoding="utf-8").strip())
+              monitor_bytes = monitor_path.read_bytes()
+              if 0 <= offset <= len(monitor_bytes):
+                  post_robot_log = monitor_bytes[offset:].decode(
+                      "utf-8", errors="replace"
+                  )
+                  phase4c_post_robot_p4_standalone = (
+                      "VERIFY:phase4c:p4_standalone:PASS" in post_robot_log
+                  )
+                  phase4c_post_robot_ui_8fps = (
+                      "VERIFY:ui:8fps:PASS" in post_robot_log
+                  )
           size_layout = {}
           if size_report_path.is_file():
               size_report = json.loads(size_report_path.read_text(encoding="utf-8"))
@@ -344,6 +531,16 @@ jobs:
                       main_stack_size = int(line.removeprefix(main_stack_prefix))
                   elif line.startswith(agent_stack_prefix):
                       agent_stack_size = int(line.removeprefix(agent_stack_prefix))
+                  elif line == agent_transport_disabled_line:
+                      phase4c_agent_transport_disabled = True
+                  elif line.startswith(agent_transport_enabled_prefix):
+                      phase4c_agent_transport_disabled = (
+                          line.removeprefix(agent_transport_enabled_prefix) != "y"
+                      )
+                  elif line.startswith(phase4c_validation_prefix):
+                      phase4c_validation_enabled = (
+                          line.removeprefix(phase4c_validation_prefix) == "y"
+                      )
           manifest = {
               "schema_version": 1,
               "mode": "artifact-only",
@@ -366,6 +563,28 @@ jobs:
               ),
               "main_task_stack_size_bytes": main_stack_size,
               "agent_transport_task_stack_size_bytes": agent_stack_size,
+              "phase4c_validation_enabled": phase4c_validation_enabled,
+              "phase4c_agent_transport_disabled": phase4c_agent_transport_disabled,
+              "phase4c_policy_binding_verified": (
+                  binding_status_path.is_file()
+                  and binding_status_path.read_text(encoding="utf-8").strip() == "1"
+              ),
+              "phase4c_serial_entity_id_sanitized": (
+                  sanitized_status_path.is_file()
+                  and sanitized_status_path.read_text(encoding="utf-8").strip() == "1"
+              ),
+              "phase4c_robot_p4_offline_status": (
+                  offline_status_path.read_text(encoding="utf-8").strip()
+                  if offline_status_path.is_file()
+                  else None
+              ),
+              "phase4c_robot_p4_offline_result": (
+                  json.loads(offline_result_path.read_text(encoding="utf-8"))
+                  if offline_result_path.is_file()
+                  else None
+              ),
+              "phase4c_post_robot_p4_standalone": phase4c_post_robot_p4_standalone,
+              "phase4c_post_robot_ui_8fps": phase4c_post_robot_ui_8fps,
               "image_memory_layout": size_layout,
               "dependency_lock_sha256": (
                   hashlib.sha256(dependency_lock.read_bytes()).hexdigest()

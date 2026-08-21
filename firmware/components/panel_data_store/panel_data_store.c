@@ -730,6 +730,13 @@ void panel_data_store_on_ha_state_change(const ha_client_state_change_t *change,
         return;
     }
 
+#if CONFIG_P4HOME_PHASE4C_VALIDATION
+    const bool phase4c_target_changed =
+        strcmp(sensor.entity_id, CONFIG_P4HOME_PHASE4C_VALIDATION_ENTITY_ID) == 0 &&
+        sensor.kind == PANEL_SENSOR_KIND_BINARY && sensor.available &&
+        strcmp(sensor.value_text, change->state_text) != 0;
+#endif
+
 #if CONFIG_P4HOME_WEATHER_ENABLE
     if (sensor.kind == PANEL_SENSOR_KIND_TEXT && strcmp(sensor.icon, "weather") == 0 &&
         sensor.available && sensor.value_text[0] != '\0') {
@@ -776,5 +783,13 @@ void panel_data_store_on_ha_state_change(const ha_client_state_change_t *change,
                  panel_data_store_normalize_unit_text(change->unit_text));
     }
 
-    (void)panel_data_store_update(&sensor);
+    esp_err_t update_ret = panel_data_store_update(&sensor);
+#if CONFIG_P4HOME_PHASE4C_VALIDATION
+    if (update_ret == ESP_OK && phase4c_target_changed && sensor.available &&
+        (strcmp(sensor.value_text, "on") == 0 || strcmp(sensor.value_text, "off") == 0)) {
+        ESP_LOGW(TAG, "VERIFY:phase4c:p4_ha_state:PASS state=%s", sensor.value_text);
+    }
+#else
+    (void)update_ret;
+#endif
 }

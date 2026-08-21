@@ -270,11 +270,19 @@ void app_main(void)
 
         const TickType_t now = xTaskGetTickCount();
         if ((now - last_heartbeat_tick) >= pdMS_TO_TICKS(30000)) {
-            diagnostics_service_log_runtime_heartbeat();
-            diagnostics_service_log_ha_summary();
-            panel_data_store_tick_freshness(time_service_now_epoch_ms());
             agent_transport_snapshot_t agent_snapshot = {0};
             agent_transport_get_snapshot(&agent_snapshot);
+            diagnostics_service_log_runtime_heartbeat();
+            diagnostics_service_log_ha_summary();
+#if CONFIG_P4HOME_PHASE4C_VALIDATION
+            const bool phase4c_standalone_healthy =
+                board_support_ha_ready() && board_support_ha_subscription_ready() &&
+                board_support_display_ready() && board_support_touch_ready() &&
+                board_support_touch_indev_ready() &&
+                !agent_snapshot.enabled && !agent_snapshot.connected;
+            log_verify_marker("phase4c", "p4_standalone", phase4c_standalone_healthy);
+#endif
+            panel_data_store_tick_freshness(time_service_now_epoch_ms());
             if (!agent_offline_2h_reported && agent_snapshot.enabled &&
                 agent_snapshot.ever_connected && !agent_snapshot.connected &&
                 agent_snapshot.disconnected_duration_ms >= 7200000ULL) {

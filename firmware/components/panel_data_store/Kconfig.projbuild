@@ -33,4 +33,13 @@ config P4HOME_ENTITY_WHITELIST_MAX_ENTITIES
     range 1 128
     default 48
 
+config P4HOME_PHASE4C_VALIDATION
+    bool "Emit Phase 4C HA convergence markers"
+    default n
+
+config P4HOME_PHASE4C_VALIDATION_ENTITY_ID
+    string "Phase 4C validation entity ID"
+    depends on P4HOME_PHASE4C_VALIDATION
+    default ""
+
 endmenu

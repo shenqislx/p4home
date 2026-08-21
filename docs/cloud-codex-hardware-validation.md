@@ -47,7 +47,7 @@ Actions secret。workflow 只把解码结果写入 `$RUNNER_TEMP`，不会复制
 
 | 参数 | 默认值 | 约束 |
 |---|---|---|
-| `validation_profile` | `generic` | `generic`、`phase2d_agent` 或 `phase3d_object` |
+| `validation_profile` | `generic` | `generic`、`phase2d_agent`、`phase3d_object` 或 `phase4c_ha` |
 | `serial_port` | `/dev/cu.usbserial-210` | runner 上的字符设备 |
 | `monitor_seconds` | `120` | `10–7200` 秒 |
 | `agent_host` | 空 | Agent profile 时必填；P4 可访问的 runner LAN host |
@@ -63,6 +63,22 @@ Phase 3D 对象门禁使用 `phase3d_object`，`monitor_seconds` 至少为 120 �
 120 秒给 Protocol v2 握手、`go_to(living_room.sofa) → sit`、重连 snapshot、主动取消和 Agent
 离线后的 UI fallback。该 profile 强制把临时固件配置设为 Device Protocol v2；Phase 2D 与默认
 固件仍使用 v1。两个 Agent profile 共用同一套一次性 TLS 凭据边界。
+
+Phase 4C HA 收敛门禁使用 `phase4c_ha`，`monitor_seconds` 至少为 120 秒，workflow 额外保留
+180 秒，并在同一个不重新打开串口的连续采集会话中，为 Robot 客户端关闭后至少保留 60 秒。
+runner 必须在仓库外提供权限为
+`0600` 的 `$HOME/.config/p4home/robot-ha.token`、`robot-ha-policy.json` 和 `robot-ha.url`。
+workflow 先把 token/policy 冻结到本次任务的 `0700` 临时目录，再从同一份冻结 policy 把唯一且已被
+P4 whitelist 跟踪的目标注入临时固件配置；Phase 4C 不向仓库新增真实 entity id，Kconfig 默认值
+保持为空，但目标必须匹配仓库中既有的 panel whitelist 条目。该 profile 明确关闭
+Agent transport。烧录前
+先让 P4 停留在 ROM bootloader，证明 P4 应用离线时 Robot 仍可反向切换并恢复。烧录后串口出现
+`VERIFY:ha:subscribed:PASS`，再执行一次在线切换/恢复，并从 Robot 客户端关闭后的串口后缀核对
+`VERIFY:phase4c:p4_standalone:PASS` 与 `VERIFY:ui:8fps:PASS`。token 不进入命令行、Git、日志或
+artifact；私有 policy 及其任务副本不进入 Git 或 artifact。原始串口先写入
+runner 私有临时目录，追加 harness 后再对完整或截断的 HA entity 样式做等长脱敏与残留扫描；只有
+成功后才原子生成 artifact 路径，失败时不会上传原始串口。artifact 只保留非管理员身份、alias、
+accepted/observed/restored 结果和 P4 目标状态 marker。
 
 ## 4. Artifact Contract
 
@@ -100,6 +116,12 @@ workflow 还写入 app image 文件名、字节数与 SHA-256；这些字段用�
 `firmware/dependencies.lock` 被解析器改写，workflow 必须失败，不允许隐式组件升级进入硬件验证。
 Agent profile 还会写入无凭据的 `agent_harness_status` 与 `agent_hardware_result`；它们仍需和
 `monitor.log` 的设备侧、Agent 侧 marker 交叉判定，不能单独替代串口证据。
+`phase4c_ha` 还记录 `phase4c_validation_enabled=true`，证明目标实体回刷 marker 来自专用门禁
+构建，而不是普通固件日志；`phase4c_agent_transport_disabled`、
+`phase4c_policy_binding_verified`、P4 应用离线时的 Robot 结果、
+Robot 客户端关闭后的 P4 standalone/8 FPS 状态，以及串口实体 ID 脱敏状态分别记录，不能由单个
+在线切换结果替代。Robot 业务 gate 的退出码写入 manifest，不改变 artifact-only workflow 的运输
+语义；业务 PASS/FAIL 仍由 manifest 与原始 `VERIFY:` marker 共同判定。
 
 ## 5. 判定顺序
 
