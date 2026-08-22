@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "mode": "artifact-only",
+  "verdict_owner": "cloud-codex",
+  "git_sha": "dc46c7e66815d804fab31504ae6a1766ac379f02",
+  "run_id": "32585132074",
+  "run_attempt": "1",
+  "job": "flash-and-monitor",
+  "serial_port": "/dev/cu.usbserial-210",
+  "monitor_seconds": 1800,
+  "capture_seconds": 1980,
+  "validation_profile": "phase4c_ha",
+  "log_file": "monitor.log",
+  "app_image": "p4home_firmware.bin",
+  "app_size_bytes": 1482656,
+  "app_sha256": "9ec168a6ae4750008affb6a9fcce090887102efa035e4370bf68a05ceca4ce0d",
+  "main_task_stack_size_bytes": 5120,
+  "agent_transport_task_stack_size_bytes": null,
+  "phase4c_validation_enabled": true,
+  "phase4c_agent_transport_disabled": true,
+  "phase4c_policy_binding_verified": true,
+  "phase4c_serial_entity_id_sanitized": true,
+  "phase4c_robot_p4_offline_status": "0",
+  "phase4c_robot_p4_offline_result": {
+    "schema_version": 1,
+    "profile": "phase4c_ha",
+    "passed": true,
+    "reason": "ok",
+    "robot_non_admin": true,
+    "policy_entities": 1,
+    "alias": "study_ceiling_light",
+    "initial_state": "off",
+    "initial_available": true,
+    "target_state": "on",
+    "target_accepted": true,
+    "target_observed": true,
+    "restore_accepted": true,
+    "restore_observed": true,
+    "restore_attempts": 1,
+    "restore_error": null,
+    "restored": true,
+    "final_state": "off",
+    "state_change_events": 4
+  },
+  "phase4c_post_robot_p4_standalone": true,
+  "phase4c_post_robot_ui_8fps": true,
+  "image_memory_layout": {
+    "Flash": {
+      "total": 0,
+      "used": 1396850,
+      "free": 0
+    },
+    "DIRAM": {
+      "total": 576464,
+      "used": 301260,
+      "free": 275204
+    },
+    "HP core RAM": {
+      "total": 8192,
+      "used": 104,
+      "free": 8088
+    },
+    "LP RAM": {
+      "total": 32768,
+      "used": 56,
+      "free": 32712
+    }
+  },
+  "dependency_lock_sha256": "f5f93d246735422a250bbb10dabb05338481f1c21556deebb2881e72e2275860",
+  "agent_harness_status": "0",
+  "agent_hardware_result": {
+    "schema_version": 1,
+    "profile": "phase4c_ha",
+    "passed": true,
+    "reason": "ok",
+    "robot_non_admin": true,
+    "policy_entities": 1,
+    "alias": "study_ceiling_light",
+    "initial_state": "off",
+    "initial_available": true,
+    "target_state": "on",
+    "target_accepted": true,
+    "target_observed": true,
+    "restore_accepted": true,
+    "restore_observed": true,
+    "restore_attempts": 1,
+    "restore_error": null,
+    "restored": true,
+    "final_state": "off",
+    "state_change_events": 4
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "profile": "phase4c_ha",
+  "run_id": "32585132074",
+  "run_attempt": 1,
+  "git_sha": "dc46c7e66815d804fab31504ae6a1766ac379f02",
+  "monitor_sha256": "7e66e638839605ebb4698b2ace125a2056e254e3dc854678bc351fcb99664944",
+  "monitor_bytes": 133049,
+  "chip_identity": {
+    "esp32_p4_revision_v1_0": 1
+  },
+  "flash_hash_verified": 4,
+  "verify_counts": {
+    "phase4c_p4_ha_state_on_pass": 2,
+    "phase4c_p4_ha_state_off_pass": 2,
+    "phase4c_p4_standalone_pass": 64,
+    "phase4c_robot_identity_pass": 2,
+    "phase4c_robot_write_pass": 2,
+    "phase4c_robot_restore_pass": 2,
+    "ui_8fps_pass": 232
+  },
+  "contradiction_counts": {
+    "verify_fail": 0,
+    "guru_meditation": 0,
+    "panic": 0,
+    "watchdog": 0,
+    "assert_failed": 0,
+    "brownout": 0,
+    "stack_overflow": 0
+  }
+}

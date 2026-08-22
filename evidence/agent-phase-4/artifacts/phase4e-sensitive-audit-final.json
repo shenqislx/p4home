@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "passed": true,
+  "git_objects_scanned": 3971,
+  "git_exact_token_matches": 0,
+  "runtime_files_scanned": 9,
+  "runtime_findings": {
+    "exact_token": 0,
+    "authorization_header": 0,
+    "ha_token_field": 0,
+    "sensitive_attribute": 0,
+    "raw_entity_id": 0
+  },
+  "process_argument_exact_token_matches": 0
+}

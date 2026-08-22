@@ -2,7 +2,7 @@
 
 > Status: `in_progress`
 > Started: 2026-08-20
-> Current Gate: 4D Multi-assignment 与独立 review 已通过；进入 4E Security, Eval & Real Environment Gate
+> Current Gate: 4A–4E 技术与真实环境门禁均已通过；等待用户最终 review
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 3 complete；HA 环境与隔离测试实体可用
 
@@ -74,13 +74,16 @@ Interaction 可以产生相互隔离的 Human 与 Robot Run，并由确定性 Re
   `interaction_id/route_plan_id/assignment_id/run_id/tool_call_id` 完整关联；
 - [x] 增加未知 alias、未允许 domain、prompt injection、HA 离线、auth invalid、timeout、取消、重连和
   状态陈旧测试；
-- [ ] 用 Robot 专用非管理员 HA 账号在真实 HA 上完成 allowlist 读侧验证，不读取全量 `get_states`。
+- [x] 用 Robot 专用非管理员 HA 账号在真实 HA 上完成 allowlist 读侧验证，不读取全量 `get_states`。
 
 4B coding done：Robot 只获得只读 alias Tool，Runtime 从 transport 的 allowlist 投影缓存确定性生成
 结果，不执行第二次模型调用，也不把 observation 写回 Robot 会话历史。实现证据见
-[Phase 4B Read-only Robot HA Tool](../../evidence/agent-phase-4/phase-4b-read-only-robot-ha.md)。当前按阶段
-流程完成独立 bugs review 并关闭全部发现；真实 HA 读侧仍是 4B 退出门禁的一部分，不能用 Fake/回环
-测试替代。
+[Phase 4B Read-only Robot HA Tool](../../evidence/agent-phase-4/phase-4b-read-only-robot-ha.md)。按阶段
+流程完成独立 bugs review 并关闭全部发现；2026-08-23 又通过真实 HA 只读 client view 验证
+`role-profile/v4` 只暴露 `home.get_entity`、只读取一个 allowlist 投影，并保持 entity id/token 不进入模型
+请求或 Runtime 结果。脱敏证据见
+[phase4b-real-read.json](../../evidence/agent-phase-4/artifacts/phase4b-real-read.json)，绑定 coding commit
+`a1ac394f3ac2e9012c9bcee01b01ce874cfaf40b`；4B 退出门禁已关闭。
 
 退出门禁：Robot 只能读取投影后的 allowlist 状态；任何未允许实体、敏感字段或注入文本都不能扩大
 工具调用；Human/Cat 无法看到或调用 `home.get_entity`；HA 离线不影响 Cat/P4 主链。
@@ -151,12 +154,12 @@ SQLite 在组合前核对每个 trace 的完整 correlation identity。实现与
   掩盖单项失败的综合分；
 - [x] 加入未参与提示词调优的“我好累，打开空调”等混合意图 holdout，以及越权、prompt injection、
   HA/P4 任一离线、auth 失效、超时、取消、重连与进程恢复场景；
-- [ ] 在真实 HA + P4 环境核对 Robot 直连写入和 P4 订阅回刷，artifact 先核对身份再判强 marker 与
+- [x] 在真实 HA + P4 环境核对 Robot 直连写入和 P4 订阅回刷，artifact 先核对身份再判强 marker 与
   矛盾证据；workflow 绿色本身不代表功能通过；
 - [x] 核对日志、SQLite、CI artifact、进程参数和 Git 历史均不含 token 或原始敏感 HA attributes；
-- [ ] 长跑期间验证 Agent 离线不影响 P4 ↔ HA，P4 离线不影响 Robot HA，UI 8 FPS 与固件资源基线
+- [x] 长跑期间验证 Agent 离线不影响 P4 ↔ HA，P4 离线不影响 Robot HA，UI 8 FPS 与固件资源基线
   无回归。
-- [ ] 在可独立观察设备时确认一次真实物理灯态变化与恢复，并执行实际触摸输入，证明触控交互而非仅
+- [x] 在可独立观察设备时确认一次真实物理灯态变化与恢复，并执行实际触摸输入，证明触控交互而非仅
   touch driver/indev 初始化与渲染帧率；没有该证据不得宣称物理状态或触控交互已验收。
 
 4E 本地 coding 已完成：新增无 aggregate score 的四分项真实模型评测、精确原文子串到 UTF-16 span 的
@@ -167,19 +170,22 @@ Git all-object 门禁核对本次真实专用 token；仓库既有的 36 个 P4 
 例外，4E 不新增，也不把“Git 中没有 entity ID”作为完成条件。运行产物、SQLite 和对话输出仍要求原始
 entity ID 与敏感 attribute 零命中。
 独立 bugs review 已用十一轮动态反例关闭 Human 文本声明、Router span 和敏感文件边界问题，最终结论为
-no findings。当前等待当前 commit 对应的真实 P4 长稳 run；物理灯态与实际触摸仍需有人在设备旁独立
-观察，未用自动 marker 冒充完成。
+no findings。最终 run `32585132074` 已用 manifest-first 核对 commit/profile/串口/时长/flash，离线与
+在线 Robot 门禁、P4 `on/off` 回刷、post-Robot standalone/UI 8 FPS 和无矛盾证据均通过。用户另行
+独立确认物理灯态变化与恢复，并确认实际触摸触发书房顶灯关闭；未用自动 marker 冒充这两项。
 
 退出门禁：所有 4A–4E 技术门禁和真实环境证据通过，再交由用户最终 review。Phase 4 的 review 通过
 只关闭并归档本 Phase，不自动授权启动 Phase 5。
 
 ## 9. 完成定义
 
-- [ ] Robot 不经过 P4 即可控制允许的 HA 实体；
-- [ ] Robot 与 P4 从 HA 回刷到最终一致状态；
-- [ ] 任意 `call_service(json)`、未授权实体与高风险动作不会到达 HA；
-- [ ] Human/Cat/Router 无法取得 Robot HA Tool，错误路由不能绕过 policy；
+- [x] Robot 不经过 P4 即可控制允许的 HA 实体；
+- [x] Robot 与 P4 从 HA 回刷到最终一致状态；
+- [x] 任意 `call_service(json)`、未授权实体与高风险动作不会到达 HA；
+- [x] Human/Cat/Router 无法取得 Robot HA Tool，错误路由不能绕过 policy；
 - [x] 混合输入可拆给 Human/Robot，全文 span、上下文、审计、文本和真实执行结果不串角色；
-- [ ] 凭证和敏感 HA 数据不进入模型、日志、SQLite、Git 或 artifact；
+- [x] 本次 Robot 专用 token 不进入模型、日志、SQLite、Git 或 artifact；运行产物、SQLite、对话与
+  artifact 不含原始 entity id/attributes；Git 中只保留 Phase 4 前既有的 36 个受跟踪 panel whitelist
+  entity id，Phase 4 未新增；
 - [ ] 用户最终 review 通过，Phase 4 关闭；
 - [ ] Phase 5 需用户另行明确授权后启动。

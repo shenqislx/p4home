@@ -1,6 +1,6 @@
 # P4 Home 当前里程碑
 
-> Updated: 2026-08-21
+> Updated: 2026-08-23
 > Current Architecture: [P4 Local Agent Architecture](./p4-local-agent-architecture.md)
 > Active Work: [Agent Phase Plans](./plans/README.md)
 
@@ -24,7 +24,7 @@
 | M7.1 Text Agent Runtime | `completed` | Ollama + 有限 Tool Loop + SQLite + eval |
 | M7.2 Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作闭环 |
 | M7.3 Cat Object World | `completed` | sofa/window/desk 等 Cat 对象级动作，实机门禁与最终 review 已通过 |
-| M7.4 Robot HA & Multi-role | `in_progress` | 4A–4C 已通过；4D Multi-assignment RoutePlan & Composer 推进中 |
+| M7.4 Robot HA & Multi-role | `in_progress` | 4A–4E 技术与真实环境门禁已通过；等待用户最终 review |
 | M7.5 Role-aware Voice | `pending` | 本地唤醒、STT、Router/Roles、TTS 闭环 |
 | M7.6 Role-aware Memory | `pending` | 评测共享、私有与混合角色记忆 |
 | M7.7 Cat Autonomy | `pending` | Timer/HA 事件驱动、低优先级、可关闭 Cat 行为 |
@@ -66,8 +66,12 @@ SQLite 关联审计的 coding 与独立 bugs review；review 发现的旧库迁�
 投影校验问题均已关闭。4C 已完成固定低风险写映射、result/observation 收敛与 unknown 不重放的核心
 coding 和独立 bugs review（含单次只读 reconciliation）。真实 run `32454798244` 已用 Robot 专用
 非管理员账号完成 P4 离线/在线两次隔离低风险切换与恢复，P4 目标回刷、standalone、post-Robot
-稳态 UI 8 FPS、artifact 脱敏和无 watchdog 均通过专用门禁；独立物理灯态与实际触摸输入留在 4E，
-4C 自动化门禁已关闭，开始 4D 多 assignment 与确定性 composer。
+稳态 UI 8 FPS、artifact 脱敏和无 watchdog 均通过专用门禁。4D 已完成多 assignment、UTF-16 span
+隔离和确定性 Composer；4E 完成四分项真实模型评测与敏感审计。最终 run `32585132074` 绑定经复审的
+Phase 4C timing fix commit，通过 P4 离线/在线 Robot、HA/P4 回刷、1800 秒长稳和 post-Robot
+standalone/UI 门禁；用户也独立确认物理灯态变化/恢复与实际触摸。M7.4 的技术与真实环境门禁均已关闭，
+等待用户最终 review，
+且未授权 M7.5 / Phase 5。
 
 ## 5. 状态更新规则
 

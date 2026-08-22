@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "source_sha256": "1531a1845b5cb19532f2f2c14b09998d4b6c8bd7a15fc8437b3a11167627b544",
+  "integrity_check": "ok",
+  "synthetic_trace": true,
+  "table_counts": {
+    "agent_profiles": 1,
+    "sessions": 1,
+    "runs": 1,
+    "messages": 3,
+    "events": 4,
+    "tool_calls": 0,
+    "actions": 0
+  },
+  "covered_by_sensitive_audit": true
+}

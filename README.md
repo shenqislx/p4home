@@ -41,8 +41,11 @@ Phase 3 已完成并归档；对象级 Tool 仅加入 Cat RoleProfile，冻结�
 Schema v1 未修改。2026-08-20 用户已授权启动 Phase 4 并先完成准备；4A–4E 独立门禁、Robot/P4
 凭证隔离、HA 写侧 unknown 语义与多角色 span 边界已冻结。4A 的 HA contract、凭证文件边界、
 allowlist transport 与 review 修复已完成并推送。4B 只读 Robot `home.get_entity(alias)` coding 与独立
-bugs review 已完成。4C 低风险写侧 coding 与独立 review 已完成；真实 HA 专用账号、隔离实体与
-P4 状态收敛验证尚未完成。
+bugs review、真实 HA 只读门禁均已完成。4C 低风险写侧、真实 HA/P4 收敛与恢复已完成；4D 多
+assignment/确定性 Composer 和 4E 安全评测也已通过。最终硬件 run `32585132074` 证明离线 Robot、
+在线 HA/P4 回刷、1800 秒长稳、post-Robot standalone/UI 8 FPS 与无矛盾证据；用户另行确认物理灯态
+变化/恢复和实际触摸交互。4A–4E 技术与真实环境门禁均已关闭，Phase 4 等待用户最终 review，未启动
+Phase 5。
 
 ## 工作规则
 
