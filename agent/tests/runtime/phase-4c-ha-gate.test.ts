@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { EventEmitter, once } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,7 @@ import {
   dispatchCausalWrite,
   parseRobotIdentity,
   restoreRobotState,
+  waitForStableProjectedState,
 } from "../../apps/runtime/src/phase4c-ha-gate-core.ts";
 import { readCurrentIdentity } from "../../apps/runtime/src/phase4c-ha-identity.ts";
 
@@ -71,12 +72,134 @@ test("identity gate rejects absent or non-boolean privilege fields", () => {
   );
 });
 
+test("initial HA state must be available and stable before the gate dispatches", async () => {
+  let state = { ...projected("off"), available: false };
+  let unsubscribed = false;
+  const client = {
+    state: "ready" as const,
+    getState() {
+      return structuredClone(state);
+    },
+    onState(candidate: (value: ReturnType<typeof projected>) => void) {
+      setTimeout(() => {
+        state = projected("on");
+        candidate(structuredClone(state));
+      }, 1);
+      return () => { unsubscribed = true; };
+    },
+  } as unknown as Pick<RobotHaWriteClient, "getState" | "onState" | "state">;
+
+  const pending = waitForStableProjectedState(client, alias, 100, 5);
+  const result = await pending;
+  assert.equal(result?.available, true);
+  assert.equal(result?.state, "on");
+  assert.equal(unsubscribed, true);
+});
+
+test("initial HA stabilization restarts when the projected state changes", async () => {
+  let state = projected("on");
+  const client = {
+    state: "ready" as const,
+    getState() {
+      return structuredClone(state);
+    },
+    onState(candidate: (value: ReturnType<typeof projected>) => void) {
+      setTimeout(() => {
+        state = projected("off");
+        candidate(structuredClone(state));
+      }, 5);
+      return () => undefined;
+    },
+  } as unknown as Pick<RobotHaWriteClient, "getState" | "onState" | "state">;
+
+  const pending = waitForStableProjectedState(client, alias, 100, 10);
+  const result = await pending;
+  assert.equal(result?.state, "off");
+});
+
+test("initial HA stabilization fails closed when availability never recovers", async () => {
+  const unavailable = { ...projected("off"), available: false };
+  const client = {
+    state: "ready" as const,
+    getState() {
+      return structuredClone(unavailable);
+    },
+    onState() {
+      return () => undefined;
+    },
+  } as unknown as Pick<RobotHaWriteClient, "getState" | "onState" | "state">;
+
+  assert.equal(await waitForStableProjectedState(client, alias, 5, 0), null);
+});
+
+test("initial HA stabilization rejects a disconnected client whose cache cleared silently", async () => {
+  let connectionState: "ready" | "error" = "ready";
+  let state: ReturnType<typeof projected> | null = projected("on");
+  const client = {
+    get state() {
+      return connectionState;
+    },
+    getState() {
+      return state === null ? null : structuredClone(state);
+    },
+    onState() {
+      setTimeout(() => {
+        connectionState = "error";
+        state = null;
+      }, 5);
+      return () => undefined;
+    },
+  } as unknown as Pick<RobotHaWriteClient, "getState" | "onState" | "state">;
+
+  assert.equal(await waitForStableProjectedState(client, alias, 30, 10), null);
+});
+
+test("zero-settle synchronous state delivery unsubscribes its listener", async () => {
+  let activeListeners = 0;
+  const client = {
+    state: "ready" as const,
+    getState() {
+      return projected("off");
+    },
+    onState(candidate: (value: ReturnType<typeof projected>) => void) {
+      activeListeners += 1;
+      candidate(projected("off"));
+      return () => {
+        activeListeners -= 1;
+      };
+    },
+  } as unknown as Pick<RobotHaWriteClient, "getState" | "onState" | "state">;
+
+  assert.equal((await waitForStableProjectedState(client, alias, 20, 0))?.state, "off");
+  assert.equal(activeListeners, 0);
+});
+
 test("causal write ignores cache and observations at the dispatch cursor", async () => {
   const stale = await dispatchCausalWrite(causalClient(1), alias, "turn_on", "on", 5);
   assert.deepEqual(stale, { accepted: true, observed: false });
 
   const fresh = await dispatchCausalWrite(causalClient(2), alias, "turn_on", "on", 5);
   assert.deepEqual(fresh, { accepted: true, observed: true });
+});
+
+test("causal write does not set the dispatch latch when beginWrite fails", async () => {
+  let dispatched = false;
+  const client = {
+    onObservation() {
+      return () => undefined;
+    },
+    beginWrite() {
+      throw new Error("disconnected before dispatch");
+    },
+  } as unknown as RobotHaWriteClient;
+
+  await assert.rejects(
+    dispatchCausalWrite(client, alias, "turn_on", "on", 5, () => {
+      dispatched = true;
+    }),
+    /disconnected before dispatch/,
+  );
+  assert.equal(dispatched, false);
 });
 
 test("restoration always dispatches and performs an independent final read", async () => {
@@ -486,6 +609,143 @@ test("identity retry starts only after the prior transport socket closes", async
   assert.equal(overlap, false);
   assert.equal(sockets.length, 3);
   assert.deepEqual(sockets.map((socket) => socket.terminateCalls), [1, 1, 1]);
+});
+
+test("gate entrypoint times out an unavailable real socket, sends no write, and closes it", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "p4home-phase4c-unavailable-"));
+  const resultPath = join(directory, "result.json");
+  const tokenPath = join(directory, "robot.token");
+  const policyPath = join(directory, "robot-policy.json");
+  const timerPreloadPath = join(directory, "bounded-timers.mjs");
+  const token = "phase4c-test-token-0123456789abcdef";
+  const entityId = "switch.phase4c_unavailable_fixture";
+  let connections = 0;
+  let closes = 0;
+  let serviceCalls = 0;
+  const server = createServer((request, response) => {
+    if (request.url === `/api/states/${entityId}`) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        entity_id: entityId,
+        state: "unavailable",
+        attributes: {},
+        last_updated: "2026-08-23T00:00:00.000Z",
+      }));
+      return;
+    }
+    response.writeHead(404);
+    response.end();
+  });
+  const webSockets = new WebSocketServer({ server, path: "/api/websocket" });
+  webSockets.on("connection", (socket) => {
+    connections += 1;
+    socket.once("close", () => {
+      closes += 1;
+    });
+    socket.send(JSON.stringify({ type: "auth_required" }));
+    socket.on("message", (data) => {
+      const message = JSON.parse(data.toString("utf8")) as Record<string, unknown>;
+      if (message.type === "auth") {
+        socket.send(JSON.stringify({ type: "auth_ok" }));
+      } else if (message.type === "auth/current_user") {
+        socket.send(JSON.stringify({
+          id: message.id,
+          type: "result",
+          success: true,
+          result: { is_admin: false, is_owner: false },
+        }));
+      } else if (message.type === "subscribe_events") {
+        socket.send(JSON.stringify({
+          id: message.id,
+          type: "result",
+          success: true,
+          result: null,
+        }));
+      } else if (message.type === "call_service") {
+        serviceCalls += 1;
+      }
+    });
+  });
+
+  try {
+    await writeFile(tokenPath, `${token}\n`, { mode: 0o600 });
+    await writeFile(policyPath, `${JSON.stringify({
+      schema_version: 1,
+      policy_id: "phase4c.unavailable-fixture",
+      entities: [{
+        alias,
+        entity_id: entityId,
+        domain: "switch",
+        read: true,
+        write_actions: ["turn_on", "turn_off"],
+        projected_attributes: [],
+      }],
+    })}\n`);
+    await writeFile(
+      timerPreloadPath,
+      "const realSetTimeout = globalThis.setTimeout;\n"
+        + "globalThis.setTimeout = (callback, delay, ...args) => "
+        + "realSetTimeout(callback, Math.min(Number(delay), 20), ...args);\n",
+    );
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert(address !== null && typeof address === "object");
+
+    const outcome = await new Promise<{
+      code: number | null;
+      stdout: string;
+      timedOut: boolean;
+    }>((resolve) => {
+      const child = spawn(
+        process.execPath,
+        ["--import", "tsx", "apps/runtime/src/phase4c-ha-gate.ts"],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            P4HOME_PHASE4C_HA_URL: `http://127.0.0.1:${address.port}`,
+            P4HOME_PHASE4C_TOKEN_FILE: tokenPath,
+            P4HOME_PHASE4C_POLICY_FILE: policyPath,
+            AGENT_HARNESS_RESULT_FILE: resultPath,
+            NODE_OPTIONS: `--import=${timerPreloadPath}`,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stdout = "";
+      child.stdout.setEncoding("utf8").on("data", (chunk) => {
+        stdout += chunk;
+      });
+      const timeout = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve({ code: null, stdout, timedOut: true });
+      }, 2_000);
+      child.on("close", (code) => {
+        clearTimeout(timeout);
+        resolve({ code, stdout, timedOut: false });
+      });
+    });
+
+    assert.equal(outcome.timedOut, false);
+    assert.equal(outcome.code, 1);
+    assert.match(outcome.stdout, /VERIFY:phase4c:robot_write:FAIL reason=unsafe_initial_state/);
+    assert.equal(serviceCalls, 0);
+    assert.equal(connections, 2);
+    for (let attempt = 0; attempt < 100 && closes < 2; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    assert.equal(closes, 2);
+    const result = JSON.parse(await readFile(resultPath, "utf8")) as Record<string, unknown>;
+    assert.equal(result.passed, false);
+    assert.equal(result.reason, "unsafe_initial_state");
+    assert.equal(result.restore_attempts, 0);
+  } finally {
+    for (const socket of webSockets.clients) socket.terminate();
+    await new Promise<void>((resolve) => webSockets.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("gate entrypoint consumes the workflow result variable and writes a sanitized failure", async () => {

@@ -35,6 +35,110 @@ export function parseRobotIdentity(result: unknown): RobotIdentity {
   return { is_admin: record.is_admin, is_owner: record.is_owner };
 }
 
+export async function waitForStableProjectedState(
+  client: Pick<RobotHaWriteClient, "getState" | "onState" | "state">,
+  alias: string,
+  timeoutMs = 60_000,
+  settleMs = 30_000,
+): Promise<RobotHaProjectedState | null> {
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new TypeError("timeoutMs must be a positive integer");
+  }
+  if (!Number.isInteger(settleMs) || settleMs < 0 || settleMs >= timeoutMs) {
+    throw new TypeError("settleMs must be a non-negative integer below timeoutMs");
+  }
+
+  return await new Promise((resolve) => {
+    let settled = false;
+    let candidate: RobotHaProjectedState | null = null;
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsubscribe: (() => void) | null = null;
+    let unsubscribePending = false;
+    const cleanupSubscription = (): void => {
+      if (unsubscribe === null) {
+        unsubscribePending = true;
+        return;
+      }
+      const current = unsubscribe;
+      unsubscribe = null;
+      current();
+    };
+    const finish = (state: RobotHaProjectedState | null): void => {
+      if (settled) return;
+      settled = true;
+      if (settleTimer !== null) clearTimeout(settleTimer);
+      clearTimeout(timeoutTimer);
+      cleanupSubscription();
+      resolve(state === null ? null : structuredClone(state));
+    };
+    const invalidate = (): void => {
+      candidate = null;
+      if (settleTimer !== null) {
+        clearTimeout(settleTimer);
+        settleTimer = null;
+      }
+    };
+    const verifyCandidate = (): void => {
+      if (settled) return;
+      let current: RobotHaProjectedState | null;
+      try {
+        current = client.state === "ready" ? client.getState(alias) : null;
+      } catch {
+        finish(null);
+        return;
+      }
+      if (
+        current === null
+        || current.alias !== alias
+        || !current.available
+        || (current.state !== "on" && current.state !== "off")
+      ) {
+        invalidate();
+        return;
+      }
+      if (candidate?.state !== current.state || !candidate.available) {
+        consider(current);
+        return;
+      }
+      finish(current);
+    };
+    const consider = (state: RobotHaProjectedState | null): void => {
+      if (settled) return;
+      if (state === null) {
+        invalidate();
+        return;
+      }
+      if (state.alias !== alias) return;
+      if (!state.available || (state.state !== "on" && state.state !== "off")) {
+        invalidate();
+        return;
+      }
+      const unchanged = candidate?.state === state.state && candidate.available;
+      candidate = structuredClone(state);
+      if (unchanged && settleTimer !== null) return;
+      if (settleTimer !== null) clearTimeout(settleTimer);
+      if (settleMs === 0) {
+        verifyCandidate();
+      } else {
+        settleTimer = setTimeout(verifyCandidate, settleMs);
+      }
+    };
+    const timeoutTimer = setTimeout(() => finish(null), timeoutMs);
+    try {
+      const registered = client.onState((state) => consider(state));
+      unsubscribe = registered;
+      if (unsubscribePending || settled) {
+        cleanupSubscription();
+      }
+      if (!settled) {
+        consider(client.getState(alias));
+      }
+    } catch {
+      finish(null);
+    }
+  });
+}
+
 export async function dispatchCausalWrite(
   client: RobotHaWriteClient,
   alias: string,

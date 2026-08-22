@@ -11,6 +11,7 @@ import type { RobotHaWriteAction } from "@p4home/contracts";
 import {
   dispatchCausalWrite,
   restoreRobotState,
+  waitForStableProjectedState,
 } from "./phase4c-ha-gate-core.ts";
 import { readCurrentIdentity } from "./phase4c-ha-identity.ts";
 
@@ -29,6 +30,7 @@ interface GateResult {
   readonly policy_entities: number;
   readonly alias: string;
   readonly initial_state: string | null;
+  readonly initial_available: boolean;
   readonly target_state: string | null;
   readonly target_accepted: boolean;
   readonly target_observed: boolean;
@@ -97,6 +99,7 @@ async function main(): Promise<number> {
   let robotNonAdmin = false;
   let policyEntities = 0;
   let initialState: "on" | "off" | null = null;
+  let initialAvailable = false;
   let targetState: string | null = null;
   let targetAccepted = false;
   let targetObserved = false;
@@ -141,16 +144,28 @@ async function main(): Promise<number> {
       stateChangeEvents += 1;
     });
     await client.connect();
-    const observedInitialState = client.getState(ALIAS)?.state ?? null;
-    if (observedInitialState !== "on" && observedInitialState !== "off") {
+    const stableInitialState = await waitForStableProjectedState(client, ALIAS);
+    if (
+      stableInitialState === null
+      || (stableInitialState.state !== "on" && stableInitialState.state !== "off")
+    ) {
       reason = "unsafe_initial_state";
       throw new Error(reason);
     }
-    initialState = observedInitialState;
+    initialAvailable = stableInitialState.available;
+    initialState = stableInitialState.state;
     targetState = initialState === "off" ? "on" : "off";
     const targetAction: RobotHaWriteAction = targetState === "on" ? "turn_on" : "turn_off";
-    targetAttempted = true;
-    const target = await dispatchCausalWrite(client, ALIAS, targetAction, targetState);
+    const target = await dispatchCausalWrite(
+      client,
+      ALIAS,
+      targetAction,
+      targetState,
+      10_000,
+      () => {
+        targetAttempted = true;
+      },
+    );
     targetAccepted = target.accepted;
     targetObserved = target.observed;
     if (!targetAccepted) {
@@ -196,6 +211,8 @@ async function main(): Promise<number> {
       } finally {
         restoreClient.close();
       }
+    } else {
+      client?.close();
     }
   }
 
@@ -218,6 +235,7 @@ async function main(): Promise<number> {
     policy_entities: policyEntities,
     alias: ALIAS,
     initial_state: initialState,
+    initial_available: initialAvailable,
     target_state: targetState,
     target_accepted: targetAccepted,
     target_observed: targetObserved,
