@@ -8,11 +8,18 @@ interface IdentityOptions {
   readonly timeout_ms?: number;
   readonly retry_delay_ms?: number;
   readonly create_socket?: (url: string) => WebSocket;
+  readonly on_outbound_frame?: (frame: string) => void;
 }
 
 function websocketUrl(url: string): string {
   const parsed = new URL(url);
-  parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+  if (parsed.protocol === "https:" || parsed.protocol === "wss:") {
+    parsed.protocol = "wss:";
+  } else if (parsed.protocol === "http:" || parsed.protocol === "ws:") {
+    parsed.protocol = "ws:";
+  } else {
+    throw new Error("identity_protocol");
+  }
   parsed.pathname = "/api/websocket";
   parsed.search = "";
   parsed.hash = "";
@@ -25,6 +32,7 @@ function readCurrentIdentityOnce(
   timeoutMs: number,
   closeGraceMs: number,
   createSocket: (url: string) => WebSocket,
+  onOutboundFrame?: (frame: string) => void,
 ): Promise<RobotIdentity> {
   return new Promise<RobotIdentity>((resolve, reject) => {
     const socket = createSocket(websocketUrl(haUrl));
@@ -69,11 +77,20 @@ function readCurrentIdentityOnce(
             socket.terminate();
           }
         }, closeGraceMs);
-        forceCloseTimer.unref();
       }
     };
     const onError = (): void => {
       finish(() => reject(new Error("identity_transport")), true);
+    };
+    const send = (frame: string): boolean => {
+      try {
+        onOutboundFrame?.(frame);
+        socket.send(frame);
+        return true;
+      } catch {
+        finish(() => reject(new Error("identity_protocol")), true);
+        return false;
+      }
     };
     const onMessage = (raw: WebSocket.RawData, binary: boolean): void => {
       if (binary) {
@@ -89,12 +106,12 @@ function readCurrentIdentityOnce(
       }
       if (message.type === "auth_required" && phase === "awaiting_auth_required") {
         phase = "awaiting_auth_ok";
-        socket.send(JSON.stringify({ type: "auth", access_token: accessToken }));
+        send(JSON.stringify({ type: "auth", access_token: accessToken }));
       } else if (message.type === "auth_invalid") {
         finish(() => reject(new Error("identity_auth")), true);
       } else if (message.type === "auth_ok" && phase === "awaiting_auth_ok") {
         phase = "awaiting_result";
-        socket.send(JSON.stringify({ id: 1, type: "auth/current_user" }));
+        send(JSON.stringify({ id: 1, type: "auth/current_user" }));
       } else if (message.type === "result" && message.id === 1 && phase === "awaiting_result") {
         if (message.success !== true) {
           finish(() => reject(new Error("identity_protocol")), true);
@@ -138,6 +155,7 @@ export async function readCurrentIdentity(
         timeoutMs,
         closeGraceMs,
         createSocket,
+        options.on_outbound_frame,
       );
     } catch (error) {
       const reason = error instanceof Error ? error.message : "identity_transport";

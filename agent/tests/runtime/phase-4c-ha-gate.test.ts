@@ -575,15 +575,42 @@ class ControlledIdentitySocket extends EventEmitter {
 
 test("identity completion force-closes a peer that ignores graceful close", async () => {
   const socket = new ControlledIdentitySocket("success");
+  const outboundTypes: string[] = [];
   const identity = await readCurrentIdentity("http://127.0.0.1:8123", "test-token", {
     attempts: 1,
     close_grace_ms: 1,
     timeout_ms: 100,
     create_socket: () => socket as unknown as WebSocket,
+    on_outbound_frame: (frame) => {
+      const message = JSON.parse(frame) as Record<string, unknown>;
+      outboundTypes.push(String(message.type));
+    },
   });
   assert.deepEqual(identity, { is_admin: false, is_owner: false });
+  assert.deepEqual(outboundTypes, ["auth", "auth/current_user"]);
   assert.equal(socket.terminateCalls, 1);
   assert.equal(socket.readyState, WebSocket.CLOSED);
+});
+
+test("identity URL normalization never downgrades wss transport", async () => {
+  const socket = new ControlledIdentitySocket("success");
+  let connectedUrl = "";
+  const identity = await readCurrentIdentity(
+    "wss://ha.example.test/api/websocket",
+    "test-token",
+    {
+      attempts: 1,
+      close_grace_ms: 1,
+      timeout_ms: 100,
+      create_socket: (url) => {
+        connectedUrl = url;
+        return socket as unknown as WebSocket;
+      },
+    },
+  );
+
+  assert.deepEqual(identity, { is_admin: false, is_owner: false });
+  assert.equal(connectedUrl, "wss://ha.example.test/api/websocket");
 });
 
 test("identity retry starts only after the prior transport socket closes", async () => {
