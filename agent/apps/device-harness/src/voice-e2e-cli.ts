@@ -141,7 +141,7 @@ async function main(): Promise<void> {
     initialState = stable.state;
     const writeAction = initialState === "off" ? "turn_on" : "turn_off";
     const prompts: Phase5ePromptSet = {
-      read: "书房灯现在是什么状态",
+      read: "请查看书房灯状态",
       write: writeAction === "turn_on" ? "请打开书房灯" : "请关闭书房灯",
       barge: "请做一段较长的自我介绍",
       followup: "你好还在吗",
