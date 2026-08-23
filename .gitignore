@@ -58,6 +58,9 @@ evidence/agent-phase-3/*
 evidence/agent-phase-4/*
 !evidence/agent-phase-4/*.md
 !evidence/agent-phase-4/artifacts/
+!evidence/agent-phase-5/
+evidence/agent-phase-5/*
+!evidence/agent-phase-5/*.md
 evidence/agent-phase-4/artifacts/*
 !evidence/agent-phase-4/artifacts/*.json
 

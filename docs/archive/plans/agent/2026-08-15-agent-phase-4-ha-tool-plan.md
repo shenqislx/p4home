@@ -1,9 +1,10 @@
 # Agent Phase 4 — Robot HA Tool & Multi-role Split Plan
 
-> Status: `in_progress`
+> Status: `completed`
 > Started: 2026-08-20
-> Current Gate: 4A–4E 技术与真实环境门禁均已通过；等待用户最终 review
-> Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
+> Completed: 2026-08-23
+> Reviewed: 2026-08-23
+> Architecture: [P4 Local Agent Architecture](../../../p4-local-agent-architecture.md)
 > Depends on: Phase 3 complete；HA 环境与隔离测试实体可用
 
 ## 1. 目标
@@ -37,7 +38,7 @@ Interaction 可以产生相互隔离的 Human 与 Robot Run，并由确定性 Re
 - [x] 核对 P4 已有 HA WebSocket/read/writeback 行为，确定 Robot 不复用固件凭证或经 P4 代发；
 - [x] 把原始串行清单拆成 4A–4E 五个可独立 review 的纵切；
 - [x] 冻结准备阶段的凭证、allowlist、未知副作用和跨角色隔离原则；
-- [x] 记录准备证据：[Phase 4 Preparation](../../evidence/agent-phase-4/phase-4-preparation.md)。
+- [x] 记录准备证据：[Phase 4 Preparation](../../../../evidence/agent-phase-4/phase-4-preparation.md)。
 
 准备阶段只建立边界与门禁，没有创建 HA 账号/token、没有打开 Robot HA socket、没有执行真实家居
 动作，也没有向 Robot RoleProfile 开放任何 HA Tool。
@@ -58,7 +59,7 @@ Interaction 可以产生相互隔离的 Human 与 Robot Run，并由确定性 Re
 重放写请求；非法配置在 socket 创建前失败；Human/Cat/Router 的工具集合不变。
 
 4A 实现与本地退出门禁已完成，证据见
-[Phase 4A HA Contract & Credential Boundary](../../evidence/agent-phase-4/phase-4a-ha-contract-credential.md)。
+[Phase 4A HA Contract & Credential Boundary](../../../../evidence/agent-phase-4/phase-4a-ha-contract-credential.md)。
 2026-08-21 已完成代码 review 并修复首事件/快照竞态、旧状态残留、REST 重定向、公开 policy
 泄漏、投影类型混淆和文件有界读取等问题。2026-08-21 用户 review 通过并明确授权继续推进 Phase 4，
 4B 已启动。
@@ -78,11 +79,11 @@ Interaction 可以产生相互隔离的 Human 与 Robot Run，并由确定性 Re
 
 4B coding done：Robot 只获得只读 alias Tool，Runtime 从 transport 的 allowlist 投影缓存确定性生成
 结果，不执行第二次模型调用，也不把 observation 写回 Robot 会话历史。实现证据见
-[Phase 4B Read-only Robot HA Tool](../../evidence/agent-phase-4/phase-4b-read-only-robot-ha.md)。按阶段
+[Phase 4B Read-only Robot HA Tool](../../../../evidence/agent-phase-4/phase-4b-read-only-robot-ha.md)。按阶段
 流程完成独立 bugs review 并关闭全部发现；2026-08-23 又通过真实 HA 只读 client view 验证
 `role-profile/v4` 只暴露 `home.get_entity`、只读取一个 allowlist 投影，并保持 entity id/token 不进入模型
 请求或 Runtime 结果。脱敏证据见
-[phase4b-real-read.json](../../evidence/agent-phase-4/artifacts/phase4b-real-read.json)，绑定 coding commit
+[phase4b-real-read.json](../../../../evidence/agent-phase-4/artifacts/phase4b-real-read.json)，绑定 coding commit
 `a1ac394f3ac2e9012c9bcee01b01ce874cfaf40b`；4B 退出门禁已关闭。
 
 退出门禁：Robot 只能读取投影后的 allowlist 状态；任何未允许实体、敏感字段或注入文本都不能扩大
@@ -107,7 +108,7 @@ Interaction 可以产生相互隔离的 Human 与 Robot Run，并由确定性 Re
 4C coding done：Runtime 已把 policy、固定 request、HA accepted/rejected 与投影 state observation 分开，
 只有后续状态回刷能产生 completed；发送后的 timeout、取消或断线统一保留 unknown 且
 `replay_allowed=false`。本地实现证据见
-[Phase 4C Low-risk Write](../../evidence/agent-phase-4/phase-4c-low-risk-write.md)。独立 bugs review 已完成；
+[Phase 4C Low-risk Write](../../../../evidence/agent-phase-4/phase-4c-low-risk-write.md)。独立 bugs review 已完成；
 真实 HA/P4 收敛、P4 应用离线时 Robot 可用，以及 Robot 关闭后的 P4 稳态是不可替代的退出门禁，
 并已由下述专用 run 关闭。
 
@@ -115,7 +116,7 @@ Interaction 可以产生相互隔离的 Human 与 Robot Run，并由确定性 Re
 身份校验、单次低风险切换、因果 observation 与恢复；P4 串口记录目标 `on/off/on/off` 回刷，Robot
 关闭后持续输出 `p4_standalone:PASS` 与 `ui:8fps:PASS`，且无 task watchdog。manifest 绑定 commit、
 profile、串口、Agent disabled、policy target 与脱敏状态；完整证据见
-[Phase 4C Low-risk Write](../../evidence/agent-phase-4/phase-4c-low-risk-write.md)。4C 退出门禁已关闭。
+[Phase 4C Low-risk Write](../../../../evidence/agent-phase-4/phase-4c-low-risk-write.md)。4C 退出门禁已关闭。
 
 退出门禁：未授权或高风险写入零执行；允许实体的真实动作可由 HA result 与后续 state change 共同
 证明，Robot/P4 最终一致；重复、超时和重连测试没有盲目重放或伪造完成。
@@ -140,7 +141,7 @@ UTF-16 span 做完整覆盖与 surrogate 边界校验，非法输出在任何 Ro
 只接收自己的精确 slice；确定性 Composer 按源顺序组合结构化终态，Human 文本无法伪造或覆盖 Robot
 结果。全局 deadline、外部取消、partial failure、post-dispatch unknown 与审计 deferred 分开建模；
 SQLite 在组合前核对每个 trace 的完整 correlation identity。实现与多轮独立 bugs review 证据见
-[Phase 4D Multi-assignment RoutePlan & Response Composer](../../evidence/agent-phase-4/phase-4d-multi-assignment.md)，
+[Phase 4D Multi-assignment RoutePlan & Response Composer](../../../../evidence/agent-phase-4/phase-4d-multi-assignment.md)，
 最终复核为 no findings，4D 退出门禁已关闭。
 
 退出门禁：单 assignment 行为保持兼容；混合输入可稳定分段且全文无遗漏/重叠；任一非法 RoutePlan
@@ -165,7 +166,7 @@ SQLite 在组合前核对每个 trace 的完整 correlation identity。实现与
 4E 本地 coding 已完成：新增无 aggregate score 的四分项真实模型评测、精确原文子串到 UTF-16 span 的
 确定性边界、Robot/Human/Composer security holdout，以及对 Git objects、运行产物、SQLite 和进程参数的
 fail-closed 敏感信息审计。证据见
-[Phase 4E Security, Eval & Real Environment Gate](../../evidence/agent-phase-4/phase-4e-security-eval-real-environment.md)。
+[Phase 4E Security, Eval & Real Environment Gate](../../../../evidence/agent-phase-4/phase-4e-security-eval-real-environment.md)。
 Git all-object 门禁核对本次真实专用 token；仓库既有的 36 个 P4 panel whitelist entity ID 是已知受跟踪
 例外，4E 不新增，也不把“Git 中没有 entity ID”作为完成条件。运行产物、SQLite 和对话输出仍要求原始
 entity ID 与敏感 attribute 零命中。
@@ -187,5 +188,8 @@ no findings。最终 run `32585132074` 已用 manifest-first 核对 commit/profi
 - [x] 本次 Robot 专用 token 不进入模型、日志、SQLite、Git 或 artifact；运行产物、SQLite、对话与
   artifact 不含原始 entity id/attributes；Git 中只保留 Phase 4 前既有的 36 个受跟踪 panel whitelist
   entity id，Phase 4 未新增；
-- [ ] 用户最终 review 通过，Phase 4 关闭；
-- [ ] Phase 5 需用户另行明确授权后启动。
+- [x] 用户最终 review 通过，Phase 4 关闭；
+- [x] Phase 5 已由用户另行明确授权启动。
+
+2026-08-23，用户最终 review 通过，Phase 4 已完成并归档。同一条指令另行明确授权启动 Phase 5；
+这两项阶段决策分别记录，Phase 4 的关闭本身不被视为自动授权下一阶段。

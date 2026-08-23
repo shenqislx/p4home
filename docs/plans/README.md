@@ -23,8 +23,8 @@
 | 1 | Text Agent Runtime | `completed` | TypeScript Runtime、Ollama、有限 Tool Loop | [Phase 1 归档](../archive/plans/agent/2026-08-15-agent-phase-1-text-runtime-plan.md) |
 | 2 | Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作 | [Phase 2 归档](../archive/plans/agent/2026-08-15-agent-phase-2-p4-room-world-plan.md) |
 | 3 | Cat Object World | `completed` | sofa 等对象锚点与 Cat 交互动作 | [Phase 3 归档](../archive/plans/agent/2026-08-15-agent-phase-3-object-world-plan.md) |
-| 4 | Robot HA & Multi-role | `in_progress` | Robot 受限 HA 工具、Human/Robot 语义分割 | [Phase 4](./2026-08-15-agent-phase-4-ha-tool-plan.md) |
-| 5 | Role-aware Voice | `pending` | ESP-SR → STT → Router/Roles → TTS | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
+| 4 | Robot HA & Multi-role | `completed` | Robot 受限 HA 工具、Human/Robot 语义分割 | [Phase 4 归档](../archive/plans/agent/2026-08-15-agent-phase-4-ha-tool-plan.md) |
+| 5 | Role-aware Voice | `in_progress` | ESP-SR → STT → Router/Roles → TTS | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
 | 6 | Role-aware Memory | `pending` | 比较共享、私有和混合记忆可见性 | [Phase 6](./2026-08-15-agent-phase-6-memory-plan.md) |
 | 7 | Cat Autonomy | `pending` | Timer/HA 事件驱动、低频、可审计 Cat 行为 | [Phase 7](./2026-08-15-agent-phase-7-autonomy-plan.md) |
 
@@ -54,8 +54,9 @@ Human/Robot Run、确定性 Response Composer、deadline/partial/deferred 语义
 Git/运行产物/SQLite/进程参数敏感审计和十一轮独立 bugs review，最终为 no findings。最终 run
 `32585132074` 已通过 manifest-first 身份、flash、离线/在线 Robot、HA/P4 回刷、1800 秒长稳、post-Robot
 standalone/UI 与矛盾证据判定；用户也已独立确认物理灯态变化/恢复和实际触摸。4B 真实只读门禁及
-4A–4E 其余技术/真实环境门禁均已关闭。Phase 4 整体仍为 `in_progress`，只等待用户最终 review；
-Phase 5 未启动。
+4A–4E 其余技术/真实环境门禁均已关闭。2026-08-23 用户最终 review 通过，Phase 4 已完成并归档。
+用户在同一条指令中另行授权启动 Phase 5；当前已完成 5A–5E 纵切设计和启动准备，只开放 5A
+Audio/ESP-SR Baseline & Voice Contract，尚未打开默认 SR、音频上行或 STT/TTS。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 已在 Phase 2 完成并通过实机证据验证。

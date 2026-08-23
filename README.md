@@ -44,8 +44,9 @@ allowlist transport 与 review 修复已完成并推送。4B 只读 Robot `home.
 bugs review、真实 HA 只读门禁均已完成。4C 低风险写侧、真实 HA/P4 收敛与恢复已完成；4D 多
 assignment/确定性 Composer 和 4E 安全评测也已通过。最终硬件 run `32585132074` 证明离线 Robot、
 在线 HA/P4 回刷、1800 秒长稳、post-Robot standalone/UI 8 FPS 与无矛盾证据；用户另行确认物理灯态
-变化/恢复和实际触摸交互。4A–4E 技术与真实环境门禁均已关闭，Phase 4 等待用户最终 review，未启动
-Phase 5。
+变化/恢复和实际触摸交互。4A–4E 技术与真实环境门禁均已关闭；2026-08-23 用户最终 review 通过，
+Phase 4 已完成并归档。用户另行明确授权启动 Phase 5；当前已完成 5A–5E 纵切设计与启动准备，只
+进入 5A 音频/ESP-SR 基线和 Voice contract，尚未打开默认 SR、音频上行或 STT/TTS。
 
 ## 工作规则
 

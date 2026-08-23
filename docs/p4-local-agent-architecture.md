@@ -740,13 +740,15 @@ Object Event & Role Boundary 已完成。3D 最终实机 run `32382940058` 已�
 
 ### Phase 4 — Robot Home Assistant Tool & Multi-role Split
 
-执行计划：[Phase 4 — Home Assistant Tool](./plans/2026-08-15-agent-phase-4-ha-tool-plan.md)
+执行计划：[Phase 4 — Home Assistant Tool（已归档）](./archive/plans/agent/2026-08-15-agent-phase-4-ha-tool-plan.md)
 
 交付：Robot 直连 HA、读侧 allowlist、低风险写侧、状态订阅、审计；RoutePlan 放开多个 assignment，
 实现语义 span 分割、Human + Robot 多角色响应和确定性 Response Composer。
 
 退出条件：Robot 控制真实实体后，Robot 与 P4 都从 HA 回刷到一致状态；“我好累，打开空调”可由
 Human 回应情绪片段、Robot 处理命令片段，权限和执行结果不串角色。
+
+2026-08-23 用户最终 review 通过，Phase 4 已完成并归档；4A–4E 技术与真实环境门禁均已关闭。
 
 ### Phase 5 — Role-aware Voice
 
@@ -756,6 +758,10 @@ Human 回应情绪片段、Robot 处理命令片段，权限和执行结果不�
 语音状态 UI。
 
 退出条件：本地唤醒到一次家控对话闭环稳定完成。
+
+2026-08-23 已获用户明确授权启动。Phase 5 拆分为 5A 音频/ESP-SR 基线与 Voice contract、5B 独立
+二进制通道、5C STT/统一 Router、5D 分角色 TTS 与 barge-in、5E 安全/评测/实机总门禁；当前只
+进入 5A，尚未打开默认 SR、音频上行或 STT/TTS。
 
 ### Phase 6 — Memory
 

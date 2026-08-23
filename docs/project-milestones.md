@@ -24,8 +24,8 @@
 | M7.1 Text Agent Runtime | `completed` | Ollama + 有限 Tool Loop + SQLite + eval |
 | M7.2 Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作闭环 |
 | M7.3 Cat Object World | `completed` | sofa/window/desk 等 Cat 对象级动作，实机门禁与最终 review 已通过 |
-| M7.4 Robot HA & Multi-role | `in_progress` | 4A–4E 技术与真实环境门禁已通过；等待用户最终 review |
-| M7.5 Role-aware Voice | `pending` | 本地唤醒、STT、Router/Roles、TTS 闭环 |
+| M7.4 Robot HA & Multi-role | `completed` | 4A–4E 技术/真实环境门禁及用户最终 review 已通过 |
+| M7.5 Role-aware Voice | `in_progress` | 5A–5E 已冻结；当前 5A 音频/ESP-SR 基线与 Voice contract |
 | M7.6 Role-aware Memory | `pending` | 评测共享、私有与混合角色记忆 |
 | M7.7 Cat Autonomy | `pending` | Timer/HA 事件驱动、低优先级、可关闭 Cat 行为 |
 
@@ -69,9 +69,11 @@ coding 和独立 bugs review（含单次只读 reconciliation）。真实 run `3
 稳态 UI 8 FPS、artifact 脱敏和无 watchdog 均通过专用门禁。4D 已完成多 assignment、UTF-16 span
 隔离和确定性 Composer；4E 完成四分项真实模型评测与敏感审计。最终 run `32585132074` 绑定经复审的
 Phase 4C timing fix commit，通过 P4 离线/在线 Robot、HA/P4 回刷、1800 秒长稳和 post-Robot
-standalone/UI 门禁；用户也独立确认物理灯态变化/恢复与实际触摸。M7.4 的技术与真实环境门禁均已关闭，
-等待用户最终 review，
-且未授权 M7.5 / Phase 5。
+standalone/UI 门禁；用户也独立确认物理灯态变化/恢复与实际触摸。M7.4 的技术与真实环境门禁均已关闭。
+2026-08-23 用户最终 review 通过，Phase 4 / M7.4 已完成并归档；用户在同一条指令中另行授权启动
+M7.5 / Phase 5。Phase 5 已拆分为 5A 音频/ESP-SR 基线与 Voice contract、5B 二进制通道、5C
+STT/统一 Router、5D 分角色 TTS/barge-in、5E 安全/评测/实机总门禁；当前只进入 5A，默认 SR、
+音频上行和 STT/TTS 仍未打开。
 
 ## 5. 状态更新规则
 
