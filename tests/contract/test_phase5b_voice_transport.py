@@ -90,6 +90,8 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         kconfig = VOICE_KCONFIG.read_text(encoding="utf-8")
 
         self.assertIn("CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK 6144", firmware)
+        self.assertIn("CONFIG_P4HOME_VOICE_RECONNECT_TIMEOUT_MS 10000", firmware)
+        self.assertIn(".reconnect_timeout_ms = CONFIG_P4HOME_VOICE_RECONNECT_TIMEOUT_MS", firmware)
         self.assertIn("default 6144", kconfig)
         self.assertIn("xTaskCreateWithCaps(\n        ha_client_worker", ha)
         self.assertIn("MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT", ha)

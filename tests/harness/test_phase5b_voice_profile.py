@@ -37,7 +37,7 @@ class Phase5BVoiceProfileTest(unittest.TestCase):
             )
             value = path.read_text(encoding="utf-8")
             for line in (
-                "CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288",
+                "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192",
                 "CONFIG_P4HOME_SR_ENABLE=y",
                 "CONFIG_P4HOME_PHASE5A_VALIDATION=y",
                 "CONFIG_P4HOME_PHASE5B_VALIDATION=y",
@@ -46,6 +46,8 @@ class Phase5BVoiceProfileTest(unittest.TestCase):
                 "CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED=y",
                 "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK=12288",
                 "CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK=6144",
+                "CONFIG_P4HOME_VOICE_RECONNECT_TIMEOUT_MS=10000",
+                "CONFIG_P4HOME_HA_CLIENT_WS_TASK_STACK=6144",
                 "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set",
                 'CONFIG_P4HOME_VOICE_TRANSPORT_URI="wss://192.0.2.10:8443/v1/voice"',
             ):

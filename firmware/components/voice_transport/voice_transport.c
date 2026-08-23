@@ -48,6 +48,9 @@ static const char *TAG = "voice_transport";
 #ifndef CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK
 #define CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK 6144
 #endif
+#ifndef CONFIG_P4HOME_VOICE_RECONNECT_TIMEOUT_MS
+#define CONFIG_P4HOME_VOICE_RECONNECT_TIMEOUT_MS 10000
+#endif
 
 typedef enum {
     VOICE_SESSION_IDLE = 0,
@@ -973,7 +976,7 @@ esp_err_t voice_transport_start(void)
         .task_stack = CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK,
         .crt_bundle_attach = voice_attach_spki_verifier,
         .skip_cert_common_name_check = true,
-        .reconnect_timeout_ms = 2000,
+        .reconnect_timeout_ms = CONFIG_P4HOME_VOICE_RECONNECT_TIMEOUT_MS,
         .enable_close_reconnect = true,
         .network_timeout_ms = 10000,
         .ping_interval_sec = 10,

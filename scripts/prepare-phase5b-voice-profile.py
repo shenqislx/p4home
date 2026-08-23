@@ -48,7 +48,7 @@ def apply_profile(path: pathlib.Path, uri: str, device_id: str, token: str, spki
         raise ValueError("Phase 5B sdkconfig must be a non-symlink regular file")
     original_mode = path.stat().st_mode & 0o777
     replacements = {
-        "CONFIG_ESP_MAIN_TASK_STACK_SIZE": "CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288",
+        "CONFIG_ESP_MAIN_TASK_STACK_SIZE": "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192",
         "CONFIG_P4HOME_SR_ENABLE": "CONFIG_P4HOME_SR_ENABLE=y",
         "CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST": "CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST=y",
         "CONFIG_P4HOME_PHASE5A_VALIDATION": "CONFIG_P4HOME_PHASE5A_VALIDATION=y",
@@ -63,6 +63,8 @@ def apply_profile(path: pathlib.Path, uri: str, device_id: str, token: str, spki
         "CONFIG_P4HOME_VOICE_SPKI_SHA256": f"CONFIG_P4HOME_VOICE_SPKI_SHA256={json.dumps(spki)}",
         "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK": "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK=12288",
         "CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK": "CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK=6144",
+        "CONFIG_P4HOME_VOICE_RECONNECT_TIMEOUT_MS": "CONFIG_P4HOME_VOICE_RECONNECT_TIMEOUT_MS=10000",
+        "CONFIG_P4HOME_HA_CLIENT_WS_TASK_STACK": "CONFIG_P4HOME_HA_CLIENT_WS_TASK_STACK=6144",
     }
     lines = path.read_text(encoding="utf-8").splitlines()
     retained = [

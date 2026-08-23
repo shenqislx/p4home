@@ -42,4 +42,10 @@ config P4HOME_VOICE_WEBSOCKET_TASK_STACK
     default 6144
     depends on P4HOME_VOICE_TRANSPORT_ENABLED
 
+config P4HOME_VOICE_RECONNECT_TIMEOUT_MS
+    int "Voice WebSocket reconnect timeout (ms)"
+    range 2000 60000
+    default 10000
+    depends on P4HOME_VOICE_TRANSPORT_ENABLED
+
 endmenu
