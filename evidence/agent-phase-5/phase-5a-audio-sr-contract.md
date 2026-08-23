@@ -33,10 +33,13 @@ selftest 和 Phase 5A marker；本纵切没有创建 Voice socket、连接 STT/T
   `CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288`；
 - 官方 G2P 带对象短命令别名及 review 修正后构建：通过，app image `0x284220` bytes，3 MiB app
   partition 剩余 `0x7bde0` bytes（16%）；
+- 命令窗口聚合诊断及三轮独立 review 修复后构建：通过，app image `0x284630` bytes，3 MiB app
+  partition 剩余 `0x7b9d0` bytes（16%）；诊断仅记录 frame/VAD/detect-call 计数与 PCM 峰值，不保存
+  或上传原始音频；
 - C host tests：4/4（`world_service`、`world_object_runtime`、`voice_protocol`、
   `audio_service_lease`）通过；
 - Agent 全量 tests：247/247；TypeScript typecheck：通过；
-- Python contract：81/81；hardware harness：11/11；
+- Python contract：82/82；hardware harness：11/11；
 - workflow YAML parse 与 `git diff --check`：通过。
 
 ## Coding bugs review
@@ -45,6 +48,14 @@ coding done 后启动独立只读 subagent review。review 报告的 6 项 findi
 payload 长度、跨消息 lifecycle/credit/window、codec read/close 串行化、codec close fault quarantine、
 JavaScript flags 数值边界、控制面全零 session。修复后另将 lease generation 溢出改为 fail-closed，
 避免旧 generation ABA 复用。上述全量回归均在修复后重新通过。
+
+后续 fixed-command 定位改动也按 coding done → 独立 review → 修复 → 复审执行。review 发现并关闭：
+命令 runtime 可因 NULL fetch/chunksize mismatch/持续 DETECTING 永久停留 AWAKE、MultiNet 空结果被
+误记为 detected、`WAKE_DETECTED` 在 NULL fetch 时无法推进，以及过期帧可能先执行动作再检查截止。
+最终状态机在任何 NULL-fetch continue、frame 计数、MultiNet detect 和本地背光动作之前统一推进
+wake hold 与 command hard deadline；所有终止路径恢复 WakeNet/Listening，并用独立 outcome 区分
+动作成功、动作失败、空结果、MultiNet timeout、硬截止和 command runtime 不可用。最终复审无代码
+finding，证据计数过期问题已同步修正为 82/82。
 
 ## 实机门禁
 
@@ -131,3 +142,22 @@ profile 继续使用 tracked 5120 bytes。workflow 在 build 前后验证 profil
 - 为降低完整长句在声学回放中的尾词丢失风险，下一候选使用 ESP-SR 官方 `multinet_g2p.py`
   生成的带对象短别名 `light on/off`。独立 review 拒绝了会扩大语义并可能抢先匹配的无对象
   `turn on/off`；既有完整短语和 action id 不变，仍需复核、推送与新 artifact 才能判定。
+
+### 第六、七轮：短别名候选仍未完成 fixed command
+
+- commit `6e992832cc9f29f2036568f052e5cb35166c39f2` 的 run `32613812909` 与
+  `32614298745` 均使用 180 秒 `phase5a_voice` profile；后者按 runner 本地 `$ serial-capture`
+  启动标记精确安排系统扬声器回放；
+- 两轮 manifest 均匹配 commit/run/profile/serial/12288-byte main stack，原始日志确认 ESP32-P4、
+  四次 flash hash、稳定栈/PCM/AFE/lease/wake；第七轮 UI 8 FPS 全部 PASS 且无 panic/overflow；
+- `light on/off` 仍没有形成 `VERIFY:phase5a:fixed_command:PASS`。第六轮一次孤立 UI interval FAIL
+  未在第七轮复现，不据此判为持续 UI 回归；
+- 同一已刷写候选的三组 no-reset 本地串口诊断分别覆盖单命令、多 voice 与 60/35/100% 音量矩阵；
+  Mac 系统扬声器每次都只作为输入尝试，MultiNet 仍以 152 blank/空结果结束，不能改变 5A FAIL。
+
+### 当前诊断候选：待真机 artifact
+
+为区分信号幅度与状态/喂帧问题，当前候选加入命令窗口 aggregate-only 诊断：raw/AFE peak、VAD
+speech frame、合格 frame 与 MultiNet detect call。`DIAG:` 与 `VERIFY:` 前缀严格分离，只有真实本地
+动作递增 `command_action_count` 后，app_main 才会输出 `VERIFY:phase5a:fixed_command:PASS`。该候选
+在提交、推送和新硬件 artifact 前不改变 Phase 5A 判定。

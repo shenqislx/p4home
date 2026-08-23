@@ -187,6 +187,81 @@ class Phase5AVoiceContractTest(unittest.TestCase):
         self.assertNotIn("s_status.afe_runtime_ready = true;", source[create_task:task_create_end])
         self.assertNotIn("runtime loop task created", source[create_task:task_create_end])
 
+    def test_command_window_diagnostics_are_aggregate_only(self):
+        source = (
+            ROOT / "firmware/components/sr_service/sr_service.c"
+        ).read_text(encoding="utf-8")
+        header = (
+            ROOT / "firmware/components/sr_service/include/sr_service.h"
+        ).read_text(encoding="utf-8")
+        for field in (
+            "command_window_frame_count",
+            "command_window_vad_speech_count",
+            "command_window_detect_call_count",
+            "command_window_raw_peak",
+            "command_window_afe_peak",
+        ):
+            self.assertIn(field, header)
+        self.assertIn('"DIAG:phase5a:command_window outcome=%s frames=%"', source)
+        self.assertIn("sr_service_pcm_peak(mic_frame", source)
+        self.assertIn("sr_service_pcm_peak(fetch_result->data", source)
+        peak = source.split("static uint32_t sr_service_pcm_peak(", 2)[2].split("\n}\n", 1)[0]
+        self.assertIn("const int32_t sample = samples[i];", peak)
+        self.assertIn("sample < 0 ? -sample : sample", peak)
+
+        runtime = source.split("static void sr_service_runtime_task(void *parameter)\n{", 1)[1]
+        awake_reset = runtime.index("s_status.command_window_frame_count = 0;")
+        awake_state = runtime.index(
+            'sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_AWAKE, "wake detected hold elapsed")'
+        )
+        frame_count = runtime.index("s_status.command_window_frame_count++;")
+        detect_count = runtime.index("s_status.command_window_detect_call_count++;")
+        detect_call = runtime.index("s_command_iface->detect(", detect_count)
+        self.assertLess(awake_reset, awake_state)
+        self.assertLess(awake_state, frame_count)
+        self.assertLess(frame_count, detect_count)
+        self.assertLess(detect_count, detect_call)
+
+        state_advance = runtime.index(
+            "/*\n         * Advance timed states before inspecting the fetched frame."
+        )
+        null_fetch = runtime.index("if (fetch_result == NULL) {", state_advance)
+        null_continue = runtime.index("continue;", null_fetch)
+        wake_deadline = runtime.index(
+            "sr_service_deadline_reached(state_now, s_wake_detected_deadline)",
+            state_advance,
+        )
+        awake_deadline = runtime.index(
+            "sr_service_deadline_reached(state_now, s_awake_deadline)",
+            wake_deadline,
+        )
+        self.assertLess(state_advance, wake_deadline)
+        self.assertLess(wake_deadline, awake_deadline)
+        self.assertLess(awake_deadline, null_fetch)
+        self.assertLess(null_fetch, null_continue)
+        self.assertLess(awake_deadline, detect_call)
+        for outcome in (
+            "detected_action_applied",
+            "detected_action_failed",
+            "detected_empty",
+            "multinet_timeout",
+            "deadline",
+            "deadline_no_runtime",
+        ):
+            self.assertIn(f'"{outcome}"', runtime)
+
+        finish = source.split(
+            "static void sr_service_finish_command_window(const char *outcome,", 2
+        )[2].split("\n}\n", 1)[0]
+        self.assertIn("sr_service_log_command_window(outcome);", finish)
+        self.assertIn("sr_service_set_wakenet_enabled(true, reason);", finish)
+        self.assertIn(
+            "sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_LISTENING, reason);",
+            finish,
+        )
+        self.assertNotIn("fwrite(", source)
+        self.assertNotIn("audio_dump", source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,6 +36,11 @@ typedef struct {
     uint32_t runtime_wake_event_count;
     uint32_t wake_state_transition_count;
     uint32_t awake_session_count;
+    uint32_t command_window_frame_count;
+    uint32_t command_window_vad_speech_count;
+    uint32_t command_window_detect_call_count;
+    uint32_t command_window_raw_peak;
+    uint32_t command_window_afe_peak;
     uint32_t command_detect_count;
     uint32_t command_action_count;
     int last_wakeup_state;

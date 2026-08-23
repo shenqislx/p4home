@@ -109,6 +109,73 @@ static esp_err_t sr_service_apply_command_action(sr_service_command_id_t command
 static const char *sr_service_voice_state_to_text(sr_service_voice_state_t state);
 static void sr_service_set_voice_state(sr_service_voice_state_t state, const char *reason);
 static void sr_service_set_wakenet_enabled(bool enabled, const char *reason);
+static uint32_t sr_service_pcm_peak(const int16_t *samples, size_t sample_count);
+static void sr_service_log_command_window(const char *outcome);
+static bool sr_service_deadline_reached(TickType_t now, TickType_t deadline);
+static void sr_service_finish_command_window(const char *outcome,
+                                             const char *status_text,
+                                             const char *reason);
+
+static uint32_t sr_service_pcm_peak(const int16_t *samples, size_t sample_count)
+{
+    uint32_t peak = 0;
+
+    if (samples == NULL) {
+        return 0;
+    }
+
+    for (size_t i = 0; i < sample_count; ++i) {
+        const int32_t sample = samples[i];
+        const uint32_t magnitude = (uint32_t)(sample < 0 ? -sample : sample);
+        if (magnitude > peak) {
+            peak = magnitude;
+        }
+    }
+    return peak;
+}
+
+static void sr_service_log_command_window(const char *outcome)
+{
+    uint32_t frames;
+    uint32_t vad_speech;
+    uint32_t detect_calls;
+    uint32_t raw_peak;
+    uint32_t afe_peak;
+
+    taskENTER_CRITICAL(&s_status_lock);
+    frames = s_status.command_window_frame_count;
+    vad_speech = s_status.command_window_vad_speech_count;
+    detect_calls = s_status.command_window_detect_call_count;
+    raw_peak = s_status.command_window_raw_peak;
+    afe_peak = s_status.command_window_afe_peak;
+    taskEXIT_CRITICAL(&s_status_lock);
+
+    ESP_LOGW(TAG,
+             "DIAG:phase5a:command_window outcome=%s frames=%" PRIu32
+             " vad_speech=%" PRIu32 " detect_calls=%" PRIu32
+             " raw_peak=%" PRIu32 " afe_peak=%" PRIu32,
+             outcome != NULL ? outcome : "unknown",
+             frames,
+             vad_speech,
+             detect_calls,
+             raw_peak,
+             afe_peak);
+}
+
+static bool sr_service_deadline_reached(TickType_t now, TickType_t deadline)
+{
+    return (int32_t)(now - deadline) >= 0;
+}
+
+static void sr_service_finish_command_window(const char *outcome,
+                                             const char *status_text,
+                                             const char *reason)
+{
+    SR_STATUS_MUTATE(s_status.status_text = status_text;);
+    sr_service_log_command_window(outcome);
+    sr_service_set_wakenet_enabled(true, reason);
+    sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_LISTENING, reason);
+}
 
 static void sr_service_apply_board_afe_policy(afe_config_t *afe_config)
 {
@@ -249,7 +316,7 @@ static void sr_service_set_voice_state(sr_service_voice_state_t state, const cha
     wake_events = s_status.runtime_wake_event_count;
     taskEXIT_CRITICAL(&s_status_lock);
 
-    ESP_LOGI(TAG,
+    ESP_LOGW(TAG,
              "voice state -> %s reason=%s transitions=%" PRIu32 " wake_events=%" PRIu32,
              voice_state_text,
              reason != NULL ? reason : "unspecified",
@@ -515,6 +582,8 @@ static void sr_service_runtime_task(void *parameter)
             break;
         }
 
+        const uint32_t raw_peak = sr_service_pcm_peak(mic_frame, (size_t)feed_chunksize);
+
         for (int i = 0; i < feed_chunksize; ++i) {
             afe_input[i * feed_channels] = mic_frame[i];
         }
@@ -529,6 +598,47 @@ static void sr_service_runtime_task(void *parameter)
         afe_fetch_result_t *fetch_result =
             s_runtime_afe_iface->fetch_with_delay(s_runtime_afe_data, pdMS_TO_TICKS(20));
         SR_STATUS_MUTATE(s_status.runtime_loop_iteration_count++;);
+        const TickType_t state_now = xTaskGetTickCount();
+
+        /*
+         * Advance timed states before inspecting the fetched frame. This keeps
+         * NULL fetches from trapping WAKE_DETECTED and prevents an expired
+         * command window from consuming a late frame or applying an action.
+         */
+        if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_WAKE_DETECTED &&
+            sr_service_deadline_reached(state_now, s_wake_detected_deadline)) {
+            s_awake_deadline = state_now + pdMS_TO_TICKS(SR_SERVICE_AWAKE_HOLD_MS);
+            SR_STATUS_MUTATE({
+                s_status.awake_session_count++;
+                s_status.command_window_frame_count = 0;
+                s_status.command_window_vad_speech_count = 0;
+                s_status.command_window_detect_call_count = 0;
+                s_status.command_window_raw_peak = 0;
+                s_status.command_window_afe_peak = 0;
+            });
+            sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_AWAKE, "wake detected hold elapsed");
+            if (s_command_iface != NULL && s_command_model_data != NULL &&
+                sr_status_command_set_ready_get()) {
+                s_command_iface->clean(s_command_model_data);
+                SR_STATUS_MUTATE(s_status.status_text = "Wake acknowledged; awaiting fixed voice command";);
+                sr_service_publish_voice_status("Voice awake: waiting for fixed command.");
+            }
+        }
+
+        if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE &&
+            sr_service_deadline_reached(state_now, s_awake_deadline)) {
+            const bool command_runtime_ready =
+                s_command_iface != NULL && s_command_model_data != NULL &&
+                sr_status_command_set_ready_get();
+            sr_service_finish_command_window(command_runtime_ready ? "deadline" : "deadline_no_runtime",
+                                             command_runtime_ready
+                                                 ? "Fixed command hard deadline reached"
+                                                 : "Wake session expired without command runtime",
+                                             command_runtime_ready
+                                                 ? "command hard deadline"
+                                                 : "awake hold elapsed");
+        }
+
         if (fetch_result == NULL) {
             continue;
         }
@@ -559,24 +669,27 @@ static void sr_service_runtime_task(void *parameter)
                      fetch_result->trigger_channel_id);
         }
 
-        if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_WAKE_DETECTED &&
-            now >= s_wake_detected_deadline) {
-            s_awake_deadline = now + pdMS_TO_TICKS(SR_SERVICE_AWAKE_HOLD_MS);
-            SR_STATUS_MUTATE(s_status.awake_session_count++;);
-            sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_AWAKE, "wake detected hold elapsed");
-            if (s_command_iface != NULL && s_command_model_data != NULL && sr_status_command_set_ready_get()) {
-                s_command_iface->clean(s_command_model_data);
-                SR_STATUS_MUTATE(s_status.status_text = "Wake acknowledged; awaiting fixed voice command";);
-                sr_service_publish_voice_status("Voice awake: waiting for fixed command.");
-            }
-        }
-
         if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE &&
             s_command_iface != NULL && s_command_model_data != NULL && sr_status_command_set_ready_get()) {
             if (fetch_result->data != NULL && fetch_result->data_size > 0) {
                 const int command_samples = fetch_result->data_size / (int)sizeof(int16_t);
+                const uint32_t afe_peak = sr_service_pcm_peak(fetch_result->data,
+                                                              (size_t)command_samples);
+                SR_STATUS_MUTATE({
+                    s_status.command_window_frame_count++;
+                    if (fetch_result->vad_state == VAD_SPEECH) {
+                        s_status.command_window_vad_speech_count++;
+                    }
+                    if (raw_peak > s_status.command_window_raw_peak) {
+                        s_status.command_window_raw_peak = raw_peak;
+                    }
+                    if (afe_peak > s_status.command_window_afe_peak) {
+                        s_status.command_window_afe_peak = afe_peak;
+                    }
+                });
                 const uint32_t mn_chunksize = sr_status_command_chunksize_get();
                 if ((uint32_t)command_samples == mn_chunksize) {
+                    SR_STATUS_MUTATE(s_status.command_window_detect_call_count++;);
                     esp_mn_state_t command_state =
                         s_command_iface->detect(s_command_model_data, fetch_result->data);
                     if (command_state == ESP_MN_STATE_DETECTED) {
@@ -601,17 +714,25 @@ static void sr_service_runtime_task(void *parameter)
                             if (action_err != ESP_OK) {
                                 ESP_LOGW(TAG, "command action failed: %s", esp_err_to_name(action_err));
                                 SR_STATUS_MUTATE(s_status.status_text = "Fixed command action failed";);
+                                sr_service_finish_command_window("detected_action_failed",
+                                                                 "Fixed command action failed",
+                                                                 "command action failed");
                             } else {
                                 SR_STATUS_MUTATE(s_status.status_text = "Fixed command action applied";);
+                                sr_service_publish_voice_status("Voice command accepted.");
+                                sr_service_finish_command_window("detected_action_applied",
+                                                                 "Fixed command action applied",
+                                                                 "command detected");
                             }
-                            sr_service_publish_voice_status("Voice command accepted.");
+                        } else {
+                            sr_service_finish_command_window("detected_empty",
+                                                             "MultiNet detected state had no command result",
+                                                             "empty command result");
                         }
-                        sr_service_set_wakenet_enabled(true, "command detected");
-                        sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_LISTENING, "command detected");
                     } else if (command_state == ESP_MN_STATE_TIMEOUT) {
-                        SR_STATUS_MUTATE(s_status.status_text = "Fixed command window timed out";);
-                        sr_service_set_wakenet_enabled(true, "command timeout");
-                        sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_LISTENING, "command timeout");
+                        sr_service_finish_command_window("multinet_timeout",
+                                                         "Fixed command window timed out",
+                                                         "command timeout");
                     }
                 } else if (mn_chunksize > 0U && (uint32_t)command_samples != mn_chunksize) {
                     ESP_LOGW(TAG,
@@ -619,14 +740,6 @@ static void sr_service_runtime_task(void *parameter)
                              command_samples,
                              mn_chunksize);
                 }
-            }
-        } else if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE) {
-            if (fetch_result->vad_state == VAD_SPEECH) {
-                s_awake_deadline = now + pdMS_TO_TICKS(SR_SERVICE_AWAKE_HOLD_MS);
-            } else if (now >= s_awake_deadline) {
-                SR_STATUS_MUTATE(s_status.status_text = "Wake session expired without command runtime";);
-                sr_service_set_wakenet_enabled(true, "awake hold elapsed");
-                sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_LISTENING, "awake hold elapsed");
             }
         }
 
