@@ -40,6 +40,15 @@ CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
 CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
 CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
 CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+# ESP-Hosted SDIO packets do not need to consume the P4's scarce internal DMA
+# heap after the bus transfer. 2.12.8+ can keep its bounded transport pool in
+# PSRAM, leaving internal memory available for concurrent ESP-SR capture.
+CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y
+# ESP32-P4 SDMMC DMA requires the ESP-Hosted PSRAM pool blocks to remain aligned
+# to the 64-byte L2 cache line. A stale private 128-byte selection can make the
+# 1600-byte transport stride alternate between aligned and invalid addresses.
+CONFIG_CACHE_L2_CACHE_LINE_64B=y
+# CONFIG_CACHE_L2_CACHE_LINE_128B is not set
 CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM=16
 CONFIG_WIFI_RMT_DYNAMIC_RX_BUFFER_NUM=64
 CONFIG_WIFI_RMT_DYNAMIC_TX_BUFFER_NUM=64

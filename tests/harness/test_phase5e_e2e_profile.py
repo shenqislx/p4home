@@ -9,9 +9,26 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/firmware-self-hosted-flash-serial.yml"
 AUDIT = ROOT / "scripts/audit-phase5e-artifacts.py"
 DRIVER = ROOT / "scripts/drive-phase5e-mac-speaker.py"
+NETWORK_COMPONENT = ROOT / "firmware/components/network_service/idf_component.yml"
+SDKCONFIG_DEFAULTS = ROOT / "firmware/sdkconfig.defaults"
+DEPENDENCY_LOCK = ROOT / "firmware/dependencies.lock"
 
 
 class Phase5eProfileTests(unittest.TestCase):
+    def test_esp_hosted_sdio_oom_hardening_is_pinned(self):
+        component = NETWORK_COMPONENT.read_text(encoding="utf-8")
+        defaults = SDKCONFIG_DEFAULTS.read_text(encoding="utf-8")
+        dependency_lock = DEPENDENCY_LOCK.read_text(encoding="utf-8")
+
+        self.assertIn('espressif/esp_hosted: "2.12.11"', component)
+        self.assertIn("CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y", defaults)
+        self.assertIn("CONFIG_CACHE_L2_CACHE_LINE_64B=y", defaults)
+        self.assertIn("# CONFIG_CACHE_L2_CACHE_LINE_128B is not set", defaults)
+        self.assertRegex(
+            dependency_lock,
+            r"(?s)  espressif/esp_hosted:.*?\n    version: 2\.12\.11\n",
+        )
+
     def test_workflow_wires_e2e_harness_models_driver_and_audit(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         for marker in (

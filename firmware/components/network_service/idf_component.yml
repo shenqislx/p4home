@@ -1,2 +1,6 @@
 dependencies:
+  # 2.12.10 hardened SDIO RX allocation so transient DMA-memory pressure no
+  # longer asserts and reboots the P4. Keep the latest compatible 2.12 patch
+  # pinned so hardware builds cannot silently fall back to the affected 2.12.3.
+  espressif/esp_hosted: "2.12.11"
   espressif/esp_wifi_remote: "1.5.1"
