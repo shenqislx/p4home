@@ -28,6 +28,9 @@ selftest 和 Phase 5A marker；本纵切没有创建 Voice socket、连接 STT/T
   `0x281c90` bytes，3 MiB app partition 剩余 `0x7e370` bytes（16%）；
 - 首轮真机失败修复后的同 profile 构建：通过，app image `0x2840c0` bytes，3 MiB app partition
   剩余 `0x7bf40` bytes（16%）；
+- 第二轮真机失败的 profile-specific main stack 修复及 review 修正后增量构建：通过，app image
+  `0x2841e0` bytes，3 MiB app partition 剩余 `0x7be20` bytes（16%）；临时 sdkconfig 已核对为
+  `CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288`；
 - C host tests：4/4（`world_service`、`world_object_runtime`、`voice_protocol`、
   `audio_service_lease`）通过；
 - Agent 全量 tests：247/247；TypeScript typecheck：通过；
@@ -79,3 +82,21 @@ fix 复核另发现 1 项 P1：`xTaskCreate` 后由父任务写 ready 状态会�
 早期失败清理竞态。最终修复在创建 task 前发布 starting 状态，创建失败统一回滚，创建成功后父任务
 不再写 live/UI 状态；后续状态只由 runtime task 持有，退出时同时清除 AFE、loop、wake 与 MultiNet
 ready 标志。
+
+### 第二轮候选：FAIL（AGC fault 消失，暴露 main stack overflow）
+
+- commit：`cfa2e27352592e7addcfddf6ecc107b839a3b0bb`；run：`32611151734`；
+  profile：`phase5a_voice`；串口：`/dev/cu.usbserial-210`；capture/monitor：300 秒；
+- workflow conclusion 为 `success`，manifest 的 commit/run/profile/serial、`ESP32-P4 (revision
+  v1.0)`、四次 `Hash of data verified`、Phase 5A 开关与 agent transport disabled 均匹配；
+- 首轮的 WebRTC AGC `Load access fault` 不再出现，启动越过两次 WakeNet/AFE create；
+- 功能仍判定为 **FAIL**：约 6.6 秒后反复 `***ERROR*** A stack overflow in task main has been
+  detected.`，manifest 确认 main stack 为 5120 bytes，没有 `VERIFY:phase5a:*` marker；
+- capture 期间用 Mac 系统扬声器以 115 和 105 两档语速播放两轮唤醒词及 on/off 固定命令；设备
+  在命令窗口前持续重启，故播音不构成 wake/command 证据。
+
+该失败的最小隔离修复只把 `phase5a_voice` 的 main task stack 提升为 12288 bytes；默认固件及其他
+profile 继续使用 tracked 5120 bytes。workflow 在 build 前后验证 profile-specific stack，并把实际值
+写入 manifest；固件分别在 `board_support_init` 返回后和首个 30 秒 heartbeat 输出历史最低剩余栈
+字节数，后者还以 1024 bytes 为最低通过门槛。下一次实机 run 必须同时核对 heartbeat marker/count
+和持续无 stack overflow，不能只依赖“不再重启”。

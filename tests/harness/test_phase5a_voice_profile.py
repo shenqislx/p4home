@@ -17,6 +17,7 @@ class Phase5AVoiceProfileTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "sdkconfig"
             path.write_text(
+                "CONFIG_ESP_MAIN_TASK_STACK_SIZE=5120\n"
                 "CONFIG_P4HOME_SR_ENABLE=n\n"
                 "# CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST is not set\n"
                 "CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED=y\n",
@@ -26,6 +27,7 @@ class Phase5AVoiceProfileTest(unittest.TestCase):
             MODULE.prepare(path)
             value = path.read_text(encoding="utf-8")
             self.assertIn("CONFIG_P4HOME_SR_ENABLE=y\n", value)
+            self.assertIn("CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288\n", value)
             self.assertIn("CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST=y\n", value)
             self.assertIn("CONFIG_P4HOME_PHASE5A_VALIDATION=y\n", value)
             self.assertIn("# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set\n", value)

@@ -53,9 +53,39 @@ class Phase5AVoiceContractTest(unittest.TestCase):
         workflow = (
             ROOT / ".github/workflows/firmware-self-hosted-flash-serial.yml"
         ).read_text(encoding="utf-8")
+        defaults = (ROOT / "firmware/sdkconfig.defaults").read_text(encoding="utf-8")
+        app_main = (ROOT / "firmware/main/app_main.c").read_text(encoding="utf-8")
         self.assertIn("- phase5a_voice", workflow)
-        self.assertIn("Prepare Phase 5A voice profile", workflow)
-        self.assertIn("scripts/prepare-phase5a-voice-profile.py", workflow)
+        phase5a_step = workflow.split(
+            "      - name: Prepare Phase 5A voice profile\n", 1
+        )[1].split("\n      - name:", 1)[0]
+        phase5a_if_lines = [
+            line.strip() for line in phase5a_step.splitlines() if line.strip().startswith("if:")
+        ]
+        self.assertEqual(
+            phase5a_if_lines,
+            ["if: inputs.validation_profile == 'phase5a_voice'"],
+        )
+        self.assertIn("scripts/prepare-phase5a-voice-profile.py", phase5a_step)
+        self.assertIn(
+            'grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288"', phase5a_step
+        )
+        self.assertIn('echo "EXPECTED_MAIN_TASK_STACK_SIZE=12288"', phase5a_step)
+        default_main_stack_lines = [
+            line
+            for line in defaults.splitlines()
+            if line.startswith("CONFIG_ESP_MAIN_TASK_STACK_SIZE=")
+        ]
+        self.assertEqual(
+            default_main_stack_lines,
+            ["CONFIG_ESP_MAIN_TASK_STACK_SIZE=5120"],
+        )
+        phase5a_guard = app_main.split("#if CONFIG_P4HOME_PHASE5A_VALIDATION", 1)[1]
+        phase5a_guard = phase5a_guard.split("#endif", 1)[0]
+        self.assertIn("main_stack_high_water_after_init_bytes", phase5a_guard)
+        self.assertIn("uxTaskGetStackHighWaterMark(NULL)", phase5a_guard)
+        self.assertIn("main_stack_high_water_heartbeat_bytes", app_main)
+        self.assertIn("PHASE5A_MAIN_STACK_HEADROOM_MIN_BYTES 1024U", app_main)
         self.assertIn('profile == "phase5a_voice" and seconds < 180', workflow)
         self.assertIn('"phase5a_validation_enabled": phase5a_validation_enabled', workflow)
         self.assertIn('"phase5a_agent_transport_disabled": phase5a_agent_transport_disabled', workflow)

@@ -58,11 +58,18 @@ static void log_verify_marker_count(const char *area, const char *check, uint32_
 #define CONFIG_P4HOME_PHASE5A_VALIDATION 0
 #endif
 
+#define PHASE5A_MAIN_STACK_HEADROOM_MIN_BYTES 1024U
+
 void app_main(void)
 {
     diagnostics_service_log_boot_banner();
 
     ESP_ERROR_CHECK(board_support_init());
+
+#if CONFIG_P4HOME_PHASE5A_VALIDATION
+    log_verify_marker_count("phase5a", "main_stack_high_water_after_init_bytes",
+                            (uint32_t)uxTaskGetStackHighWaterMark(NULL));
+#endif
 
     board_support_log_summary();
     diagnostics_service_log_chip_summary();
@@ -269,6 +276,7 @@ void app_main(void)
     TickType_t last_heartbeat_tick = xTaskGetTickCount();
     bool agent_offline_2h_reported = false;
 #if CONFIG_P4HOME_PHASE5A_VALIDATION
+    bool phase5a_main_stack_reported = false;
     bool phase5a_mic_reported = false;
     bool phase5a_afe_reported = false;
     bool phase5a_lease_reported = false;
@@ -297,6 +305,16 @@ void app_main(void)
             diagnostics_service_log_runtime_heartbeat();
             diagnostics_service_log_ha_summary();
 #if CONFIG_P4HOME_PHASE5A_VALIDATION
+            if (!phase5a_main_stack_reported) {
+                const uint32_t main_stack_high_water_bytes =
+                    (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+                log_verify_marker_count("phase5a", "main_stack_high_water_heartbeat_bytes",
+                                        main_stack_high_water_bytes);
+                log_verify_marker("phase5a", "main_stack_headroom",
+                                  main_stack_high_water_bytes >=
+                                      PHASE5A_MAIN_STACK_HEADROOM_MIN_BYTES);
+                phase5a_main_stack_reported = true;
+            }
             if (!phase5a_mic_reported &&
                 board_support_audio_microphone_nonzero_samples() > 0U) {
                 log_verify_marker("phase5a", "microphone_nonzero_pcm", true);

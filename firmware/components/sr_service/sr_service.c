@@ -831,7 +831,7 @@ esp_err_t sr_service_init(void)
         esp_srmodel_deinit(models);
         goto log_and_exit;
     }
-    ESP_LOGI(TAG, "AFE board policy: input_format=M aec=off agc=off memory=more_psram");
+    ESP_LOGW(TAG, "AFE board policy: input_format=M aec=off agc=off memory=more_psram");
 
     esp_afe_sr_iface_t *afe_iface = esp_afe_handle_from_config(afe_config);
     const bool afe_iface_ready = (afe_iface != NULL);

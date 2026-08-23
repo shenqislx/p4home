@@ -191,10 +191,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/prepare-phase5a-voice-profile.py --sdkconfig "$HARDWARE_SDKCONFIG"
+          grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288" "$HARDWARE_SDKCONFIG"
           grep -qx "CONFIG_P4HOME_SR_ENABLE=y" "$HARDWARE_SDKCONFIG"
           grep -qx "CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST=y" "$HARDWARE_SDKCONFIG"
           grep -qx "CONFIG_P4HOME_PHASE5A_VALIDATION=y" "$HARDWARE_SDKCONFIG"
           grep -qx "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set" "$HARDWARE_SDKCONFIG"
+          echo "EXPECTED_MAIN_TASK_STACK_SIZE=12288" >> "$GITHUB_ENV"
 
       - name: Prepare ephemeral Agent profile
         if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object'
