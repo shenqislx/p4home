@@ -246,6 +246,7 @@ jobs:
             grep -qx "CONFIG_P4HOME_PHASE5B_VALIDATION=y" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED=y" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK=12288" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK=8192" "$HARDWARE_SDKCONFIG"
             grep -qx "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set" "$HARDWARE_SDKCONFIG"
             echo "EXPECTED_MAIN_TASK_STACK_SIZE=12288" >> "$GITHUB_ENV"
           fi
@@ -331,6 +332,7 @@ jobs:
             grep -qx "CONFIG_P4HOME_PHASE5B_VALIDATION=y" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED=y" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK=12288" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK=8192" "$HARDWARE_SDKCONFIG"
             grep -qx "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set" "$HARDWARE_SDKCONFIG"
           fi
           test "$(shasum -a 256 firmware/dependencies.lock | awk '{print $1}')" = "$DEPENDENCY_LOCK_SHA256_BEFORE"
@@ -574,6 +576,7 @@ jobs:
           phase5b_validation_prefix = "CONFIG_P4HOME_PHASE5B_VALIDATION="
           voice_transport_enabled_prefix = "CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED="
           voice_transport_stack_prefix = "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK="
+          voice_websocket_stack_prefix = "CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK="
           sr_enable_prefix = "CONFIG_P4HOME_SR_ENABLE="
           audio_selftest_prefix = "CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST="
           main_stack_size = None
@@ -588,6 +591,7 @@ jobs:
           phase5b_validation_enabled = False
           phase5b_voice_transport_enabled = False
           phase5b_voice_transport_stack_size = None
+          phase5b_voice_websocket_stack_size = None
           phase5b_agent_transport_disabled = False
           phase4c_post_robot_p4_standalone = False
           phase4c_post_robot_ui_8fps = False
@@ -648,6 +652,10 @@ jobs:
                       phase5b_voice_transport_stack_size = int(
                           line.removeprefix(voice_transport_stack_prefix)
                       )
+                  elif line.startswith(voice_websocket_stack_prefix):
+                      phase5b_voice_websocket_stack_size = int(
+                          line.removeprefix(voice_websocket_stack_prefix)
+                      )
                   elif line.startswith(sr_enable_prefix):
                       phase5a_sr_enabled = line.removeprefix(sr_enable_prefix) == "y"
                   elif line.startswith(audio_selftest_prefix):
@@ -694,6 +702,7 @@ jobs:
               "phase5b_validation_enabled": phase5b_validation_enabled,
               "phase5b_voice_transport_enabled": phase5b_voice_transport_enabled,
               "phase5b_voice_transport_task_stack_size_bytes": phase5b_voice_transport_stack_size,
+              "phase5b_voice_websocket_task_stack_size_bytes": phase5b_voice_websocket_stack_size,
               "phase5b_agent_transport_disabled": phase5b_agent_transport_disabled,
               "phase4c_agent_transport_disabled": phase4c_agent_transport_disabled,
               "phase4c_policy_binding_verified": (

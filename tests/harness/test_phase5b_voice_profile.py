@@ -42,6 +42,8 @@ class Phase5BVoiceProfileTest(unittest.TestCase):
                 "CONFIG_P4HOME_PHASE5A_VALIDATION=y",
                 "CONFIG_P4HOME_PHASE5B_VALIDATION=y",
                 "CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED=y",
+                "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK=12288",
+                "CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK=8192",
                 "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set",
                 'CONFIG_P4HOME_VOICE_TRANSPORT_URI="wss://192.0.2.10:8443/v1/voice"',
             ):
@@ -83,6 +85,7 @@ class Phase5BVoiceProfileTest(unittest.TestCase):
             'phase5b_validation_prefix = "CONFIG_P4HOME_PHASE5B_VALIDATION="',
             '"phase5b_voice_transport_enabled": phase5b_voice_transport_enabled',
             '"phase5b_voice_transport_task_stack_size_bytes": phase5b_voice_transport_stack_size',
+            '"phase5b_voice_websocket_task_stack_size_bytes": phase5b_voice_websocket_stack_size',
             '[[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]',
             'if [[ -s "$AGENT_HARNESS_STATUS_FILE" ]]',
             '[[ "${{ inputs.validation_profile }}" == "phase5b_voice" ]]',

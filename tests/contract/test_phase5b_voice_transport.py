@@ -24,6 +24,11 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         self.assertIn('"Authorization: Bearer %s\\r\\nX-P4-Device-ID: %s\\r\\n"', firmware)
         self.assertIn("VOICE_TRANSPORT_QUEUE_FRAMES 16U", firmware)
         self.assertIn("VOICE_TRANSPORT_MAX_INFLIGHT_FRAMES 16U", firmware)
+        self.assertIn("xTaskCreateWithCaps", firmware)
+        self.assertIn("MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT", firmware)
+        self.assertIn(".task_stack = CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK", firmware)
+        self.assertIn("vTaskDeleteWithCaps(worker)", firmware)
+        self.assertIn("eTaskGetState(worker) == eSuspended", firmware)
         self.assertIn("VOICE_MAX_FRAME_RATE_PER_SECOND = 100", runtime)
         self.assertIn("maxPayload: VOICE_MAX_CONTROL_BYTES", runtime)
         self.assertNotIn("agent_transport.h", firmware)
@@ -59,7 +64,11 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         self.assertNotIn("nvs_", begin_capture)
         worker = firmware[firmware.index("static void voice_worker("):
                           firmware.index("esp_err_t voice_transport_init(")]
-        self.assertIn("voice_reserve_epoch_block", worker)
+        self.assertNotIn("voice_reserve_epoch_block", worker)
+        epoch_task = firmware[firmware.index("static void voice_epoch_reservation_task("):
+                              firmware.index("static esp_err_t voice_send_json(")]
+        self.assertIn("voice_reserve_epoch_block", epoch_task)
+        self.assertIn("xTaskCreate(voice_epoch_reservation_task", worker)
         self.assertIn("session.eos must match the final EOS frame", (
             ROOT / "agent/packages/contracts/src/voice-protocol.ts"
         ).read_text(encoding="utf-8"))

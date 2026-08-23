@@ -60,6 +60,7 @@ def apply_profile(path: pathlib.Path, uri: str, device_id: str, token: str, spki
         "CONFIG_P4HOME_VOICE_DEVICE_TOKEN": f"CONFIG_P4HOME_VOICE_DEVICE_TOKEN={json.dumps(token)}",
         "CONFIG_P4HOME_VOICE_SPKI_SHA256": f"CONFIG_P4HOME_VOICE_SPKI_SHA256={json.dumps(spki)}",
         "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK": "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK=12288",
+        "CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK": "CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK=8192",
     }
     lines = path.read_text(encoding="utf-8").splitlines()
     retained = [

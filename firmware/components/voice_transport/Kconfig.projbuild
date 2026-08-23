@@ -33,4 +33,10 @@ config P4HOME_VOICE_TRANSPORT_TASK_STACK
     default 12288
     depends on P4HOME_VOICE_TRANSPORT_ENABLED
 
+config P4HOME_VOICE_WEBSOCKET_TASK_STACK
+    int "Voice WebSocket internal task stack bytes"
+    range 6144 12288
+    default 8192
+    depends on P4HOME_VOICE_TRANSPORT_ENABLED
+
 endmenu

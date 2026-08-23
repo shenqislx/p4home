@@ -8,11 +8,13 @@
 
 #include "cJSON.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "mbedtls/pk.h"
@@ -36,11 +38,15 @@ static const char *TAG = "voice_transport";
 #define VOICE_TRANSPORT_EPOCH_RESERVATION 65536U
 #define VOICE_TRANSPORT_EPOCH_RESERVE_THRESHOLD 1024U
 #define VOICE_TRANSPORT_EPOCH_RETRY_US 5000000LL
+#define VOICE_TRANSPORT_EPOCH_TASK_STACK 4096U
 #define VOICE_TRANSPORT_NVS_NAMESPACE "p4voice"
 #define VOICE_TRANSPORT_NVS_EPOCH_END "epoch_end"
 
 #ifndef CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK
 #define CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK 12288
+#endif
+#ifndef CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK
+#define CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK 8192
 #endif
 
 typedef enum {
@@ -286,6 +292,23 @@ static esp_err_t voice_reserve_epoch_block(void)
         taskEXIT_CRITICAL(&s_voice.lock);
     }
     return result;
+}
+
+static void voice_epoch_reservation_task(void *argument)
+{
+    (void)argument;
+    const esp_err_t reserve_result = voice_reserve_epoch_block();
+    const int64_t now_us = esp_timer_get_time();
+    taskENTER_CRITICAL(&s_voice.lock);
+    s_voice.epoch_reservation_in_progress = false;
+    if (reserve_result == ESP_OK) {
+        s_voice.epoch_reservation_retry_at_us = 0;
+    } else {
+        s_voice.epoch_reservation_retry_at_us = now_us + VOICE_TRANSPORT_EPOCH_RETRY_US;
+        s_voice.metrics.protocol_errors++;
+    }
+    taskEXIT_CRITICAL(&s_voice.lock);
+    vTaskDelete(NULL);
 }
 
 static esp_err_t voice_send_json(cJSON *root)
@@ -752,16 +775,14 @@ static void voice_worker(void *argument)
         if (reserve_epoch) s_voice.epoch_reservation_in_progress = true;
         taskEXIT_CRITICAL(&s_voice.lock);
         if (reserve_epoch) {
-            const esp_err_t reserve_result = voice_reserve_epoch_block();
-            taskENTER_CRITICAL(&s_voice.lock);
-            s_voice.epoch_reservation_in_progress = false;
-            if (reserve_result == ESP_OK) {
-                s_voice.epoch_reservation_retry_at_us = 0;
-            } else {
+            if (xTaskCreate(voice_epoch_reservation_task, "voice_epoch",
+                            VOICE_TRANSPORT_EPOCH_TASK_STACK, NULL, 4, NULL) != pdPASS) {
+                taskENTER_CRITICAL(&s_voice.lock);
+                s_voice.epoch_reservation_in_progress = false;
                 s_voice.epoch_reservation_retry_at_us = now_us + VOICE_TRANSPORT_EPOCH_RETRY_US;
                 s_voice.metrics.protocol_errors++;
+                taskEXIT_CRITICAL(&s_voice.lock);
             }
-            taskEXIT_CRITICAL(&s_voice.lock);
         }
         taskENTER_CRITICAL(&s_voice.lock);
         const bool session_timed_out = s_voice.session_state != VOICE_SESSION_IDLE &&
@@ -861,8 +882,22 @@ static void voice_worker(void *argument)
         taskEXIT_CRITICAL(&s_voice.lock);
         vTaskDelay(pdMS_TO_TICKS(VOICE_TRANSPORT_WORKER_INTERVAL_MS));
     }
-    s_voice.worker_task = NULL;
-    vTaskDelete(NULL);
+    for (;;) vTaskSuspend(NULL);
+}
+
+static esp_err_t voice_delete_worker_task(void)
+{
+    TaskHandle_t worker = s_voice.worker_task;
+    if (worker == NULL) return ESP_OK;
+    for (size_t i = 0; i < 250U; ++i) {
+        if (eTaskGetState(worker) == eSuspended) {
+            vTaskDeleteWithCaps(worker);
+            s_voice.worker_task = NULL;
+            return ESP_OK;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return ESP_ERR_TIMEOUT;
 }
 
 esp_err_t voice_transport_init(const voice_transport_config_t *config)
@@ -935,7 +970,7 @@ esp_err_t voice_transport_start(void)
         .uri = s_voice.uri,
         .headers = s_voice.headers,
         .buffer_size = 1024,
-        .task_stack = CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK,
+        .task_stack = CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK,
         .crt_bundle_attach = voice_attach_spki_verifier,
         .skip_cert_common_name_check = true,
         .reconnect_timeout_ms = 2000,
@@ -959,8 +994,10 @@ esp_err_t voice_transport_start(void)
         return result;
     }
     s_voice.running = true;
-    if (xTaskCreate(voice_worker, "voice_transport", CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK,
-                    NULL, 5, &s_voice.worker_task) != pdPASS) {
+    if (xTaskCreateWithCaps(voice_worker, "voice_transport",
+                            CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK, NULL, 5,
+                            &s_voice.worker_task,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         s_voice.running = false;
         esp_websocket_client_destroy(s_voice.ws);
         s_voice.ws = NULL;
@@ -969,12 +1006,10 @@ esp_err_t voice_transport_start(void)
     result = esp_websocket_client_start(s_voice.ws);
     if (result != ESP_OK) {
         s_voice.running = false;
-        for (size_t i = 0; i < 250U && s_voice.worker_task != NULL; ++i) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
+        const esp_err_t worker_result = voice_delete_worker_task();
         esp_websocket_client_destroy(s_voice.ws);
         s_voice.ws = NULL;
-        return result;
+        return worker_result == ESP_OK ? result : worker_result;
     }
     return ESP_OK;
 }
@@ -983,10 +1018,7 @@ esp_err_t voice_transport_stop(void)
 {
     if (!s_voice.initialized || (!s_voice.running && s_voice.ws == NULL)) return ESP_OK;
     s_voice.running = false;
-    for (size_t i = 0; i < 250U && s_voice.worker_task != NULL; ++i) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    if (s_voice.worker_task != NULL) return ESP_ERR_TIMEOUT;
+    ESP_RETURN_ON_ERROR(voice_delete_worker_task(), TAG, "failed to stop voice worker task");
     voice_abort_session("voice transport stopped");
     if (s_voice.ws != NULL) {
         (void)esp_websocket_client_stop(s_voice.ws);
