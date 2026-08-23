@@ -19,7 +19,7 @@
 #include "model_path.h"
 
 static const char *TAG = "sr_service";
-#define SR_SERVICE_INPUT_FORMAT "MR"
+#define SR_SERVICE_INPUT_FORMAT "M"
 #define SR_SERVICE_MODEL_PATH "model"
 #define SR_SERVICE_COMMAND_TIMEOUT_MS 6000
 #define SR_SERVICE_RUNTIME_SELFTEST_FRAMES 6
@@ -107,6 +107,34 @@ static esp_err_t sr_service_apply_command_action(sr_service_command_id_t command
 static const char *sr_service_voice_state_to_text(sr_service_voice_state_t state);
 static void sr_service_set_voice_state(sr_service_voice_state_t state, const char *reason);
 static void sr_service_set_wakenet_enabled(bool enabled, const char *reason);
+
+static void sr_service_apply_board_afe_policy(afe_config_t *afe_config)
+{
+    if (afe_config == NULL) {
+        return;
+    }
+
+    /*
+     * The P4Home board exposes one microphone and does not feed a playback
+     * reference channel into ESP-SR. Keep AEC and its unused reference path
+     * disabled. The Phase 5A hardware gate observed ESP-SR 2.1.4's WebRTC AGC
+     * path fault while accessing an ESP32-P4 LP-RAM address. The pointer's
+     * origin is not yet proven. Phase 5A does not require AGC, so isolate that
+     * path and keep the remaining AFE allocations PSRAM-first.
+     */
+    afe_config->aec_init = false;
+    afe_config->agc_init = false;
+    afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
+}
+
+static bool sr_service_board_afe_policy_valid(const afe_config_t *afe_config)
+{
+    return afe_config != NULL && !afe_config->aec_init && !afe_config->agc_init &&
+           afe_config->memory_alloc_mode == AFE_MEMORY_ALLOC_MORE_PSRAM &&
+           afe_config->pcm_config.total_ch_num == 1 && afe_config->pcm_config.mic_num == 1 &&
+           afe_config->pcm_config.ref_num == 0 && afe_config->pcm_config.mic_ids != NULL &&
+           afe_config->pcm_config.mic_ids[0] == 0;
+}
 
 static const char *sr_service_command_id_to_text(int command_id)
 {
@@ -320,6 +348,12 @@ static void sr_service_deinit_command_runtime(void)
     s_command_iface = NULL;
     s_command_model_name[0] = '\0';
     esp_mn_commands_free();
+    SR_STATUS_MUTATE({
+        s_status.command_model_ready = false;
+        s_status.command_set_ready = false;
+        s_status.command_chunksize = 0;
+        s_status.command_model_name = "none";
+    });
 }
 
 static esp_err_t sr_service_run_runtime_selftest(esp_afe_sr_iface_t *afe_iface,
@@ -630,7 +664,12 @@ static void sr_service_runtime_task(void *parameter)
     }
 
 cleanup:
-    SR_STATUS_MUTATE(s_status.runtime_loop_active = false;);
+    SR_STATUS_MUTATE({
+        s_status.afe_runtime_ready = false;
+        s_status.runtime_loop_started = false;
+        s_status.runtime_loop_active = false;
+        s_status.wake_state_machine_started = false;
+    });
     sr_service_set_wakenet_enabled(true, "runtime loop stopped");
     sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_INACTIVE, "runtime loop stopped");
 
@@ -675,6 +714,9 @@ static esp_err_t sr_service_start_runtime_loop(esp_afe_sr_iface_t *afe_iface,
         return ESP_OK;
     }
 
+    /* The selftest instance has already been destroyed; do not expose it as live readiness. */
+    SR_STATUS_MUTATE(s_status.afe_runtime_ready = false;);
+
     s_runtime_afe_data = afe_iface->create_from_config(afe_config);
     if (s_runtime_afe_data == NULL) {
         SR_STATUS_MUTATE(s_status.status_text = "ESP-SR runtime loop create_from_config failed";);
@@ -690,6 +732,17 @@ static esp_err_t sr_service_start_runtime_loop(esp_afe_sr_iface_t *afe_iface,
     }
 
     s_runtime_afe_iface = afe_iface;
+    /*
+     * Publish the starting state before the higher-priority task can run. The
+     * task owns all later transitions; if it fails immediately, its cleanup
+     * remains the last writer and cannot be overwritten by this function.
+     */
+    SR_STATUS_MUTATE({
+        s_status.afe_runtime_ready = true;
+        s_status.runtime_loop_started = true;
+        s_status.wake_state_machine_started = true;
+        s_status.status_text = "ESP-SR runtime loop starting";
+    });
     if (xTaskCreate(sr_service_runtime_task,
                     "sr_runtime",
                     SR_SERVICE_RUNTIME_TASK_STACK_SIZE,
@@ -700,17 +753,15 @@ static esp_err_t sr_service_start_runtime_loop(esp_afe_sr_iface_t *afe_iface,
         s_runtime_afe_data = NULL;
         s_runtime_afe_iface = NULL;
         s_runtime_feed_channel_count = 0;
-        SR_STATUS_MUTATE(s_status.status_text = "ESP-SR runtime loop task create failed";);
+        SR_STATUS_MUTATE({
+            s_status.afe_runtime_ready = false;
+            s_status.runtime_loop_started = false;
+            s_status.wake_state_machine_started = false;
+            s_status.status_text = "ESP-SR runtime loop task create failed";
+        });
         return ESP_ERR_NO_MEM;
     }
 
-    SR_STATUS_MUTATE({
-        s_status.runtime_loop_started = true;
-        s_status.wake_state_machine_started = true;
-    });
-    sr_service_set_wakenet_enabled(true, "runtime loop task created");
-    sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_LISTENING, "runtime loop task created");
-    SR_STATUS_MUTATE(s_status.status_text = "ESP-SR runtime loop starting";);
     return ESP_OK;
 }
 
@@ -773,6 +824,14 @@ esp_err_t sr_service_init(void)
         esp_srmodel_deinit(models);
         goto log_and_exit;
     }
+    sr_service_apply_board_afe_policy(afe_config);
+    if (!sr_service_board_afe_policy_valid(afe_config)) {
+        SR_STATUS_MUTATE(s_status.status_text = "AFE board policy or channel geometry invalid";);
+        afe_config_free(afe_config);
+        esp_srmodel_deinit(models);
+        goto log_and_exit;
+    }
+    ESP_LOGI(TAG, "AFE board policy: input_format=M aec=off agc=off memory=more_psram");
 
     esp_afe_sr_iface_t *afe_iface = esp_afe_handle_from_config(afe_config);
     const bool afe_iface_ready = (afe_iface != NULL);
