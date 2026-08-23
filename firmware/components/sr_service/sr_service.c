@@ -44,6 +44,8 @@ static const sr_service_command_phrase_t SR_SERVICE_COMMAND_PHRASES[] = {
     {SR_SERVICE_COMMAND_ID_LIGHT_ON, "turn on the light", "TkN nN jc LiT"},
     {SR_SERVICE_COMMAND_ID_LIGHT_OFF, "turn off the light", "TkN eF jc LiT"},
     {SR_SERVICE_COMMAND_ID_LIGHT_OFF, "turn of the light", "TkN cV jc LiT"},
+    {SR_SERVICE_COMMAND_ID_LIGHT_ON, "light on", "LiT nN"},
+    {SR_SERVICE_COMMAND_ID_LIGHT_OFF, "light off", "LiT eF"},
     {SR_SERVICE_COMMAND_ID_LIGHT_ON, "screen on", "SKRmN nN"},
     {SR_SERVICE_COMMAND_ID_LIGHT_OFF, "screen off", "SKRmN eF"},
     {SR_SERVICE_COMMAND_ID_LIGHT_ON, "display on", "DgSPLd nN"},

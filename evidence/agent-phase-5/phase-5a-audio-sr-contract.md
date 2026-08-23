@@ -31,10 +31,12 @@ selftest 和 Phase 5A marker；本纵切没有创建 Voice socket、连接 STT/T
 - 第二轮真机失败的 profile-specific main stack 修复及 review 修正后增量构建：通过，app image
   `0x2841e0` bytes，3 MiB app partition 剩余 `0x7be20` bytes（16%）；临时 sdkconfig 已核对为
   `CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288`；
+- 官方 G2P 带对象短命令别名及 review 修正后构建：通过，app image `0x284220` bytes，3 MiB app
+  partition 剩余 `0x7bde0` bytes（16%）；
 - C host tests：4/4（`world_service`、`world_object_runtime`、`voice_protocol`、
   `audio_service_lease`）通过；
 - Agent 全量 tests：247/247；TypeScript typecheck：通过；
-- Python contract：80/80；hardware harness：11/11；
+- Python contract：81/81；hardware harness：11/11；
 - workflow YAML parse 与 `git diff --check`：通过。
 
 ## Coding bugs review
@@ -100,3 +102,32 @@ profile 继续使用 tracked 5120 bytes。workflow 在 build 前后验证 profil
 写入 manifest；固件分别在 `board_support_init` 返回后和首个 30 秒 heartbeat 输出历史最低剩余栈
 字节数，后者还以 1024 bytes 为最低通过门槛。下一次实机 run 必须同时核对 heartbeat marker/count
 和持续无 stack overflow，不能只依赖“不再重启”。
+
+### 第三轮：基础设施失败（不产生功能判定）
+
+- commit：`ca28fa05f99734ac0208bc8a149f10ce55d62faf`；run：`32611933569`；
+- build 通过后 self-hosted runner 在 flash/capture 步骤中途离线，GitHub 等待 job lease 到期后将
+  workflow 标为 `failure`；该步骤没有完成状态，后续 manifest 与 artifact upload 均未执行；
+- GitHub runner API 确认 `andydeMac-mini` 为 `offline`，本地 runner/worker 日志也在采集中途终止；
+  因此该 run 既不是固件 FAIL，也不能作为功能 PASS。
+
+### 第四轮：部分通过（稳定/wake PASS，fixed command 未通过）
+
+- commit：`ca28fa05f99734ac0208bc8a149f10ce55d62faf`；run：`32612649839`；
+  profile：`phase5a_voice`；串口：`/dev/cu.usbserial-210`；capture/monitor：300 秒；
+- workflow conclusion 为 `success`；manifest 的 commit/run/profile/serial、12288-byte main stack、
+  Phase 5A 开关与 agent transport disabled 均匹配；原始日志确认 ESP32-P4 与四次 flash hash；
+- 设备 300 秒内无 panic、stack overflow 或 watchdog；after-init/heartbeat 最低剩余 main stack 分别为
+  7260/7032 bytes，`main_stack_headroom`、非零 PCM、AFE stream、audio lease 与 UI 8 FPS 均 PASS；
+- Mac 系统扬声器回放得到真实 `VERIFY:phase5a:wake_detected:PASS`，但没有
+  `VERIFY:phase5a:fixed_command:PASS`，MultiNet 只输出空结果。因此本轮仍不能关闭 5A。
+
+### 第五轮：定向声学重试仍未完成 fixed command
+
+- 同一 commit 的 run `32613095770` 使用 180 秒窗口，manifest 身份与第四轮相同且 workflow
+  success；栈、PCM、AFE、lease、wake 与 UI marker 再次通过；
+- 系统音量为 100%，按 wake hold 后 3 秒的节奏回放 `screen on`、`display off` 和慢速
+  `turn on the light`；MultiNet 输出已解析到 `_TkN_nN_jc`（`turn on the`）但未形成 DETECTED；
+- 为降低完整长句在声学回放中的尾词丢失风险，下一候选使用 ESP-SR 官方 `multinet_g2p.py`
+  生成的带对象短别名 `light on/off`。独立 review 拒绝了会扩大语义并可能抢先匹配的无对象
+  `turn on/off`；既有完整短语和 action id 不变，仍需复核、推送与新 artifact 才能判定。

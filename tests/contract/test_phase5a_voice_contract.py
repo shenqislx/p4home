@@ -1,5 +1,6 @@
 import json
 import pathlib
+import re
 import unittest
 
 
@@ -113,6 +114,54 @@ class Phase5AVoiceContractTest(unittest.TestCase):
         self.assertLess(config_init, apply_policy)
         self.assertLess(apply_policy, validate_policy)
         self.assertLess(validate_policy, resolve_handle)
+
+    def test_fixed_command_table_is_unique_and_backlight_only(self):
+        source = (
+            ROOT / "firmware/components/sr_service/sr_service.c"
+        ).read_text(encoding="utf-8")
+        command_table = source.split(
+            "static const sr_service_command_phrase_t SR_SERVICE_COMMAND_PHRASES[] = {", 1
+        )[1].split("};", 1)[0]
+        entries = re.findall(
+            r'\{(SR_SERVICE_COMMAND_ID_[A-Z_]+),\s*"([^"]+)",\s*"([^"]+)"\}',
+            command_table,
+        )
+        expected = {
+            "turn on the light": ("SR_SERVICE_COMMAND_ID_LIGHT_ON", "TkN nN jc LiT"),
+            "turn off the light": ("SR_SERVICE_COMMAND_ID_LIGHT_OFF", "TkN eF jc LiT"),
+            "turn of the light": ("SR_SERVICE_COMMAND_ID_LIGHT_OFF", "TkN cV jc LiT"),
+            "light on": ("SR_SERVICE_COMMAND_ID_LIGHT_ON", "LiT nN"),
+            "light off": ("SR_SERVICE_COMMAND_ID_LIGHT_OFF", "LiT eF"),
+            "screen on": ("SR_SERVICE_COMMAND_ID_LIGHT_ON", "SKRmN nN"),
+            "screen off": ("SR_SERVICE_COMMAND_ID_LIGHT_OFF", "SKRmN eF"),
+            "display on": ("SR_SERVICE_COMMAND_ID_LIGHT_ON", "DgSPLd nN"),
+            "display off": ("SR_SERVICE_COMMAND_ID_LIGHT_OFF", "DgSPLd eF"),
+        }
+        self.assertEqual(len(entries), len(expected))
+        self.assertEqual(len({phrase for _, phrase, _ in entries}), len(entries))
+        actual = {phrase: (command_id, phonemes) for command_id, phrase, phonemes in entries}
+        self.assertEqual(actual, expected)
+        self.assertEqual(
+            {command_id for command_id, _, _ in entries},
+            {"SR_SERVICE_COMMAND_ID_LIGHT_ON", "SR_SERVICE_COMMAND_ID_LIGHT_OFF"},
+        )
+
+        action = source.split(
+            "static esp_err_t sr_service_apply_command_action(sr_service_command_id_t command_id)\n{",
+            1,
+        )[1].split("\n}\n", 1)[0]
+        self.assertIn(
+            "case SR_SERVICE_COMMAND_ID_LIGHT_ON:\n"
+            "        err = display_service_set_backlight_enabled(true);",
+            action,
+        )
+        self.assertIn(
+            "case SR_SERVICE_COMMAND_ID_LIGHT_OFF:\n"
+            "        err = display_service_set_backlight_enabled(false);",
+            action,
+        )
+        self.assertNotIn("board_support_ha", action)
+        self.assertNotIn("agent_transport", action)
 
     def test_runtime_readiness_cannot_survive_second_create_failure(self):
         source = (
