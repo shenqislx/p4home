@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://p4home.local/contracts/voice/v1/control-message.schema.json",
+  "title": "P4 Voice Protocol v1 control message",
+  "oneOf": [
+    { "$ref": "#/$defs/sessionOpen" },
+    { "$ref": "#/$defs/sessionReady" },
+    { "$ref": "#/$defs/credit" },
+    { "$ref": "#/$defs/sessionEos" },
+    { "$ref": "#/$defs/sessionCancel" },
+    { "$ref": "#/$defs/sessionClosed" },
+    { "$ref": "#/$defs/error" }
+  ],
+  "$defs": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "not": { "const": "00000000000000000000000000000000" }
+    },
+    "positiveUint32": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+    "uint32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "base": {
+      "type": "object",
+      "required": ["protocol_version", "type", "session_id", "stream_id", "epoch"],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "type": { "type": "string" },
+        "session_id": { "$ref": "#/$defs/sessionId" },
+        "stream_id": { "$ref": "#/$defs/positiveUint32" },
+        "epoch": { "$ref": "#/$defs/positiveUint32" }
+      }
+    },
+    "format": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "sample_rate_hz", "channels", "bits_per_sample", "frame_samples"],
+      "properties": {
+        "encoding": { "const": "pcm_s16le" },
+        "sample_rate_hz": { "const": 16000 },
+        "channels": { "const": 1 },
+        "bits_per_sample": { "const": 16 },
+        "frame_samples": { "const": 320 }
+      }
+    },
+    "sessionOpen": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["protocol_version", "type", "session_id", "stream_id", "epoch", "direction", "format", "max_inflight_frames"],
+          "properties": {
+            "protocol_version": { "const": 1 },
+            "type": { "const": "session.open" },
+            "session_id": { "$ref": "#/$defs/sessionId" },
+            "stream_id": { "$ref": "#/$defs/positiveUint32" },
+            "epoch": { "$ref": "#/$defs/positiveUint32" },
+            "direction": { "enum": ["capture", "playback"] },
+            "format": { "$ref": "#/$defs/format" },
+            "max_inflight_frames": { "type": "integer", "minimum": 1, "maximum": 64 }
+          }
+        }
+      ]
+    },
+    "sessionReady": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["protocol_version", "type", "session_id", "stream_id", "epoch", "initial_credit_frames"],
+          "properties": {
+            "protocol_version": { "const": 1 },
+            "type": { "const": "session.ready" },
+            "session_id": { "$ref": "#/$defs/sessionId" },
+            "stream_id": { "$ref": "#/$defs/positiveUint32" },
+            "epoch": { "$ref": "#/$defs/positiveUint32" },
+            "initial_credit_frames": { "type": "integer", "minimum": 1, "maximum": 64 }
+          }
+        }
+      ]
+    },
+    "credit": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["protocol_version", "type", "session_id", "stream_id", "epoch", "ack_sequence", "grant_frames"],
+          "properties": {
+            "protocol_version": { "const": 1 },
+            "type": { "const": "credit" },
+            "session_id": { "$ref": "#/$defs/sessionId" },
+            "stream_id": { "$ref": "#/$defs/positiveUint32" },
+            "epoch": { "$ref": "#/$defs/positiveUint32" },
+            "ack_sequence": { "$ref": "#/$defs/uint32" },
+            "grant_frames": { "type": "integer", "minimum": 1, "maximum": 64 }
+          }
+        }
+      ]
+    },
+    "sessionEos": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["protocol_version", "type", "session_id", "stream_id", "epoch", "final_sequence", "reason"],
+          "properties": {
+            "protocol_version": { "const": 1 },
+            "type": { "const": "session.eos" },
+            "session_id": { "$ref": "#/$defs/sessionId" },
+            "stream_id": { "$ref": "#/$defs/positiveUint32" },
+            "epoch": { "$ref": "#/$defs/positiveUint32" },
+            "final_sequence": { "$ref": "#/$defs/uint32" },
+            "reason": { "enum": ["vad_end", "max_duration", "source_complete"] }
+          }
+        }
+      ]
+    },
+    "sessionCancel": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["protocol_version", "type", "session_id", "stream_id", "epoch", "reason"],
+          "properties": {
+            "protocol_version": { "const": 1 },
+            "type": { "const": "session.cancel" },
+            "session_id": { "$ref": "#/$defs/sessionId" },
+            "stream_id": { "$ref": "#/$defs/positiveUint32" },
+            "epoch": { "$ref": "#/$defs/positiveUint32" },
+            "reason": { "enum": ["barge_in", "timeout", "disconnect", "provider_error", "user"] }
+          }
+        }
+      ]
+    },
+    "sessionClosed": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["protocol_version", "type", "session_id", "stream_id", "epoch", "status", "dropped_frames"],
+          "properties": {
+            "protocol_version": { "const": 1 },
+            "type": { "const": "session.closed" },
+            "session_id": { "$ref": "#/$defs/sessionId" },
+            "stream_id": { "$ref": "#/$defs/positiveUint32" },
+            "epoch": { "$ref": "#/$defs/positiveUint32" },
+            "status": { "enum": ["completed", "cancelled", "failed"] },
+            "dropped_frames": { "$ref": "#/$defs/uint32" }
+          }
+        }
+      ]
+    },
+    "error": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["protocol_version", "type", "session_id", "stream_id", "epoch", "code"],
+          "properties": {
+            "protocol_version": { "const": 1 },
+            "type": { "const": "error" },
+            "session_id": { "$ref": "#/$defs/sessionId" },
+            "stream_id": { "$ref": "#/$defs/positiveUint32" },
+            "epoch": { "$ref": "#/$defs/positiveUint32" },
+            "code": { "enum": ["INVALID_MESSAGE", "INVALID_FRAME", "LIMIT_EXCEEDED", "STALE_EPOCH", "UNAVAILABLE"] }
+          }
+        }
+      ]
+    }
+  }
+}

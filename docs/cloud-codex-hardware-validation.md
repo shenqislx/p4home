@@ -47,7 +47,7 @@ Actions secret。workflow 只把解码结果写入 `$RUNNER_TEMP`，不会复制
 
 | 参数 | 默认值 | 约束 |
 |---|---|---|
-| `validation_profile` | `generic` | `generic`、`phase2d_agent`、`phase3d_object` 或 `phase4c_ha` |
+| `validation_profile` | `generic` | `generic`、`phase2d_agent`、`phase3d_object`、`phase4c_ha` 或 `phase5a_voice` |
 | `serial_port` | `/dev/cu.usbserial-210` | runner 上的字符设备 |
 | `monitor_seconds` | `120` | `10–7200` 秒 |
 | `agent_host` | 空 | Agent profile 时必填；P4 可访问的 runner LAN host |
@@ -79,6 +79,12 @@ artifact；私有 policy 及其任务副本不进入 Git 或 artifact。原始�
 runner 私有临时目录，追加 harness 后再对完整或截断的 HA entity 样式做等长脱敏与残留扫描；只有
 成功后才原子生成 artifact 路径，失败时不会上传原始串口。artifact 只保留非管理员身份、alias、
 accepted/observed/restored 结果和 P4 目标状态 marker。
+
+Phase 5A 本地语音基线使用 `phase5a_voice`，`monitor_seconds` 至少为 180 秒。该 profile 只在
+runner 临时 sdkconfig 中打开 audio startup selftest、ESP-SR 和 Phase 5A marker，并显式关闭 Agent
+transport；它不创建 Voice socket、不向 Agent 发送 PCM，也不接入 STT/TTS。自动证据覆盖 codec、
+非零 PCM、AFE feed/fetch、lease、资源/看门狗和 UI；真实 `Hi ESP`、`turn on the light` 口播与
+speaker 可听播放属于人工观察，必须和自动 marker 分开报告。
 
 ## 4. Artifact Contract
 
@@ -122,6 +128,10 @@ Agent profile 还会写入无凭据的 `agent_harness_status` 与 `agent_hardwar
 Robot 客户端关闭后的 P4 standalone/8 FPS 状态，以及串口实体 ID 脱敏状态分别记录，不能由单个
 在线切换结果替代。Robot 业务 gate 的退出码写入 manifest，不改变 artifact-only workflow 的运输
 语义；业务 PASS/FAIL 仍由 manifest 与原始 `VERIFY:` marker 共同判定。
+`phase5a_voice` 还记录 `phase5a_validation_enabled=true`、`phase5a_sr_enabled=true`、
+`phase5a_audio_selftest_enabled=true` 与 `phase5a_agent_transport_disabled=true`。这些字段只证明专用
+构建边界，不能替代非零 PCM、AFE、wake、固定命令、播放和稳态 marker；人工听觉观察也不能由
+manifest 推断。
 
 ## 5. 判定顺序
 

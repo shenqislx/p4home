@@ -4,4 +4,9 @@ config P4HOME_AUDIO_STARTUP_SELFTEST
     bool "Run audio startup tone and microphone selftest"
     default n
 
+config P4HOME_PHASE5A_VALIDATION
+    bool "Enable Phase 5A voice baseline validation markers"
+    default n
+    depends on P4HOME_SR_ENABLE && P4HOME_AUDIO_STARTUP_SELFTEST
+
 endmenu

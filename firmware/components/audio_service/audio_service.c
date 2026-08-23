@@ -9,11 +9,11 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "audio_service";
-static const char *AUDIO_SERVICE_OWNER_NONE = "none";
 
 #ifndef CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST
 #define CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST 0
@@ -37,9 +37,10 @@ static esp_codec_dev_handle_t s_microphone_codec;
 static int16_t s_tone_buffer[8000];
 static int16_t s_capture_buffer[1024];
 static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
-static bool s_action_running;
+static StaticSemaphore_t s_io_mutex_storage;
+static SemaphoreHandle_t s_io_mutex;
 static bool s_microphone_stream_open;
-static const char *s_action_owner = "none";
+static audio_service_lease_state_t s_lease_state;
 
 static const esp_codec_dev_sample_info_t AUDIO_SERVICE_SAMPLE_INFO = {
     .bits_per_sample = 16,
@@ -51,11 +52,35 @@ static const esp_codec_dev_sample_info_t AUDIO_SERVICE_SAMPLE_INFO = {
 
 static esp_err_t audio_service_capture_microphone(bool log_result);
 
+static bool audio_service_ensure_io_mutex(void)
+{
+    taskENTER_CRITICAL(&s_state_lock);
+    if (s_io_mutex == NULL) {
+        s_io_mutex = xSemaphoreCreateMutexStatic(&s_io_mutex_storage);
+    }
+    const bool ready = s_io_mutex != NULL;
+    taskEXIT_CRITICAL(&s_state_lock);
+    return ready;
+}
+
+static bool audio_service_lock_io(void)
+{
+    return audio_service_ensure_io_mutex() &&
+           xSemaphoreTake(s_io_mutex, portMAX_DELAY) == pdTRUE;
+}
+
+static void audio_service_unlock_io(void)
+{
+    (void)xSemaphoreGive(s_io_mutex);
+}
+
 static esp_err_t audio_service_write_speaker_tone(size_t sample_count,
                                                   int16_t amplitude,
                                                   uint8_t volume_percent,
-                                                  TickType_t settle_delay_ticks)
+                                                  TickType_t settle_delay_ticks,
+                                                  bool *codec_state_uncertain)
 {
+    *codec_state_uncertain = false;
     int ret = esp_codec_dev_set_out_vol(s_speaker_codec, volume_percent);
     if (ret != ESP_CODEC_DEV_OK) {
         ESP_LOGE(TAG, "failed to set speaker volume: %d", ret);
@@ -65,6 +90,7 @@ static esp_err_t audio_service_write_speaker_tone(size_t sample_count,
     ret = esp_codec_dev_open(s_speaker_codec, (esp_codec_dev_sample_info_t *)&AUDIO_SERVICE_SAMPLE_INFO);
     if (ret != ESP_CODEC_DEV_OK) {
         ESP_LOGE(TAG, "failed to open speaker stream: %d", ret);
+        *codec_state_uncertain = true;
         return ESP_FAIL;
     }
 
@@ -80,6 +106,7 @@ static esp_err_t audio_service_write_speaker_tone(size_t sample_count,
     int close_ret = esp_codec_dev_close(s_speaker_codec);
     if (close_ret != ESP_CODEC_DEV_OK) {
         ESP_LOGE(TAG, "failed to close speaker stream: %d", close_ret);
+        *codec_state_uncertain = true;
         return ESP_FAIL;
     }
     if (ret != ESP_CODEC_DEV_OK) {
@@ -91,32 +118,43 @@ static esp_err_t audio_service_write_speaker_tone(size_t sample_count,
     return ESP_OK;
 }
 
-static const char *audio_service_normalize_owner(const char *owner)
-{
-    return (owner != NULL && owner[0] != '\0') ? owner : AUDIO_SERVICE_OWNER_NONE;
-}
-
-static bool audio_service_try_begin_action(const char *owner)
+static bool audio_service_try_begin_action(audio_service_owner_t owner,
+                                           audio_service_lease_t *lease)
 {
     bool granted = false;
 
     taskENTER_CRITICAL(&s_state_lock);
-    if (!s_action_running) {
-        s_action_running = true;
-        s_action_owner = audio_service_normalize_owner(owner);
-        granted = true;
-    }
+    granted = audio_service_lease_acquire(&s_lease_state, owner, lease);
     taskEXIT_CRITICAL(&s_state_lock);
 
     return granted;
 }
 
-static void audio_service_finish_action(void)
+static bool audio_service_finish_action(audio_service_lease_t *lease)
 {
+    bool released;
     taskENTER_CRITICAL(&s_state_lock);
-    s_action_running = false;
-    s_action_owner = AUDIO_SERVICE_OWNER_NONE;
+    released = audio_service_lease_release(&s_lease_state, lease);
     taskEXIT_CRITICAL(&s_state_lock);
+    return released;
+}
+
+static bool audio_service_quarantine_action(audio_service_lease_t *lease)
+{
+    bool faulted;
+    taskENTER_CRITICAL(&s_state_lock);
+    faulted = audio_service_lease_fault(&s_lease_state, lease);
+    taskEXIT_CRITICAL(&s_state_lock);
+    return faulted;
+}
+
+static bool audio_service_lease_is_current(const audio_service_lease_t *lease)
+{
+    bool matches;
+    taskENTER_CRITICAL(&s_state_lock);
+    matches = audio_service_lease_matches(&s_lease_state, lease);
+    taskEXIT_CRITICAL(&s_state_lock);
+    return matches;
 }
 
 static void audio_service_fill_snapshot(audio_service_microphone_snapshot_t *snapshot)
@@ -215,23 +253,41 @@ static esp_err_t audio_service_init_microphone(void)
 
 esp_err_t audio_service_play_test_tone(void)
 {
+    audio_service_lease_t lease = {0};
+    bool codec_state_uncertain = false;
     ESP_RETURN_ON_ERROR(audio_service_init(), TAG, "lazy audio init failed");
     ESP_RETURN_ON_FALSE(s_state.initialized, ESP_ERR_INVALID_STATE, TAG,
                         "audio service not initialized");
     ESP_RETURN_ON_FALSE(s_speaker_codec != NULL, ESP_ERR_INVALID_STATE, TAG,
                         "speaker codec unavailable");
-    ESP_RETURN_ON_FALSE(audio_service_try_begin_action("speaker_tone"), ESP_ERR_INVALID_STATE, TAG,
+    ESP_RETURN_ON_FALSE(audio_service_try_begin_action(AUDIO_SERVICE_OWNER_SPEAKER_TEST, &lease),
+                        ESP_ERR_INVALID_STATE, TAG,
                         "audio action already running");
 
-    esp_err_t err = ESP_OK;
-    err = audio_service_write_speaker_tone(sizeof(s_tone_buffer) / sizeof(s_tone_buffer[0]),
-                                           9000,
-                                           55,
-                                           pdMS_TO_TICKS(120));
+    if (!audio_service_lock_io()) {
+        (void)audio_service_finish_action(&lease);
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t err = audio_service_write_speaker_tone(
+        sizeof(s_tone_buffer) / sizeof(s_tone_buffer[0]),
+        9000,
+        55,
+        pdMS_TO_TICKS(120),
+        &codec_state_uncertain);
+    audio_service_unlock_io();
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "speaker test tone wrote %u bytes", (unsigned)sizeof(s_tone_buffer));
     }
-    audio_service_finish_action();
+    const bool released = codec_state_uncertain
+                              ? audio_service_quarantine_action(&lease)
+                              : audio_service_finish_action(&lease);
+    if (!released) {
+        ESP_LOGE(TAG, "speaker lease release failed");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (codec_state_uncertain) {
+        ESP_LOGE(TAG, "speaker codec quarantined until reboot after uncertain open/close");
+    }
     return err;
 }
 
@@ -243,18 +299,34 @@ esp_err_t audio_service_run_startup_selftest(void)
     esp_err_t overall = ESP_OK;
 
     if (s_speaker_codec != NULL) {
-        if (!audio_service_try_begin_action("startup_speaker_selftest")) {
+        audio_service_lease_t lease = {0};
+        bool codec_state_uncertain = false;
+        if (!audio_service_try_begin_action(AUDIO_SERVICE_OWNER_STARTUP_SELFTEST, &lease)) {
             ESP_LOGW(TAG, "startup speaker selftest skipped: audio action already running");
             overall = ESP_ERR_INVALID_STATE;
         } else {
-            esp_err_t ret = audio_service_write_speaker_tone(1024, 7000, 35, pdMS_TO_TICKS(40));
+            esp_err_t ret = ESP_ERR_NO_MEM;
+            if (audio_service_lock_io()) {
+                ret = audio_service_write_speaker_tone(
+                    1024, 7000, 35, pdMS_TO_TICKS(40), &codec_state_uncertain);
+                audio_service_unlock_io();
+            }
             if (ret != ESP_OK) {
                 ESP_LOGW(TAG, "startup speaker selftest failed: %s", esp_err_to_name(ret));
                 overall = ret;
             } else {
                 ESP_LOGI(TAG, "startup speaker selftest wrote %u bytes", 1024U * (unsigned)sizeof(int16_t));
             }
-            audio_service_finish_action();
+            const bool released = codec_state_uncertain
+                                      ? audio_service_quarantine_action(&lease)
+                                      : audio_service_finish_action(&lease);
+            if (!released) {
+                ESP_LOGE(TAG, "startup speaker lease release failed");
+                overall = ESP_ERR_INVALID_STATE;
+            }
+            if (codec_state_uncertain) {
+                ESP_LOGE(TAG, "speaker codec quarantined until reboot after uncertain open/close");
+            }
         }
     }
 
@@ -271,89 +343,119 @@ esp_err_t audio_service_run_startup_selftest(void)
     return overall;
 }
 
-esp_err_t audio_service_begin_microphone_stream_for(const char *owner)
+esp_err_t audio_service_begin_microphone_stream(audio_service_owner_t owner,
+                                                audio_service_lease_t *lease)
 {
+    ESP_RETURN_ON_FALSE(lease != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "microphone lease output is null");
     ESP_RETURN_ON_ERROR(audio_service_init(), TAG, "lazy audio init failed");
     ESP_RETURN_ON_FALSE(s_state.initialized, ESP_ERR_INVALID_STATE, TAG,
                         "audio service not initialized");
     ESP_RETURN_ON_FALSE(s_microphone_codec != NULL, ESP_ERR_INVALID_STATE, TAG,
                         "microphone codec unavailable");
-    ESP_RETURN_ON_FALSE(audio_service_try_begin_action(owner), ESP_ERR_INVALID_STATE, TAG,
+    ESP_RETURN_ON_FALSE(audio_service_try_begin_action(owner, lease), ESP_ERR_INVALID_STATE, TAG,
                         "audio action already running");
 
+    if (!audio_service_lock_io()) {
+        (void)audio_service_finish_action(lease);
+        return ESP_ERR_NO_MEM;
+    }
     int ret = esp_codec_dev_set_in_gain(s_microphone_codec, 30.0f);
     if (ret != ESP_CODEC_DEV_OK) {
         ESP_LOGE(TAG, "failed to set microphone gain: %d", ret);
-        audio_service_finish_action();
+        audio_service_unlock_io();
+        (void)audio_service_finish_action(lease);
         return ESP_FAIL;
     }
 
     ret = esp_codec_dev_open(s_microphone_codec, (esp_codec_dev_sample_info_t *)&AUDIO_SERVICE_SAMPLE_INFO);
     if (ret != ESP_CODEC_DEV_OK) {
         ESP_LOGE(TAG, "failed to open microphone stream: %d", ret);
-        audio_service_finish_action();
+        audio_service_unlock_io();
+        (void)audio_service_quarantine_action(lease);
+        ESP_LOGE(TAG, "microphone codec quarantined until reboot after uncertain open");
         return ESP_FAIL;
     }
 
     s_microphone_stream_open = true;
+    audio_service_unlock_io();
     return ESP_OK;
 }
 
-esp_err_t audio_service_begin_microphone_stream(void)
-{
-    return audio_service_begin_microphone_stream_for("microphone_stream");
-}
-
-static esp_err_t audio_service_read_microphone_stream_internal(audio_service_microphone_snapshot_t *snapshot,
+static esp_err_t audio_service_read_microphone_stream_internal(const audio_service_lease_t *lease,
+                                                               audio_service_microphone_snapshot_t *snapshot,
                                                                int16_t *samples,
                                                                size_t sample_count,
                                                                bool log_result)
 {
-    ESP_RETURN_ON_FALSE(s_microphone_stream_open, ESP_ERR_INVALID_STATE, TAG,
-                        "microphone stream not open");
     ESP_RETURN_ON_FALSE(samples != NULL, ESP_ERR_INVALID_ARG, TAG,
                         "microphone samples buffer is null");
     ESP_RETURN_ON_FALSE(sample_count > 0, ESP_ERR_INVALID_ARG, TAG,
                         "microphone sample count must be positive");
+    ESP_RETURN_ON_FALSE(audio_service_lock_io(), ESP_ERR_NO_MEM, TAG,
+                        "audio I/O mutex unavailable");
+    if (!s_microphone_stream_open || !audio_service_lease_is_current(lease)) {
+        audio_service_unlock_io();
+        ESP_LOGE(TAG, "microphone stream or lease is stale");
+        return ESP_ERR_INVALID_STATE;
+    }
 
     size_t bytes_read = sample_count * sizeof(int16_t);
     memset(samples, 0, bytes_read);
     int ret = esp_codec_dev_read(s_microphone_codec, samples, bytes_read);
     if (ret != ESP_CODEC_DEV_OK) {
         ESP_LOGE(TAG, "failed to read microphone samples: %d", ret);
+        audio_service_unlock_io();
         return ESP_FAIL;
     }
 
     audio_service_process_capture_samples(samples, sample_count, log_result);
     audio_service_fill_snapshot(snapshot);
+    audio_service_unlock_io();
     return ESP_OK;
 }
 
-esp_err_t audio_service_read_microphone_stream(audio_service_microphone_snapshot_t *snapshot)
+esp_err_t audio_service_read_microphone_stream(const audio_service_lease_t *lease,
+                                               audio_service_microphone_snapshot_t *snapshot)
 {
-    return audio_service_read_microphone_stream_internal(snapshot,
+    return audio_service_read_microphone_stream_internal(lease,
+                                                         snapshot,
                                                          s_capture_buffer,
                                                          sizeof(s_capture_buffer) / sizeof(s_capture_buffer[0]),
                                                          false);
 }
 
-esp_err_t audio_service_read_microphone_samples(int16_t *samples,
+esp_err_t audio_service_read_microphone_samples(const audio_service_lease_t *lease,
+                                                int16_t *samples,
                                                 size_t sample_count,
                                                 audio_service_microphone_snapshot_t *snapshot)
 {
-    return audio_service_read_microphone_stream_internal(snapshot, samples, sample_count, false);
+    return audio_service_read_microphone_stream_internal(lease, snapshot, samples, sample_count, false);
 }
 
-esp_err_t audio_service_end_microphone_stream(void)
+esp_err_t audio_service_end_microphone_stream(audio_service_lease_t *lease)
 {
-    ESP_RETURN_ON_FALSE(s_microphone_stream_open, ESP_ERR_INVALID_STATE, TAG,
-                        "microphone stream not open");
+    ESP_RETURN_ON_FALSE(audio_service_lock_io(), ESP_ERR_NO_MEM, TAG,
+                        "audio I/O mutex unavailable");
+    if (!s_microphone_stream_open || !audio_service_lease_is_current(lease)) {
+        audio_service_unlock_io();
+        ESP_LOGE(TAG, "microphone stream or lease is stale");
+        return ESP_ERR_INVALID_STATE;
+    }
 
     int close_ret = esp_codec_dev_close(s_microphone_codec);
     s_microphone_stream_open = false;
-    audio_service_finish_action();
+    audio_service_unlock_io();
+    const bool released = close_ret == ESP_CODEC_DEV_OK
+                              ? audio_service_finish_action(lease)
+                              : audio_service_quarantine_action(lease);
+    if (!released) {
+        ESP_LOGE(TAG, "microphone lease release failed");
+        return ESP_ERR_INVALID_STATE;
+    }
     if (close_ret != ESP_CODEC_DEV_OK) {
         ESP_LOGE(TAG, "failed to close microphone stream: %d", close_ret);
+        ESP_LOGE(TAG, "microphone codec quarantined until reboot after uncertain close");
         return ESP_FAIL;
     }
     return ESP_OK;
@@ -361,16 +463,20 @@ esp_err_t audio_service_end_microphone_stream(void)
 
 static esp_err_t audio_service_capture_microphone(bool log_result)
 {
-    ESP_RETURN_ON_ERROR(audio_service_begin_microphone_stream_for(log_result ? "microphone_capture"
-                                                                            : "microphone_poll"),
+    audio_service_lease_t lease = {0};
+    ESP_RETURN_ON_ERROR(audio_service_begin_microphone_stream(
+                            log_result ? AUDIO_SERVICE_OWNER_MICROPHONE_CAPTURE
+                                       : AUDIO_SERVICE_OWNER_MICROPHONE_POLL,
+                            &lease),
                         TAG,
                         "failed to begin microphone stream");
 
-    esp_err_t err = audio_service_read_microphone_stream_internal(NULL,
+    esp_err_t err = audio_service_read_microphone_stream_internal(&lease,
+                                                                  NULL,
                                                                   s_capture_buffer,
                                                                   sizeof(s_capture_buffer) / sizeof(s_capture_buffer[0]),
                                                                   log_result);
-    esp_err_t close_err = audio_service_end_microphone_stream();
+    esp_err_t close_err = audio_service_end_microphone_stream(&lease);
     if (err == ESP_OK && close_err != ESP_OK) {
         err = close_err;
     }
@@ -433,7 +539,7 @@ bool audio_service_is_busy(void)
     bool busy;
 
     taskENTER_CRITICAL(&s_state_lock);
-    busy = s_action_running;
+    busy = s_lease_state.active || s_lease_state.faulted;
     taskEXIT_CRITICAL(&s_state_lock);
 
     return busy;
@@ -441,13 +547,33 @@ bool audio_service_is_busy(void)
 
 const char *audio_service_current_owner(void)
 {
-    const char *owner;
+    audio_service_owner_t owner;
+    bool faulted;
 
     taskENTER_CRITICAL(&s_state_lock);
-    owner = s_action_owner;
+    owner = s_lease_state.owner;
+    faulted = s_lease_state.faulted;
     taskEXIT_CRITICAL(&s_state_lock);
 
-    return owner;
+    return faulted ? "faulted" : audio_service_owner_name(owner);
+}
+
+uint32_t audio_service_current_generation(void)
+{
+    uint32_t generation;
+    taskENTER_CRITICAL(&s_state_lock);
+    generation = s_lease_state.active ? s_lease_state.generation : 0U;
+    taskEXIT_CRITICAL(&s_state_lock);
+    return generation;
+}
+
+bool audio_service_faulted(void)
+{
+    bool faulted;
+    taskENTER_CRITICAL(&s_state_lock);
+    faulted = s_lease_state.faulted;
+    taskEXIT_CRITICAL(&s_state_lock);
+    return faulted;
 }
 
 bool audio_service_speaker_ready(void)

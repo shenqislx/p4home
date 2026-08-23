@@ -31,6 +31,30 @@ set(FIRMWARE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../firmware")
 set(UI_PAGES_DIR "${FIRMWARE_DIR}/components/ui_pages")
 set(UI_ART_DIR "${FIRMWARE_DIR}/components/ui_pixel_art")
 set(WORLD_SERVICE_DIR "${FIRMWARE_DIR}/components/world_service")
+set(VOICE_PROTOCOL_DIR "${FIRMWARE_DIR}/components/voice_protocol")
+set(AUDIO_SERVICE_DIR "${FIRMWARE_DIR}/components/audio_service")
+
+function(add_audio_service_lease_host_test_target)
+    add_executable(audio_service_lease_host_test
+        audio_service_lease_host_test.c
+        "${AUDIO_SERVICE_DIR}/audio_service_lease.c"
+    )
+    target_include_directories(audio_service_lease_host_test PRIVATE
+        "${AUDIO_SERVICE_DIR}/include"
+    )
+    target_compile_options(audio_service_lease_host_test PRIVATE -Wall -Wextra -Werror -g -O1)
+endfunction()
+
+function(add_voice_protocol_host_test_target)
+    add_executable(voice_protocol_host_test
+        voice_protocol_host_test.c
+        "${VOICE_PROTOCOL_DIR}/voice_protocol.c"
+    )
+    target_include_directories(voice_protocol_host_test PRIVATE
+        "${VOICE_PROTOCOL_DIR}/include"
+    )
+    target_compile_options(voice_protocol_host_test PRIVATE -Wall -Wextra -Werror -g -O1)
+endfunction()
 
 function(add_world_service_host_test_target)
     add_executable(world_service_host_test
@@ -66,9 +90,13 @@ option(P4HOME_WORLD_SERVICE_TEST_ONLY "Build only the dependency-free world serv
 if(P4HOME_WORLD_SERVICE_TEST_ONLY)
     add_world_service_host_test_target()
     add_world_object_runtime_host_test_target()
+    add_voice_protocol_host_test_target()
+    add_audio_service_lease_host_test_target()
     enable_testing()
     add_test(NAME world_service_host_test COMMAND world_service_host_test)
     add_test(NAME world_object_runtime_host_test COMMAND world_object_runtime_host_test)
+    add_test(NAME voice_protocol_host_test COMMAND voice_protocol_host_test)
+    add_test(NAME audio_service_lease_host_test COMMAND audio_service_lease_host_test)
     return()
 endif()
 
@@ -161,7 +189,11 @@ target_link_directories(pixel_sim PRIVATE ${SDL2_LIBRARY_DIRS})
 
 add_world_service_host_test_target()
 add_world_object_runtime_host_test_target()
+add_voice_protocol_host_test_target()
+add_audio_service_lease_host_test_target()
 enable_testing()
 add_test(NAME world_service_host_test COMMAND world_service_host_test)
 add_test(NAME world_object_runtime_host_test COMMAND world_object_runtime_host_test)
+add_test(NAME voice_protocol_host_test COMMAND voice_protocol_host_test)
+add_test(NAME audio_service_lease_host_test COMMAND audio_service_lease_host_test)
 add_test(NAME pixel_object_gate COMMAND pixel_sim --mode dump --verify-object-gate)

@@ -12,6 +12,7 @@ on:
           - phase2d_agent
           - phase3d_object
           - phase4c_ha
+          - phase5a_voice
         default: generic
       serial_port:
         description: macOS serial device path
@@ -97,7 +98,7 @@ jobs:
           if not 10 <= seconds <= 7200:
               raise SystemExit("monitor_seconds must be between 10 and 7200")
           profile = os.environ["VALIDATION_PROFILE"]
-          if profile not in {"generic", "phase2d_agent", "phase3d_object", "phase4c_ha"}:
+          if profile not in {"generic", "phase2d_agent", "phase3d_object", "phase4c_ha", "phase5a_voice"}:
               raise SystemExit("unsupported validation_profile")
           port = int(os.environ["AGENT_PORT"])
           if not 1 <= port <= 65535:
@@ -113,6 +114,8 @@ jobs:
               raise SystemExit("phase3d_object requires monitor_seconds>=120")
           if profile == "phase4c_ha" and seconds < 120:
               raise SystemExit("phase4c_ha requires monitor_seconds>=120")
+          if profile == "phase5a_voice" and seconds < 180:
+              raise SystemExit("phase5a_voice requires monitor_seconds>=180")
           PY
           test -f scripts/activate-idf-v5.5.4.sh
           test -s firmware/dependencies.lock
@@ -182,6 +185,16 @@ jobs:
             grep -qx "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=$EXPECTED_AGENT_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
             echo "EXPECTED_AGENT_TASK_STACK_SIZE=$EXPECTED_AGENT_TASK_STACK_SIZE" >> "$GITHUB_ENV"
           fi
+
+      - name: Prepare Phase 5A voice profile
+        if: inputs.validation_profile == 'phase5a_voice'
+        run: |
+          set -euo pipefail
+          python3 scripts/prepare-phase5a-voice-profile.py --sdkconfig "$HARDWARE_SDKCONFIG"
+          grep -qx "CONFIG_P4HOME_SR_ENABLE=y" "$HARDWARE_SDKCONFIG"
+          grep -qx "CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST=y" "$HARDWARE_SDKCONFIG"
+          grep -qx "CONFIG_P4HOME_PHASE5A_VALIDATION=y" "$HARDWARE_SDKCONFIG"
+          grep -qx "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set" "$HARDWARE_SDKCONFIG"
 
       - name: Prepare ephemeral Agent profile
         if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object'
@@ -289,7 +302,7 @@ jobs:
           test "$(shasum -a 256 firmware/dependencies.lock | awk '{print $1}')" = "$DEPENDENCY_LOCK_SHA256_BEFORE"
 
       - name: Set up Node for Agent harness
-        if: inputs.validation_profile != 'generic'
+        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase4c_ha'
         uses: actions/setup-node@v4
         with:
           node-version: 24.19.0
@@ -440,6 +453,9 @@ jobs:
         if: always() && inputs.validation_profile != 'generic'
         run: |
           set -euo pipefail
+          if [[ "$VALIDATION_PROFILE" == "phase5a_voice" ]]; then
+            exit 0
+          fi
           if [[ "$VALIDATION_PROFILE" == "phase4c_ha" && -s "$PHASE4C_OFFLINE_LOG" ]]; then
             printf '\n$ phase4c-robot-gate p4_application=offline\n' >> "$PHASE4C_RAW_MONITOR_LOG"
             tee -a "$PHASE4C_RAW_MONITOR_LOG" < "$PHASE4C_OFFLINE_LOG" > /dev/null
@@ -506,10 +522,18 @@ jobs:
           agent_transport_enabled_prefix = "CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED="
           agent_transport_disabled_line = "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set"
           phase4c_validation_prefix = "CONFIG_P4HOME_PHASE4C_VALIDATION="
+          phase5a_validation_prefix = "CONFIG_P4HOME_PHASE5A_VALIDATION="
+          sr_enable_prefix = "CONFIG_P4HOME_SR_ENABLE="
+          audio_selftest_prefix = "CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST="
           main_stack_size = None
           agent_stack_size = None
           phase4c_validation_enabled = False
+          agent_transport_disabled = False
           phase4c_agent_transport_disabled = False
+          phase5a_validation_enabled = False
+          phase5a_sr_enabled = False
+          phase5a_audio_selftest_enabled = False
+          phase5a_agent_transport_disabled = False
           phase4c_post_robot_p4_standalone = False
           phase4c_post_robot_ui_8fps = False
           monitor_path = pathlib.Path("firmware/monitor.log")
@@ -544,15 +568,32 @@ jobs:
                   elif line.startswith(agent_stack_prefix):
                       agent_stack_size = int(line.removeprefix(agent_stack_prefix))
                   elif line == agent_transport_disabled_line:
-                      phase4c_agent_transport_disabled = True
+                      agent_transport_disabled = True
                   elif line.startswith(agent_transport_enabled_prefix):
-                      phase4c_agent_transport_disabled = (
+                      agent_transport_disabled = (
                           line.removeprefix(agent_transport_enabled_prefix) != "y"
                       )
                   elif line.startswith(phase4c_validation_prefix):
                       phase4c_validation_enabled = (
                           line.removeprefix(phase4c_validation_prefix) == "y"
                       )
+                  elif line.startswith(phase5a_validation_prefix):
+                      phase5a_validation_enabled = (
+                          line.removeprefix(phase5a_validation_prefix) == "y"
+                      )
+                  elif line.startswith(sr_enable_prefix):
+                      phase5a_sr_enabled = line.removeprefix(sr_enable_prefix) == "y"
+                  elif line.startswith(audio_selftest_prefix):
+                      phase5a_audio_selftest_enabled = (
+                          line.removeprefix(audio_selftest_prefix) == "y"
+                      )
+              profile = os.environ["VALIDATION_PROFILE"]
+              phase4c_agent_transport_disabled = (
+                  profile == "phase4c_ha" and agent_transport_disabled
+              )
+              phase5a_agent_transport_disabled = (
+                  profile == "phase5a_voice" and agent_transport_disabled
+              )
           manifest = {
               "schema_version": 1,
               "mode": "artifact-only",
@@ -576,6 +617,10 @@ jobs:
               "main_task_stack_size_bytes": main_stack_size,
               "agent_transport_task_stack_size_bytes": agent_stack_size,
               "phase4c_validation_enabled": phase4c_validation_enabled,
+              "phase5a_validation_enabled": phase5a_validation_enabled,
+              "phase5a_sr_enabled": phase5a_sr_enabled,
+              "phase5a_audio_selftest_enabled": phase5a_audio_selftest_enabled,
+              "phase5a_agent_transport_disabled": phase5a_agent_transport_disabled,
               "phase4c_agent_transport_disabled": phase4c_agent_transport_disabled,
               "phase4c_policy_binding_verified": (
                   binding_status_path.is_file()

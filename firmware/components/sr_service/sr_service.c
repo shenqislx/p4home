@@ -325,6 +325,7 @@ static void sr_service_deinit_command_runtime(void)
 static esp_err_t sr_service_run_runtime_selftest(esp_afe_sr_iface_t *afe_iface,
                                                  afe_config_t *afe_config)
 {
+    audio_service_lease_t audio_lease = {0};
     ESP_RETURN_ON_FALSE(afe_iface != NULL, ESP_ERR_INVALID_ARG, TAG,
                         "AFE interface is null");
     ESP_RETURN_ON_FALSE(afe_config != NULL, ESP_ERR_INVALID_ARG, TAG,
@@ -362,7 +363,7 @@ static esp_err_t sr_service_run_runtime_selftest(esp_afe_sr_iface_t *afe_iface,
         goto cleanup;
     }
 
-    err = audio_service_begin_microphone_stream_for("sr_runtime_selftest");
+    err = audio_service_begin_microphone_stream(AUDIO_SERVICE_OWNER_SR_SELFTEST, &audio_lease);
     if (err != ESP_OK) {
         SR_STATUS_MUTATE(s_status.status_text = "AFE runtime could not open microphone stream";);
         free(mic_frame);
@@ -372,7 +373,10 @@ static esp_err_t sr_service_run_runtime_selftest(esp_afe_sr_iface_t *afe_iface,
 
     for (int frame = 0; frame < SR_SERVICE_RUNTIME_SELFTEST_FRAMES; ++frame) {
         memset(afe_input, 0, (size_t)feed_chunksize * (size_t)feed_channels * sizeof(int16_t));
-        err = audio_service_read_microphone_samples(mic_frame, (size_t)feed_chunksize, NULL);
+        err = audio_service_read_microphone_samples(&audio_lease,
+                                                    mic_frame,
+                                                    (size_t)feed_chunksize,
+                                                    NULL);
         if (err != ESP_OK) {
             SR_STATUS_MUTATE(s_status.status_text = "AFE runtime microphone frame read failed";);
             break;
@@ -411,7 +415,7 @@ static esp_err_t sr_service_run_runtime_selftest(esp_afe_sr_iface_t *afe_iface,
         err = ESP_FAIL;
     }
 
-    esp_err_t stream_close_err = audio_service_end_microphone_stream();
+    esp_err_t stream_close_err = audio_service_end_microphone_stream(&audio_lease);
     if (err == ESP_OK && stream_close_err != ESP_OK) {
         SR_STATUS_MUTATE(s_status.status_text = "AFE runtime microphone stream close failed";);
         err = stream_close_err;
@@ -435,6 +439,7 @@ static void sr_service_runtime_task(void *parameter)
     int16_t *mic_frame = NULL;
     int16_t *afe_input = NULL;
     bool stream_open = false;
+    audio_service_lease_t audio_lease = {0};
 
     if (feed_chunksize <= 0 || feed_channels <= 0) {
         SR_STATUS_MUTATE(s_status.status_text = "ESP-SR runtime loop geometry invalid";);
@@ -448,7 +453,7 @@ static void sr_service_runtime_task(void *parameter)
         goto cleanup;
     }
 
-    err = audio_service_begin_microphone_stream_for("sr_runtime_loop");
+    err = audio_service_begin_microphone_stream(AUDIO_SERVICE_OWNER_SR_RUNTIME, &audio_lease);
     if (err != ESP_OK) {
         SR_STATUS_MUTATE(s_status.status_text = "ESP-SR runtime loop could not acquire microphone";);
         goto cleanup;
@@ -465,7 +470,10 @@ static void sr_service_runtime_task(void *parameter)
     while (true) {
         const TickType_t now = xTaskGetTickCount();
         memset(afe_input, 0, (size_t)feed_chunksize * (size_t)feed_channels * sizeof(int16_t));
-        err = audio_service_read_microphone_samples(mic_frame, (size_t)feed_chunksize, NULL);
+        err = audio_service_read_microphone_samples(&audio_lease,
+                                                    mic_frame,
+                                                    (size_t)feed_chunksize,
+                                                    NULL);
         if (err != ESP_OK) {
             SR_STATUS_MUTATE(s_status.status_text = "ESP-SR runtime loop microphone read failed";);
             break;
@@ -627,7 +635,7 @@ cleanup:
     sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_INACTIVE, "runtime loop stopped");
 
     if (stream_open) {
-        esp_err_t close_err = audio_service_end_microphone_stream();
+        esp_err_t close_err = audio_service_end_microphone_stream(&audio_lease);
         if (err == ESP_OK && close_err != ESP_OK) {
             err = close_err;
         }

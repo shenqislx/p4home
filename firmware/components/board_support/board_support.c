@@ -527,6 +527,16 @@ const char *board_support_audio_owner_text(void)
     return audio_service_current_owner();
 }
 
+uint32_t board_support_audio_owner_generation(void)
+{
+    return audio_service_current_generation();
+}
+
+uint32_t board_support_audio_microphone_nonzero_samples(void)
+{
+    return audio_service_microphone_nonzero_samples();
+}
+
 bool board_support_gateway_ready(void)
 {
     return gateway_service_is_ready();
@@ -653,4 +663,32 @@ const char *board_support_sr_command_text(void)
 const char *board_support_sr_status_text(void)
 {
     return sr_service_status_text();
+}
+
+uint32_t board_support_sr_runtime_iteration_count(void)
+{
+    sr_service_status_t status = {0};
+    sr_service_get_status(&status);
+    return status.runtime_loop_iteration_count;
+}
+
+uint32_t board_support_sr_runtime_fetch_count(void)
+{
+    sr_service_status_t status = {0};
+    sr_service_get_status(&status);
+    return status.runtime_fetch_count;
+}
+
+uint32_t board_support_sr_wake_event_count(void)
+{
+    sr_service_status_t status = {0};
+    sr_service_get_status(&status);
+    return status.runtime_wake_event_count;
+}
+
+uint32_t board_support_sr_command_action_count(void)
+{
+    sr_service_status_t status = {0};
+    sr_service_get_status(&status);
+    return status.command_action_count;
 }

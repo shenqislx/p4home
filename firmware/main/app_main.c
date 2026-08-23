@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "esp_err.h"
 #include "esp_log.h"
@@ -18,6 +19,7 @@
 #include "ui_page_dashboard.h"
 #include "ui_page_home.h"
 #include "ui_status_banner.h"
+#include "voice_protocol.h"
 
 static const char *TAG = "p4home_main";
 
@@ -50,6 +52,10 @@ static void log_verify_marker_count(const char *area, const char *check, uint32_
 
 #ifndef CONFIG_P4HOME_GATEWAY_RUNTIME_POLL_ENABLE
 #define CONFIG_P4HOME_GATEWAY_RUNTIME_POLL_ENABLE 0
+#endif
+
+#ifndef CONFIG_P4HOME_PHASE5A_VALIDATION
+#define CONFIG_P4HOME_PHASE5A_VALIDATION 0
 #endif
 
 void app_main(void)
@@ -248,11 +254,27 @@ void app_main(void)
     log_verify_marker_status("sr", "command_model", "SKIPPED");
     log_verify_marker_status("sr", "command_set", "SKIPPED");
 #endif
+#if CONFIG_P4HOME_PHASE5A_VALIDATION
+    const bool phase5a_pcm_contract =
+        VOICE_PROTOCOL_VERSION == 1U && VOICE_PROTOCOL_HEADER_BYTES == 56U &&
+        VOICE_PROTOCOL_SAMPLE_RATE_HZ == 16000U && VOICE_PROTOCOL_CHANNELS == 1U &&
+        VOICE_PROTOCOL_BITS_PER_SAMPLE == 16U && VOICE_PROTOCOL_FRAME_SAMPLES == 320U &&
+        VOICE_PROTOCOL_FRAME_PAYLOAD_BYTES == 640U;
+    log_verify_marker("phase5a", "profile", true);
+    log_verify_marker("phase5a", "pcm_contract", phase5a_pcm_contract);
+#endif
     log_verify_marker_count("panel_store", "entity_count", (uint32_t)board_support_panel_entity_count());
     log_verify_marker_count("ui", "dashboard_card_count", (uint32_t)ui_page_dashboard_card_count());
 
     TickType_t last_heartbeat_tick = xTaskGetTickCount();
     bool agent_offline_2h_reported = false;
+#if CONFIG_P4HOME_PHASE5A_VALIDATION
+    bool phase5a_mic_reported = false;
+    bool phase5a_afe_reported = false;
+    bool phase5a_lease_reported = false;
+    bool phase5a_wake_reported = false;
+    bool phase5a_command_reported = false;
+#endif
     while (true) {
 #if CONFIG_P4HOME_GATEWAY_RUNTIME_POLL_ENABLE
         if (board_support_gateway_ready()) {
@@ -274,6 +296,37 @@ void app_main(void)
             agent_transport_get_snapshot(&agent_snapshot);
             diagnostics_service_log_runtime_heartbeat();
             diagnostics_service_log_ha_summary();
+#if CONFIG_P4HOME_PHASE5A_VALIDATION
+            if (!phase5a_mic_reported &&
+                board_support_audio_microphone_nonzero_samples() > 0U) {
+                log_verify_marker("phase5a", "microphone_nonzero_pcm", true);
+                log_verify_marker_count("phase5a", "microphone_nonzero_samples",
+                                        board_support_audio_microphone_nonzero_samples());
+                phase5a_mic_reported = true;
+            }
+            if (!phase5a_afe_reported && board_support_sr_runtime_loop_active() &&
+                board_support_sr_runtime_iteration_count() >= 100U &&
+                board_support_sr_runtime_fetch_count() >= 100U) {
+                log_verify_marker("phase5a", "afe_stream", true);
+                log_verify_marker_count("phase5a", "afe_iterations",
+                                        board_support_sr_runtime_iteration_count());
+                phase5a_afe_reported = true;
+            }
+            if (!phase5a_lease_reported && board_support_audio_busy() &&
+                strcmp(board_support_audio_owner_text(), "sr_runtime") == 0 &&
+                board_support_audio_owner_generation() > 0U) {
+                log_verify_marker("phase5a", "audio_lease", true);
+                phase5a_lease_reported = true;
+            }
+            if (!phase5a_wake_reported && board_support_sr_wake_event_count() > 0U) {
+                log_verify_marker("phase5a", "wake_detected", true);
+                phase5a_wake_reported = true;
+            }
+            if (!phase5a_command_reported && board_support_sr_command_action_count() > 0U) {
+                log_verify_marker("phase5a", "fixed_command", true);
+                phase5a_command_reported = true;
+            }
+#endif
 #if CONFIG_P4HOME_PHASE4C_VALIDATION
             const bool phase4c_standalone_healthy =
                 board_support_ha_ready() && board_support_ha_subscription_ready() &&
