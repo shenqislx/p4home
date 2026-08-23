@@ -22,6 +22,12 @@ import {
   type DecodedVoiceFrame,
   type VoiceControlMessage,
 } from "@p4home/contracts";
+import {
+  createVoicePlaybackIdentity,
+  VoicePlaybackError,
+  VoicePlaybackSender,
+  type VoicePlaybackSummary,
+} from "./voice-playback-sender.ts";
 
 const VOICE_WEBSOCKET_PATH = "/v1/voice";
 const VOICE_TOKEN_MIN_BYTES = 32;
@@ -404,6 +410,7 @@ export class VoiceWebSocketServer {
   readonly #handshakeTimeoutMs: number;
   readonly #sink: VoiceCaptureSink;
   readonly #connections = new Map<string, WebSocket>();
+  readonly #playbacks = new Map<string, VoicePlaybackSender>();
   readonly #pendingSockets = new Map<Socket, ReturnType<typeof setTimeout>>();
   readonly #highestEpoch = new Map<string, number>();
   readonly #sessionOpenRates = new Map<string, { started_ms: number; count: number }>();
@@ -479,6 +486,55 @@ export class VoiceWebSocketServer {
 
   public get address(): VoiceWebSocketServerAddress | null { return this.#address; }
   public get connection_count(): number { return this.#connections.size; }
+  public get playback_count(): number { return this.#playbacks.size; }
+
+  public async playback(
+    deviceId: string,
+    pcm: Uint8Array,
+    signal?: AbortSignal,
+  ): Promise<VoicePlaybackSummary> {
+    const webSocket = this.#connections.get(deviceId);
+    if (webSocket === undefined || webSocket.readyState !== WebSocket.OPEN) {
+      throw new VoicePlaybackError("UNAVAILABLE", "paired P4 voice socket is unavailable");
+    }
+    if (this.#playbacks.has(deviceId)) {
+      throw new VoicePlaybackError("LIMIT_EXCEEDED", "one playback is already active for this P4");
+    }
+    let sender: VoicePlaybackSender;
+    sender = new VoicePlaybackSender({
+      device_id: deviceId,
+      identity: createVoicePlaybackIdentity(),
+      pcm,
+      wire: {
+        sendControl: (message) => {
+          const text = JSON.stringify(message);
+          if (webSocket.readyState !== WebSocket.OPEN
+              || webSocket.bufferedAmount + Buffer.byteLength(text, "utf8")
+                > this.#maxBufferedResponseBytes) {
+            throw new VoicePlaybackError("LIMIT_EXCEEDED", "playback control backpressure limit exceeded");
+          }
+          webSocket.send(text, { binary: false }, (error) => {
+            if (error) sender.disconnect();
+          });
+        },
+        sendBinary: (message) => {
+          if (webSocket.readyState !== WebSocket.OPEN
+              || webSocket.bufferedAmount + message.byteLength > this.#maxBufferedResponseBytes) {
+            throw new VoicePlaybackError("LIMIT_EXCEEDED", "playback binary backpressure limit exceeded");
+          }
+          webSocket.send(message, { binary: true }, (error) => {
+            if (error) sender.disconnect();
+          });
+        },
+      },
+    });
+    this.#playbacks.set(deviceId, sender);
+    try {
+      return await sender.start(signal);
+    } finally {
+      if (this.#playbacks.get(deviceId) === sender) this.#playbacks.delete(deviceId);
+    }
+  }
 
   public async start(): Promise<VoiceWebSocketServerAddress> {
     if (this.#server !== null) throw new Error("Voice WebSocket server is already started");
@@ -546,7 +602,10 @@ export class VoiceWebSocketServer {
       this.#untrackPendingSocket(request.socket);
       this.#webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
         const previous = this.#connections.get(deviceId);
-        if (previous !== undefined && previous.readyState !== WebSocket.CLOSED) previous.terminate();
+        if (previous !== undefined && previous.readyState !== WebSocket.CLOSED) {
+          this.#playbacks.get(deviceId)?.disconnect();
+          previous.terminate();
+        }
         this.#connections.set(deviceId, webSocket);
         const trySendControls = (messages: readonly VoiceControlMessage[]): boolean => {
           try {
@@ -612,8 +671,19 @@ export class VoiceWebSocketServer {
                 throw new VoiceProtocolError("LIMIT_EXCEEDED", "voice response backpressure limit exceeded");
               }
             } else {
-              if (!trySendControls(receiver.handleControl(parseControl(data)))) {
-                throw new VoiceProtocolError("LIMIT_EXCEEDED", "voice response backpressure limit exceeded");
+              const message = parseControl(data);
+              const playback = this.#playbacks.get(deviceId);
+              if (playback !== undefined && playback.matches(message)
+                  && message.type !== "session.open") {
+                playback.handleControl(message);
+              } else {
+                if (playback !== undefined && message.type === "session.open"
+                    && message.direction === "capture") {
+                  playback.cancel("barge_in");
+                }
+                if (!trySendControls(receiver.handleControl(message))) {
+                  throw new VoiceProtocolError("LIMIT_EXCEEDED", "voice response backpressure limit exceeded");
+                }
               }
             }
           } catch (error) {
@@ -637,6 +707,7 @@ export class VoiceWebSocketServer {
           }
         });
         webSocket.once("close", () => {
+          this.#playbacks.get(deviceId)?.disconnect();
           receiver.disconnect();
           if (this.#connections.get(deviceId) === webSocket) this.#connections.delete(deviceId);
         });
@@ -680,6 +751,8 @@ export class VoiceWebSocketServer {
     for (const timer of this.#pendingSockets.values()) clearTimeout(timer);
     this.#pendingSockets.clear();
     for (const connection of this.#connections.values()) connection.terminate();
+    for (const playback of this.#playbacks.values()) playback.disconnect();
+    this.#playbacks.clear();
     this.#connections.clear();
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error === undefined ? resolve() : reject(error));

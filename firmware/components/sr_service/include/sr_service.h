@@ -16,6 +16,8 @@ typedef enum {
 typedef struct {
     void *context;
     /* Callbacks run on the SR task and must never block. */
+    void (*wake_detected)(void *context, uint64_t detected_at_us);
+    bool (*ready_for_capture)(void *context);
     bool (*begin_capture)(void *context, uint64_t started_at_us);
     void (*offer_pcm)(void *context, const int16_t *samples, size_t sample_count,
                       uint64_t captured_at_us);

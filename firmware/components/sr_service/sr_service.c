@@ -28,6 +28,8 @@ static const char *TAG = "sr_service";
 #define SR_SERVICE_RUNTIME_TASK_STACK_SIZE 6144
 #define SR_SERVICE_WAKE_DETECTED_HOLD_MS 1500
 #define SR_SERVICE_AWAKE_HOLD_MS 5000
+#define SR_SERVICE_CAPTURE_GATE_RETRY_MS 20
+#define SR_SERVICE_CAPTURE_GATE_MAX_WAIT_MS 3500
 
 typedef enum {
     SR_SERVICE_COMMAND_ID_NONE = 0,
@@ -63,6 +65,7 @@ static const esp_mn_iface_t *s_command_iface;
 static model_iface_data_t *s_command_model_data;
 static char s_command_model_name[MODEL_NAME_MAX_LENGTH];
 static TickType_t s_wake_detected_deadline;
+static TickType_t s_capture_gate_deadline;
 static TickType_t s_awake_deadline;
 static sr_service_capture_listener_t s_capture_listener;
 static bool s_capture_active;
@@ -618,6 +621,23 @@ static void sr_service_runtime_task(void *parameter)
          */
         if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_WAKE_DETECTED &&
             sr_service_deadline_reached(state_now, s_wake_detected_deadline)) {
+            const bool capture_ready = s_capture_listener.ready_for_capture == NULL ||
+                                       s_capture_listener.ready_for_capture(
+                                           s_capture_listener.context);
+            if (!capture_ready &&
+                !sr_service_deadline_reached(state_now, s_capture_gate_deadline)) {
+                s_wake_detected_deadline = state_now +
+                                           pdMS_TO_TICKS(SR_SERVICE_CAPTURE_GATE_RETRY_MS);
+                continue;
+            }
+            if (!capture_ready) {
+                sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_LISTENING,
+                                           "barge-in capture gate timeout");
+                sr_service_set_wakenet_enabled(true, "barge-in capture gate timeout");
+                SR_STATUS_MUTATE(s_status.status_text =
+                                     "Playback did not stop; capture suppressed";);
+                continue;
+            }
             s_awake_deadline = state_now + pdMS_TO_TICKS(SR_SERVICE_AWAKE_HOLD_MS);
             SR_STATUS_MUTATE({
                 s_status.awake_session_count++;
@@ -673,7 +693,13 @@ static void sr_service_runtime_task(void *parameter)
         if (fetch_result->wakeup_state == WAKENET_DETECTED &&
             sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_LISTENING) {
             SR_STATUS_MUTATE(s_status.runtime_wake_event_count++;);
+            if (s_capture_listener.wake_detected != NULL) {
+                s_capture_listener.wake_detected(s_capture_listener.context,
+                                                 (uint64_t)esp_timer_get_time());
+            }
             s_wake_detected_deadline = now + pdMS_TO_TICKS(SR_SERVICE_WAKE_DETECTED_HOLD_MS);
+            s_capture_gate_deadline = now +
+                                      pdMS_TO_TICKS(SR_SERVICE_CAPTURE_GATE_MAX_WAIT_MS);
             sr_service_set_wakenet_enabled(false, "wake detected");
             sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_WAKE_DETECTED, "WakeNet detected");
             SR_STATUS_MUTATE(s_status.status_text = "Wake word detected; opening command window";);
@@ -1058,7 +1084,9 @@ log_and_exit:
 
 esp_err_t sr_service_register_capture_listener(const sr_service_capture_listener_t *listener)
 {
-    if (listener == NULL || listener->begin_capture == NULL || listener->offer_pcm == NULL ||
+    if (listener == NULL || listener->wake_detected == NULL ||
+        listener->ready_for_capture == NULL ||
+        listener->begin_capture == NULL || listener->offer_pcm == NULL ||
         listener->end_capture == NULL) {
         return ESP_ERR_INVALID_ARG;
     }

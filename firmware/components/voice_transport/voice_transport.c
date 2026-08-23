@@ -16,6 +16,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/sha256.h"
@@ -24,6 +25,7 @@
 #include "nvs.h"
 #include "sr_service.h"
 #include "voice_protocol.h"
+#include "voice_playback_receiver.h"
 
 static const char *TAG = "voice_transport";
 
@@ -43,6 +45,7 @@ static const char *TAG = "voice_transport";
 #define VOICE_TRANSPORT_NVS_EPOCH_END "epoch_end"
 #define VOICE_WS_OPCODE_CONTINUATION 0x0U
 #define VOICE_WS_OPCODE_TEXT 0x1U
+#define VOICE_WS_OPCODE_BINARY 0x2U
 #define VOICE_WS_OPCODE_CLOSE 0x8U
 #define VOICE_WS_OPCODE_PING 0x9U
 #define VOICE_WS_OPCODE_PONG 0xAU
@@ -81,6 +84,7 @@ typedef struct {
     esp_websocket_client_handle_t ws;
     TaskHandle_t worker_task;
     QueueHandle_t frame_queue;
+    SemaphoreHandle_t send_mutex;
     portMUX_TYPE lock;
     char uri[VOICE_TRANSPORT_URI_MAX_BYTES];
     char device_id[VOICE_TRANSPORT_DEVICE_ID_MAX_BYTES + 1U];
@@ -117,6 +121,7 @@ typedef struct {
     char rx_control[VOICE_TRANSPORT_CONTROL_MAX_BYTES + 1U];
     size_t rx_expected;
     size_t rx_received;
+    bool rx_binary;
     voice_transport_snapshot_t metrics;
 } voice_transport_state_t;
 
@@ -130,6 +135,8 @@ static bool voice_begin_capture(void *context, uint64_t started_at_us);
 static void voice_offer_pcm(void *context, const int16_t *samples, size_t sample_count,
                             uint64_t captured_at_us);
 static void voice_end_capture(void *context, const char *reason, uint64_t ended_at_us);
+static void voice_wake_detected(void *context, uint64_t detected_at_us);
+static bool voice_ready_for_capture(void *context);
 
 static bool voice_valid_uri(const char *uri)
 {
@@ -255,6 +262,7 @@ static void voice_abort_session(const char *reason)
         s_voice.metrics.sessions_cancelled++;
     }
     taskEXIT_CRITICAL(&s_voice.lock);
+    voice_playback_receiver_capture_finished();
     if (was_active) ESP_LOGW(TAG, "voice capture aborted: %s", reason);
 }
 
@@ -321,10 +329,7 @@ static void voice_epoch_reservation_task(void *argument)
 
 static esp_err_t voice_send_json(cJSON *root)
 {
-    taskENTER_CRITICAL(&s_voice.lock);
-    const bool connected = s_voice.socket_connected;
-    taskEXIT_CRITICAL(&s_voice.lock);
-    if (root == NULL || s_voice.ws == NULL || !connected) {
+    if (root == NULL || s_voice.send_mutex == NULL) {
         cJSON_Delete(root);
         return ESP_ERR_INVALID_STATE;
     }
@@ -332,12 +337,48 @@ static esp_err_t voice_send_json(cJSON *root)
     cJSON_Delete(root);
     if (text == NULL) return ESP_ERR_NO_MEM;
     size_t length = strlen(text);
-    int sent = length <= VOICE_TRANSPORT_CONTROL_MAX_BYTES
-                   ? esp_websocket_client_send_text(s_voice.ws, text, length,
-                                                    pdMS_TO_TICKS(VOICE_TRANSPORT_SEND_TIMEOUT_MS))
-                   : -1;
+    int sent = -1;
+    if (length <= VOICE_TRANSPORT_CONTROL_MAX_BYTES &&
+        xSemaphoreTake(s_voice.send_mutex,
+                       pdMS_TO_TICKS(VOICE_TRANSPORT_SEND_TIMEOUT_MS)) == pdTRUE) {
+        taskENTER_CRITICAL(&s_voice.lock);
+        const bool connected = s_voice.socket_connected;
+        esp_websocket_client_handle_t ws = s_voice.ws;
+        taskEXIT_CRITICAL(&s_voice.lock);
+        if (connected && ws != NULL) {
+            sent = esp_websocket_client_send_text(
+                ws, text, length, pdMS_TO_TICKS(VOICE_TRANSPORT_SEND_TIMEOUT_MS));
+        }
+        xSemaphoreGive(s_voice.send_mutex);
+    }
     free(text);
     return sent == (int)length ? ESP_OK : ESP_FAIL;
+}
+
+static esp_err_t voice_send_binary(const uint8_t *bytes, size_t length)
+{
+    if (bytes == NULL || length == 0U || s_voice.send_mutex == NULL ||
+        xSemaphoreTake(s_voice.send_mutex,
+                       pdMS_TO_TICKS(VOICE_TRANSPORT_SEND_TIMEOUT_MS)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    taskENTER_CRITICAL(&s_voice.lock);
+    const bool connected = s_voice.socket_connected;
+    esp_websocket_client_handle_t ws = s_voice.ws;
+    taskEXIT_CRITICAL(&s_voice.lock);
+    int sent = connected && ws != NULL
+                   ? esp_websocket_client_send_bin(
+                         ws, (const char *)bytes, length,
+                         pdMS_TO_TICKS(VOICE_TRANSPORT_SEND_TIMEOUT_MS))
+                   : -1;
+    xSemaphoreGive(s_voice.send_mutex);
+    return sent == (int)length ? ESP_OK : ESP_FAIL;
+}
+
+static esp_err_t voice_playback_send_json(cJSON *root, void *context)
+{
+    (void)context;
+    return voice_send_json(root);
 }
 
 static void voice_add_identity(cJSON *root, const char *type)
@@ -403,7 +444,31 @@ static void voice_handle_control(const char *text, size_t length)
 {
     cJSON *root = cJSON_ParseWithLength(text, length);
     const cJSON *type = root != NULL ? cJSON_GetObjectItemCaseSensitive(root, "type") : NULL;
-    if (root == NULL || !cJSON_IsString(type) || !voice_control_identity_valid(root)) {
+    if (root == NULL || !cJSON_IsString(type)) {
+        cJSON_Delete(root);
+        voice_metric_protocol_error();
+        voice_request_reconnect();
+        return;
+    }
+    const cJSON *direction = cJSON_GetObjectItemCaseSensitive(root, "direction");
+    if (strcmp(type->valuestring, "session.open") == 0 && cJSON_IsString(direction) &&
+        strcmp(direction->valuestring, "playback") == 0) {
+        if (voice_playback_receiver_open(root) != ESP_OK) {
+            voice_metric_protocol_error();
+            voice_request_reconnect();
+        }
+        cJSON_Delete(root);
+        return;
+    }
+    if (voice_playback_receiver_matches(root)) {
+        if (voice_playback_receiver_control(root) != ESP_OK) {
+            voice_metric_protocol_error();
+            voice_playback_receiver_fail();
+        }
+        cJSON_Delete(root);
+        return;
+    }
+    if (!voice_control_identity_valid(root)) {
         cJSON_Delete(root);
         voice_metric_protocol_error();
         voice_request_reconnect();
@@ -492,6 +557,7 @@ static void voice_handle_control(const char *text, size_t length)
             voice_metric_protocol_error();
             voice_request_reconnect();
         } else {
+            voice_playback_receiver_capture_finished();
 #if CONFIG_P4HOME_PHASE5B_VALIDATION
             taskENTER_CRITICAL(&s_voice.lock);
             const uint32_t queue_high_water = s_voice.metrics.queue_high_water;
@@ -524,7 +590,11 @@ static void voice_handle_ws_data(const esp_websocket_event_data_t *data)
     size_t total = data->payload_len > 0 ? (size_t)data->payload_len : (size_t)data->data_len;
     size_t offset = data->payload_offset > 0 ? (size_t)data->payload_offset : 0U;
     size_t length = (size_t)data->data_len;
-    if (total > VOICE_TRANSPORT_CONTROL_MAX_BYTES || offset + length > total) {
+    const bool first_binary = offset == 0U && data->op_code == VOICE_WS_OPCODE_BINARY;
+    const size_t maximum = (first_binary || (offset > 0U && s_voice.rx_binary))
+                               ? VOICE_PROTOCOL_HEADER_BYTES + VOICE_PROTOCOL_FRAME_PAYLOAD_BYTES
+                               : VOICE_TRANSPORT_CONTROL_MAX_BYTES;
+    if (total > maximum || offset + length > total) {
         voice_metric_protocol_error();
         voice_request_reconnect();
         s_voice.rx_expected = s_voice.rx_received = 0U;
@@ -533,6 +603,7 @@ static void voice_handle_ws_data(const esp_websocket_event_data_t *data)
     if (offset == 0U) {
         s_voice.rx_expected = total;
         s_voice.rx_received = 0U;
+        s_voice.rx_binary = first_binary;
     }
     if (s_voice.rx_expected != total || offset != s_voice.rx_received) {
         voice_metric_protocol_error();
@@ -543,9 +614,22 @@ static void voice_handle_ws_data(const esp_websocket_event_data_t *data)
     memcpy(s_voice.rx_control + offset, data->data_ptr, length);
     s_voice.rx_received += length;
     if (data->fin || s_voice.rx_received == s_voice.rx_expected) {
-        s_voice.rx_control[s_voice.rx_expected] = '\0';
-        voice_handle_control(s_voice.rx_control, s_voice.rx_expected);
+        if (s_voice.rx_binary) {
+            voice_playback_snapshot_t playback;
+            voice_playback_receiver_get_snapshot(&playback);
+            if (!playback.active ||
+                voice_playback_receiver_frame((const uint8_t *)s_voice.rx_control,
+                                              s_voice.rx_expected) != ESP_OK) {
+                voice_metric_protocol_error();
+                if (playback.active) voice_playback_receiver_fail();
+                else voice_request_reconnect();
+            }
+        } else {
+            s_voice.rx_control[s_voice.rx_expected] = '\0';
+            voice_handle_control(s_voice.rx_control, s_voice.rx_expected);
+        }
         s_voice.rx_expected = s_voice.rx_received = 0U;
+        s_voice.rx_binary = false;
     }
 }
 
@@ -571,9 +655,11 @@ static void voice_ws_event(void *handler_args, esp_event_base_t base,
         s_voice.metrics.connected = false;
         taskEXIT_CRITICAL(&s_voice.lock);
         voice_request_abort();
+        voice_playback_receiver_disconnect();
         break;
     case WEBSOCKET_EVENT_DATA:
         if (data != NULL && (data->op_code == VOICE_WS_OPCODE_TEXT ||
+                             data->op_code == VOICE_WS_OPCODE_BINARY ||
                              data->op_code == VOICE_WS_OPCODE_CONTINUATION)) {
             voice_handle_ws_data(data);
         } else if (data != NULL && (data->op_code == VOICE_WS_OPCODE_CLOSE ||
@@ -654,7 +740,10 @@ static bool voice_begin_capture(void *context, uint64_t started_at_us)
                            !s_voice.epoch_reservation_in_progress &&
                            s_voice.epoch < s_voice.epoch_reserved_end;
     taskEXIT_CRITICAL(&s_voice.lock);
-    if (!candidate) return false;
+    if (!candidate) {
+        voice_playback_receiver_capture_finished();
+        return false;
+    }
 
     uint8_t session_id[sizeof(s_voice.session_id)];
     char session_id_hex[sizeof(s_voice.session_id_hex)];
@@ -680,6 +769,7 @@ static bool voice_begin_capture(void *context, uint64_t started_at_us)
         if (next_epoch == 0U) {
             s_voice.metrics.protocol_errors++;
             taskEXIT_CRITICAL(&s_voice.lock);
+            voice_playback_receiver_capture_finished();
             return false;
         }
         s_voice.session_state = VOICE_SESSION_OPENING;
@@ -712,8 +802,23 @@ static bool voice_begin_capture(void *context, uint64_t started_at_us)
     taskEXIT_CRITICAL(&s_voice.lock);
     if (accepted) {
         ESP_LOGW(TAG, "capture opened epoch=%" PRIu32, accepted_epoch);
+    } else {
+        voice_playback_receiver_capture_finished();
     }
     return accepted;
+}
+
+static void voice_wake_detected(void *context, uint64_t detected_at_us)
+{
+    (void)context;
+    (void)detected_at_us;
+    voice_playback_receiver_barge_in();
+}
+
+static bool voice_ready_for_capture(void *context)
+{
+    (void)context;
+    return voice_playback_receiver_allow_capture();
 }
 
 static void voice_offer_pcm(void *context, const int16_t *samples, size_t sample_count,
@@ -859,10 +964,7 @@ static void voice_worker(void *argument)
                 voice_request_abort();
                 break;
             }
-            int sent = esp_websocket_client_send_bin(s_voice.ws, (const char *)frame.bytes,
-                                                     frame.length,
-                                                     pdMS_TO_TICKS(VOICE_TRANSPORT_SEND_TIMEOUT_MS));
-            if (sent != (int)frame.length) {
+            if (voice_send_binary(frame.bytes, frame.length) != ESP_OK) {
                 voice_abort_session("binary send failed");
                 voice_request_reconnect();
                 break;
@@ -958,14 +1060,32 @@ esp_err_t voice_transport_init(const voice_transport_config_t *config)
     s_voice.frame_queue = xQueueCreate(VOICE_TRANSPORT_QUEUE_FRAMES,
                                        sizeof(voice_transport_frame_t));
     if (s_voice.frame_queue == NULL) return ESP_ERR_NO_MEM;
+    s_voice.send_mutex = xSemaphoreCreateMutex();
+    if (s_voice.send_mutex == NULL) {
+        vQueueDelete(s_voice.frame_queue);
+        s_voice.frame_queue = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t result = voice_playback_receiver_init(voice_playback_send_json, NULL);
+    if (result != ESP_OK) {
+        vSemaphoreDelete(s_voice.send_mutex);
+        s_voice.send_mutex = NULL;
+        vQueueDelete(s_voice.frame_queue);
+        s_voice.frame_queue = NULL;
+        return result;
+    }
     const sr_service_capture_listener_t listener = {
         .context = NULL,
+        .wake_detected = voice_wake_detected,
+        .ready_for_capture = voice_ready_for_capture,
         .begin_capture = voice_begin_capture,
         .offer_pcm = voice_offer_pcm,
         .end_capture = voice_end_capture,
     };
-    esp_err_t result = sr_service_register_capture_listener(&listener);
+    result = sr_service_register_capture_listener(&listener);
     if (result != ESP_OK) {
+        vSemaphoreDelete(s_voice.send_mutex);
+        s_voice.send_mutex = NULL;
         vQueueDelete(s_voice.frame_queue);
         s_voice.frame_queue = NULL;
         return result;
@@ -984,6 +1104,8 @@ esp_err_t voice_transport_start(void)
     ESP_RETURN_ON_FALSE(s_voice.initialized, ESP_ERR_INVALID_STATE, TAG,
                         "voice transport not initialized");
     if (!s_voice.enabled || s_voice.running) return ESP_OK;
+    ESP_RETURN_ON_ERROR(voice_playback_receiver_start(), TAG,
+                        "failed to start voice playback receiver");
     esp_websocket_client_config_t config = {
         .uri = s_voice.uri,
         .headers = s_voice.headers,
@@ -1002,13 +1124,16 @@ esp_err_t voice_transport_start(void)
         .keep_alive_count = 3,
     };
     s_voice.ws = esp_websocket_client_init(&config);
-    ESP_RETURN_ON_FALSE(s_voice.ws != NULL, ESP_ERR_NO_MEM, TAG,
-                        "failed to create voice WebSocket client");
+    if (s_voice.ws == NULL) {
+        (void)voice_playback_receiver_stop();
+        return ESP_ERR_NO_MEM;
+    }
     esp_err_t result = esp_websocket_register_events(s_voice.ws, WEBSOCKET_EVENT_ANY,
                                                       voice_ws_event, NULL);
     if (result != ESP_OK) {
         esp_websocket_client_destroy(s_voice.ws);
         s_voice.ws = NULL;
+        (void)voice_playback_receiver_stop();
         return result;
     }
     s_voice.running = true;
@@ -1019,6 +1144,7 @@ esp_err_t voice_transport_start(void)
         s_voice.running = false;
         esp_websocket_client_destroy(s_voice.ws);
         s_voice.ws = NULL;
+        (void)voice_playback_receiver_stop();
         return ESP_ERR_NO_MEM;
     }
     result = esp_websocket_client_start(s_voice.ws);
@@ -1027,6 +1153,7 @@ esp_err_t voice_transport_start(void)
         const esp_err_t worker_result = voice_delete_worker_task();
         esp_websocket_client_destroy(s_voice.ws);
         s_voice.ws = NULL;
+        (void)voice_playback_receiver_stop();
         return worker_result == ESP_OK ? result : worker_result;
     }
     return ESP_OK;
@@ -1038,6 +1165,9 @@ esp_err_t voice_transport_stop(void)
     s_voice.running = false;
     ESP_RETURN_ON_ERROR(voice_delete_worker_task(), TAG, "failed to stop voice worker task");
     voice_abort_session("voice transport stopped");
+    voice_playback_receiver_disconnect();
+    ESP_RETURN_ON_ERROR(voice_playback_receiver_stop(), TAG,
+                        "failed to stop voice playback receiver");
     if (s_voice.ws != NULL) {
         (void)esp_websocket_client_stop(s_voice.ws);
         esp_websocket_client_destroy(s_voice.ws);
@@ -1060,4 +1190,20 @@ void voice_transport_get_snapshot(voice_transport_snapshot_t *snapshot)
     taskENTER_CRITICAL(&s_voice.lock);
     *snapshot = s_voice.metrics;
     taskEXIT_CRITICAL(&s_voice.lock);
+    voice_playback_snapshot_t playback;
+    voice_playback_receiver_get_snapshot(&playback);
+    snapshot->playback_active = playback.active;
+    snapshot->playback_output_quarantined = playback.output_quarantined;
+    snapshot->playback_sessions_started = playback.sessions_started;
+    snapshot->playback_sessions_completed = playback.sessions_completed;
+    snapshot->playback_sessions_cancelled = playback.sessions_cancelled;
+    snapshot->playback_sessions_failed = playback.sessions_failed;
+    snapshot->playback_frames_received = playback.frames_received;
+    snapshot->playback_frames_played = playback.frames_played;
+    snapshot->playback_bytes_played = playback.bytes_played;
+    snapshot->playback_dropped_frames = playback.dropped_frames;
+    snapshot->playback_queue_high_water = playback.queue_high_water;
+    snapshot->playback_barge_in_count = playback.barge_in_count;
+    snapshot->playback_speaker_close_failures = playback.speaker_close_failures;
+    snapshot->playback_stack_high_water_bytes = playback.stack_high_water_bytes;
 }

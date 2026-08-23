@@ -10,6 +10,7 @@ export * from "./device-action-adapter.ts";
 export * from "./device-protocol.ts";
 export * from "./device-websocket-server.ts";
 export * from "./voice-websocket-server.ts";
+export * from "./voice-playback-sender.ts";
 export * from "./voice-stt-pipeline.ts";
 export * from "./voice-role-dispatcher.ts";
 export * from "./phase5c-stt-gate.ts";

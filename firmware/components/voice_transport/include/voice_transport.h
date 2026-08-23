@@ -34,6 +34,20 @@ typedef struct {
     uint32_t available_credit;
     uint32_t last_epoch;
     uint32_t worker_stack_high_water_bytes;
+    bool playback_active;
+    bool playback_output_quarantined;
+    uint32_t playback_sessions_started;
+    uint32_t playback_sessions_completed;
+    uint32_t playback_sessions_cancelled;
+    uint32_t playback_sessions_failed;
+    uint32_t playback_frames_received;
+    uint32_t playback_frames_played;
+    uint32_t playback_bytes_played;
+    uint32_t playback_dropped_frames;
+    uint32_t playback_queue_high_water;
+    uint32_t playback_barge_in_count;
+    uint32_t playback_speaker_close_failures;
+    uint32_t playback_stack_high_water_bytes;
 } voice_transport_snapshot_t;
 
 esp_err_t voice_transport_init(const voice_transport_config_t *config);
