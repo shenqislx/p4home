@@ -92,6 +92,7 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         self.assertIn("CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED=n", defaults)
         self.assertIn("default n", kconfig)
         self.assertIn("depends on P4HOME_SR_ENABLE", kconfig)
+        self.assertIn("MBEDTLS_EXTERNAL_MEM_ALLOC", kconfig)
         self.assertIn("queue_high_water", header)
         self.assertIn("worker_stack_high_water_bytes", header)
         self.assertNotIn("ESP_LOG_BUFFER", firmware)

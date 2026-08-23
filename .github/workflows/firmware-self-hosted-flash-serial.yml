@@ -244,6 +244,8 @@ jobs:
             grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_SR_ENABLE=y" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_PHASE5B_VALIDATION=y" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y" "$HARDWARE_SDKCONFIG"
+            grep -qx "# CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC is not set" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED=y" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK=12288" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK=8192" "$HARDWARE_SDKCONFIG"
@@ -330,6 +332,8 @@ jobs:
             grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_SR_ENABLE=y" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_PHASE5B_VALIDATION=y" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y" "$HARDWARE_SDKCONFIG"
+            grep -qx "# CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC is not set" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED=y" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK=12288" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK=8192" "$HARDWARE_SDKCONFIG"
@@ -577,6 +581,7 @@ jobs:
           voice_transport_enabled_prefix = "CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED="
           voice_transport_stack_prefix = "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK="
           voice_websocket_stack_prefix = "CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK="
+          mbedtls_external_mem_prefix = "CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC="
           sr_enable_prefix = "CONFIG_P4HOME_SR_ENABLE="
           audio_selftest_prefix = "CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST="
           main_stack_size = None
@@ -592,6 +597,7 @@ jobs:
           phase5b_voice_transport_enabled = False
           phase5b_voice_transport_stack_size = None
           phase5b_voice_websocket_stack_size = None
+          phase5b_mbedtls_external_mem_alloc = False
           phase5b_agent_transport_disabled = False
           phase4c_post_robot_p4_standalone = False
           phase4c_post_robot_ui_8fps = False
@@ -656,6 +662,10 @@ jobs:
                       phase5b_voice_websocket_stack_size = int(
                           line.removeprefix(voice_websocket_stack_prefix)
                       )
+                  elif line.startswith(mbedtls_external_mem_prefix):
+                      phase5b_mbedtls_external_mem_alloc = (
+                          line.removeprefix(mbedtls_external_mem_prefix) == "y"
+                      )
                   elif line.startswith(sr_enable_prefix):
                       phase5a_sr_enabled = line.removeprefix(sr_enable_prefix) == "y"
                   elif line.startswith(audio_selftest_prefix):
@@ -703,6 +713,7 @@ jobs:
               "phase5b_voice_transport_enabled": phase5b_voice_transport_enabled,
               "phase5b_voice_transport_task_stack_size_bytes": phase5b_voice_transport_stack_size,
               "phase5b_voice_websocket_task_stack_size_bytes": phase5b_voice_websocket_stack_size,
+              "phase5b_mbedtls_external_mem_alloc": phase5b_mbedtls_external_mem_alloc,
               "phase5b_agent_transport_disabled": phase5b_agent_transport_disabled,
               "phase4c_agent_transport_disabled": phase4c_agent_transport_disabled,
               "phase4c_policy_binding_verified": (

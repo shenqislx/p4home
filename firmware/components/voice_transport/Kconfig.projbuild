@@ -2,8 +2,11 @@ menu "P4Home Voice Transport"
 
 config P4HOME_VOICE_TRANSPORT_ENABLED
     bool "Enable independent Voice Protocol WebSocket transport"
-    depends on P4HOME_SR_ENABLE
+    depends on P4HOME_SR_ENABLE && MBEDTLS_EXTERNAL_MEM_ALLOC
     default n
+    help
+        Voice TLS uses external PSRAM for mbedTLS allocations so internal DMA
+        memory remains available to the ESP-Hosted SDIO transport and HA tasks.
 
 config P4HOME_VOICE_TRANSPORT_URI
     string "Agent Voice WebSocket URI"
