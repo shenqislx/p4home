@@ -10,7 +10,7 @@ import {
   type SttPartialTranscript,
   type SttProvider,
 } from "@p4home/provider-stt";
-import type { DecodedVoiceFrame } from "@p4home/contracts";
+import { VOICE_FLAG_END_OF_STREAM, type DecodedVoiceFrame } from "@p4home/contracts";
 
 import type { UserTextInteraction } from "./role-contracts.ts";
 import type { VoiceCaptureSink, VoiceCaptureSummary } from "./voice-websocket-server.ts";
@@ -195,7 +195,16 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
   public onFrame(summary: VoiceCaptureSummary, frame: DecodedVoiceFrame): void {
     if (this.#closed) throw new TypeError("voice STT pipeline is closed");
     const state = this.#active.get(sessionKey(summary));
-    if (state === undefined || !identityMatches(summary, frame) || frame.payload.byteLength !== FRAME_BYTES) {
+    const payloadBytes = frame.payload.byteLength;
+    const eos = (frame.header.flags & VOICE_FLAG_END_OF_STREAM) !== 0;
+    const payloadGeometryValid = payloadBytes === FRAME_BYTES || (
+      eos
+      && payloadBytes >= 2
+      && payloadBytes < FRAME_BYTES
+      && payloadBytes % 2 === 0
+      && frame.header.frameSamples * 2 === payloadBytes
+    );
+    if (state === undefined || !identityMatches(summary, frame) || !payloadGeometryValid) {
       throw new TypeError("voice STT frame does not match its active PCM session");
     }
     if (state.endpointReached) return;
@@ -207,10 +216,11 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
     const energy = frameEnergy(frame.payload);
     const speech = energy.peak >= this.#vadPeakThreshold
       && energy.rms >= Math.max(1, Math.floor(this.#vadPeakThreshold / 3));
-    if (speech) {
+    const fullFrame = payloadBytes === FRAME_BYTES;
+    if (speech && fullFrame) {
       state.speechFrames++;
       state.trailingSilenceFrames = 0;
-    } else if (state.speechFrames > 0) {
+    } else if (!speech && fullFrame && state.speechFrames > 0) {
       state.trailingSilenceFrames++;
     }
     state.frames.push(Buffer.from(frame.payload));

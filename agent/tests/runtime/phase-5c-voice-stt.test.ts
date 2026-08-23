@@ -24,7 +24,7 @@ import {
   type UserTextInteraction,
   type VoiceCaptureSummary,
 } from "@p4home/runtime";
-import type { DecodedVoiceFrame } from "@p4home/contracts";
+import { VOICE_FLAG_END_OF_STREAM, type DecodedVoiceFrame } from "@p4home/contracts";
 import type { OllamaChatResult } from "@p4home/provider-ollama";
 
 const SESSION_ID = "00112233445566778899aabbccddeeff";
@@ -78,6 +78,21 @@ function impulseFrame(epoch: number, sequence: number, amplitude: number): Decod
   new DataView(value.payload.buffer, value.payload.byteOffset, value.payload.byteLength)
     .setInt16(0, amplitude, true);
   return value;
+}
+
+function shortEosFrame(epoch: number, sequence: number, amplitude: number): DecodedVoiceFrame {
+  const payload = new Uint8Array(2);
+  new DataView(payload.buffer).setInt16(0, amplitude, true);
+  const value = frame(epoch, sequence, 0);
+  return {
+    header: {
+      ...value.header,
+      flags: VOICE_FLAG_END_OF_STREAM,
+      payloadBytes: payload.byteLength,
+      frameSamples: 1,
+    },
+    payload,
+  };
 }
 
 function completeSession(pipeline: VoiceSttPipeline, epoch: number, speechFrames = 15): void {
@@ -158,6 +173,33 @@ test("only an active final transcript enters the existing user_text voice bounda
   pipeline.onSessionClosed(summary(1, "completed", true));
   await pipeline.drain();
   assert.equal(dispatched.length, 1, "duplicate terminal must not create another Interaction");
+});
+
+test("a legal short EOS tail reaches STT without inflating the minimum speech duration", async () => {
+  const provider = new FakeSttProvider();
+  const pipeline = new VoiceSttPipeline({ provider, dispatch_final: async () => undefined });
+  const active = summary(1);
+  pipeline.onSessionOpen(active);
+  let sequence = 0;
+  for (; sequence < 15; sequence++) pipeline.onFrame(active, frame(1, sequence, 1_200));
+  for (let silence = 0; silence < 10; silence++, sequence++) {
+    pipeline.onFrame(active, frame(1, sequence, 0));
+  }
+  pipeline.onFrame(active, shortEosFrame(1, sequence, 1_200));
+  pipeline.onSessionClosed(summary(1, "completed", true));
+  await pipeline.drain();
+
+  assert.equal(provider.requests[0]?.pcm.byteLength, 25 * 640 + 2);
+  assert.equal(pipeline.results[0]?.speech_frames, 15);
+  assert.equal(pipeline.results[0]?.outcome, "dispatched");
+
+  const invalid = summary(2);
+  pipeline.onSessionOpen(invalid);
+  const shortWithoutEos = shortEosFrame(2, 0, 0);
+  assert.throws(() => pipeline.onFrame(invalid, {
+    ...shortWithoutEos,
+    header: { ...shortWithoutEos.header, flags: 0 },
+  }), /does not match/);
 });
 
 test("Phase 5C fixed transcript gate tolerates punctuation only and rejects hallucinations", () => {
