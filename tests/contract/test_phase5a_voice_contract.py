@@ -45,7 +45,8 @@ class Phase5AVoiceContractTest(unittest.TestCase):
         lease = (
             ROOT / "firmware/components/audio_service/audio_service_lease.c"
         ).read_text(encoding="utf-8")
-        self.assertIn("xSemaphoreTake(s_io_mutex, portMAX_DELAY)", source)
+        self.assertIn("xSemaphoreTake(s_input_mutex, portMAX_DELAY)", source)
+        self.assertIn("xSemaphoreTake(s_output_mutex, portMAX_DELAY)", source)
         self.assertIn("audio_service_quarantine_action", source)
         self.assertIn("audio_service_lease_fault", lease)
         self.assertIn("state->faulted", lease)

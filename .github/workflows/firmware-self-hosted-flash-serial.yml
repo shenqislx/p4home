@@ -784,7 +784,7 @@ jobs:
             tee -a "$harness_monitor_log" < "$AGENT_HARNESS_LOG" > /dev/null
           fi
 
-      - name: Sanitize private HA serial artifact
+      - name: Sanitize Phase 4C serial artifact
         if: always() && (inputs.validation_profile == 'phase4c_ha' || inputs.validation_profile == 'phase5e_e2e')
         run: |
           set -euo pipefail
