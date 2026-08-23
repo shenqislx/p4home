@@ -3,6 +3,7 @@ import { TTS_ROLE_VOICES } from "@p4home/provider-tts";
 
 import type { RunRoleInteractionResult } from "./role-orchestrator.ts";
 import type { VoiceInteractionResult } from "./voice-interaction-coordinator.ts";
+import type { GateRestoreResult } from "./phase4c-ha-gate-core.ts";
 
 export type Phase5ePromptKind = "barge" | "followup" | "read" | "write";
 
@@ -31,6 +32,17 @@ export interface Phase5eVoiceGateVerdict {
 }
 
 const SAFE_ALIAS = /^[a-z][a-z0-9_]{0,63}$/;
+
+export function requirePhase5eRestoredState(
+  restore: GateRestoreResult,
+  initialState: "off" | "on",
+): "off" | "on" {
+  if (!restore.restored || restore.final_state?.available !== true
+      || restore.final_state.state !== initialState) {
+    throw new Error("restore_failed");
+  }
+  return initialState;
+}
 
 export function normalizePhase5eTranscript(value: string): string {
   return value.normalize("NFKC").replace(/[\p{P}\p{Z}]/gu, "").toLowerCase();

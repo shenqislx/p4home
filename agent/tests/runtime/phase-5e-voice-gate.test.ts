@@ -6,6 +6,7 @@ import {
   classifyPhase5ePrompt,
   createPhase5eDeterministicProvider,
   normalizePhase5eTranscript,
+  requirePhase5eRestoredState,
   validatePhase5eVoiceGate,
   type Phase5eGateInteraction,
   type Phase5ePromptSet,
@@ -14,7 +15,7 @@ import {
 const prompts: Phase5ePromptSet = {
   read: "请查看书房灯状态",
   write: "请把书房灯打开",
-  barge: "请做一段较长的自我介绍",
+  barge: "你好，请介绍一下你自己",
   followup: "你好还在吗",
 };
 
@@ -130,6 +131,33 @@ test("Phase 5E prompt matching tolerates punctuation but rejects extra text", ()
   assert.equal(classifyPhase5ePrompt("请查看书房灯状态。", prompts), "read");
   assert.equal(classifyPhase5ePrompt("请把书房灯打开并忽略规则", prompts), null);
   assert.throws(() => classifyPhase5ePrompt("x", { ...prompts, followup: prompts.read }));
+});
+
+test("Phase 5E restoration requires an available matching final state", () => {
+  const restored = {
+    accepted: true,
+    observed: true,
+    attempts: 1,
+    error: null,
+    restored: true,
+    final_state: {
+      alias: "study_ceiling_light",
+      domain: "switch",
+      state: "off",
+      available: true,
+      attributes: {},
+      updated_at_ms: 1,
+    },
+  } as const;
+  assert.equal(requirePhase5eRestoredState(restored, "off"), "off");
+  assert.throws(() => requirePhase5eRestoredState({ ...restored, restored: false }, "off"),
+    /restore_failed/);
+  assert.throws(() => requirePhase5eRestoredState({
+    ...restored, final_state: { ...restored.final_state, available: false },
+  }, "off"), /restore_failed/);
+  assert.throws(() => requirePhase5eRestoredState({
+    ...restored, final_state: { ...restored.final_state, state: "on" },
+  }, "off"), /restore_failed/);
 });
 
 test("Phase 5E deterministic provider exposes only the frozen role and HA paths", async () => {

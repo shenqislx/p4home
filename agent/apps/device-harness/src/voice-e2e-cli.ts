@@ -26,6 +26,7 @@ import {
   classifyPhase5ePrompt,
   createPhase5eDeterministicProvider,
   readCurrentIdentity,
+  requirePhase5eRestoredState,
   restoreRobotState,
   validatePhase5eVoiceGate,
   waitForStableProjectedState,
@@ -143,7 +144,7 @@ async function main(): Promise<void> {
     const prompts: Phase5ePromptSet = {
       read: "请查看书房灯状态",
       write: writeAction === "turn_on" ? "请把书房灯打开" : "请把书房灯关闭",
-      barge: "请做一段较长的自我介绍",
+      barge: "你好，请介绍一下你自己",
       followup: "你好还在吗",
     };
     const deterministic = createPhase5eDeterministicProvider({
@@ -268,8 +269,7 @@ async function main(): Promise<void> {
     await runtime.close();
     runtime = null;
     const restore = await restoreRobotState(client, alias, initialState, 10_000, 2_000);
-    restoredState = restore.final_state?.state ?? null;
-    if (!restore.restored) throw new Error("restore_failed");
+    restoredState = requirePhase5eRestoredState(restore, initialState);
     const verdict = validatePhase5eVoiceGate({
       interactions,
       write_action: writeAction,
@@ -319,14 +319,21 @@ async function main(): Promise<void> {
     process.off("SIGTERM", requestShutdown);
     process.off("SIGINT", requestShutdown);
     let runtimeCloseFailure: unknown = null;
+    let restoreFailure: unknown = null;
     try { await runtime?.close(); }
     catch (error) { runtimeCloseFailure = error; }
     if (initialState !== null && writeMayHaveOccurred && restoredState !== initialState) {
-      try { restoredState = (await restoreRobotState(client, alias, initialState)).final_state?.state ?? null; }
-      catch { /* fail closed; the workflow reports the original bounded error */ }
+      try {
+        restoredState = requirePhase5eRestoredState(
+          await restoreRobotState(client, alias, initialState), initialState,
+        );
+      } catch {
+        restoreFailure = new Error("restore_failed");
+      }
     }
     scheduler.close();
     client.close();
+    if (restoreFailure !== null) throw restoreFailure;
     if (runtimeCloseFailure !== null) throw runtimeCloseFailure;
   }
 }
