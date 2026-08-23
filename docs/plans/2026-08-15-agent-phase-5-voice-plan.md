@@ -2,7 +2,7 @@
 
 > Status: `in_progress`
 > Started: 2026-08-23
-> Current Gate: 5C STT/统一 Role Runtime 技术门禁通过；P4 可听播放人工观察待补，当前进入 5D TTS/播放/barge-in
+> Current Gate: 5D TTS/播放/barge-in 技术门禁通过；当前进入 5E 安全/评测/实机总门禁
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用
 
@@ -105,14 +105,19 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
 
 只有 5C review 通过后开始：
 
-- [ ] 接入版本锁定的 TTS Provider，冻结输出 PCM 几何和 chunk/session/epoch 契约；
-- [ ] TTS 只消费 Composer 结构化输出：Human 表达和 Robot 真实执行结果保持分段、顺序与可辨识
+- [x] 接入版本锁定的 TTS Provider，冻结输出 PCM 几何和 chunk/session/epoch 契约；
+- [x] TTS 只消费 Composer 结构化输出：Human 表达和 Robot 真实执行结果保持分段、顺序与可辨识
   voice/style，不能互相覆盖或让 Human 文本伪造 Robot 完成；
-- [ ] P4 实现有界播放队列、underrun/overrun 指标、过期 chunk 拒绝和播放终态；播放失败不回写成
+- [x] P4 实现有界播放队列、underrun/overrun 指标、过期 chunk 拒绝和播放终态；播放失败不回写成
   Agent/HA 执行失败；
-- [ ] 实现 barge-in 原子 fencing：停止旧播放、创建新 capture epoch、取消旧 voice Run/低优先 Cat，
+- [x] 实现 barge-in 原子 fencing：停止旧播放、创建新 capture epoch、取消旧 voice Run/低优先 Cat，
   并保持已发 Robot 写侧的 unknown/reconciliation；
-- [ ] 覆盖播放期间唤醒、网络断开、TTS timeout、迟到音频、连续打断、取消竞态和重连。
+- [x] 覆盖播放期间唤醒、网络断开、TTS timeout、迟到音频、连续打断、取消竞态和重连。
+
+证据：[Phase 5D Role-aware TTS, Playback & Barge-in](../../evidence/agent-phase-5/phase-5d-role-aware-playback.md)。
+5D-A/5D-B/5D-C 分别由 `c353d9d`、`cd03437`、`eb8a827` 落地；最终 Agent 全量 319/319、
+5D orchestration 14/14、ESP32-P4 clean temp build 与逐批独立 bugs review 均通过。真实 P4 板载
+扬声器可听观察及完整端到端长跑仍归 5E 总门禁，Mac 系统扬声器不得替代该输出证明。
 
 退出门禁：Human/Robot 组合响应按确定性顺序播放；barge-in 不播放旧音频、不串 role/session，也不
 伪造或重放 Robot 副作用。

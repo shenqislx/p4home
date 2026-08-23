@@ -76,8 +76,10 @@ STT/统一 Router、5D 分角色 TTS/barge-in、5E 安全/评测/实机总门禁
 wake 与固定命令动作已通过。5B 最终 run `32627837273` 证明真实 P4 PCM 有界抵达 Agent fake sink、
 丢帧 0，并保持 HA、固定命令与稳态 UI 主链；独立 review 后 5B 技术门禁关闭。5C 最终 run
 `32635742553` 已证明现场中文经真实 P4/VAD/固定 MLX STT 后只进入统一 Human Runtime，审计完整、
-Cat 零泄漏且不保留原始音频；独立 review 后技术门禁关闭。P4 可听 startup tone 人工观察仍明确
-待补；当前进入 5D 分角色 TTS、播放与 barge-in，默认 SR 仍关闭。
+Cat 零泄漏且不保留原始音频；独立 review 后技术门禁关闭。5D 已完成固定 Kokoro TTS、分角色
+Composer 消费、有界 P4 playback、统一语音 assembly 与 barge-in/Cat cancellation，最终全量
+319/319 且第五轮 closure review 为 no findings；当前进入 5E 安全/评测/实机总门禁。P4 可听
+startup tone 与分角色播放人工观察仍明确待补，默认 SR 仍关闭。
 
 ## 5. 状态更新规则
 
