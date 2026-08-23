@@ -13,6 +13,7 @@ on:
           - phase3d_object
           - phase4c_ha
           - phase5a_voice
+          - phase5b_voice
         default: generic
       serial_port:
         description: macOS serial device path
@@ -98,12 +99,12 @@ jobs:
           if not 10 <= seconds <= 7200:
               raise SystemExit("monitor_seconds must be between 10 and 7200")
           profile = os.environ["VALIDATION_PROFILE"]
-          if profile not in {"generic", "phase2d_agent", "phase3d_object", "phase4c_ha", "phase5a_voice"}:
+          if profile not in {"generic", "phase2d_agent", "phase3d_object", "phase4c_ha", "phase5a_voice", "phase5b_voice"}:
               raise SystemExit("unsupported validation_profile")
           port = int(os.environ["AGENT_PORT"])
           if not 1 <= port <= 65535:
               raise SystemExit("agent_port must be between 1 and 65535")
-          if profile in {"phase2d_agent", "phase3d_object"}:
+          if profile in {"phase2d_agent", "phase3d_object", "phase5b_voice"}:
               host = os.environ["AGENT_HOST"]
               if not host or re.fullmatch(r"[A-Za-z0-9.-]+", host) is None:
                   raise SystemExit("Agent profiles require a safe runner LAN agent_host")
@@ -116,6 +117,8 @@ jobs:
               raise SystemExit("phase4c_ha requires monitor_seconds>=120")
           if profile == "phase5a_voice" and seconds < 180:
               raise SystemExit("phase5a_voice requires monitor_seconds>=180")
+          if profile == "phase5b_voice" and seconds < 180:
+              raise SystemExit("phase5b_voice requires monitor_seconds>=180")
           PY
           test -f scripts/activate-idf-v5.5.4.sh
           test -s firmware/dependencies.lock
@@ -130,6 +133,8 @@ jobs:
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 120))" >> "$GITHUB_ENV"
           elif [[ "$VALIDATION_PROFILE" == "phase4c_ha" ]]; then
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 180))" >> "$GITHUB_ENV"
+          elif [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
+            echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 120))" >> "$GITHUB_ENV"
           else
             echo "CAPTURE_SECONDS=$MONITOR_SECONDS" >> "$GITHUB_ENV"
           fi
@@ -199,7 +204,7 @@ jobs:
           echo "EXPECTED_MAIN_TASK_STACK_SIZE=12288" >> "$GITHUB_ENV"
 
       - name: Prepare ephemeral Agent profile
-        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object'
+        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase5b_voice'
         run: |
           set -euo pipefail
           mkdir -p "$AGENT_TMP_DIR"
@@ -217,14 +222,33 @@ jobs:
             | awk '{print $2}' > "$AGENT_TMP_DIR/spki-sha256"
           chmod 600 "$AGENT_TMP_DIR"/*
           AGENT_DEVICE_ID="p4-hardware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          AGENT_URI="wss://$AGENT_HOST:$AGENT_PORT/v1/device"
-          python3 scripts/prepare-agent-hardware-sdkconfig.py \
-            --sdkconfig "$HARDWARE_SDKCONFIG" \
-            --uri "$AGENT_URI" \
-            --device-id "$AGENT_DEVICE_ID" \
-            --token-file "$AGENT_TMP_DIR/device-token" \
-            --spki-file "$AGENT_TMP_DIR/spki-sha256" \
-            --protocol-version "$AGENT_PROTOCOL_VERSION"
+          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
+            AGENT_URI="wss://$AGENT_HOST:$AGENT_PORT/v1/voice"
+            python3 scripts/prepare-phase5b-voice-profile.py \
+              --sdkconfig "$HARDWARE_SDKCONFIG" \
+              --uri "$AGENT_URI" \
+              --device-id "$AGENT_DEVICE_ID" \
+              --token-file "$AGENT_TMP_DIR/device-token" \
+              --spki-file "$AGENT_TMP_DIR/spki-sha256"
+          else
+            AGENT_URI="wss://$AGENT_HOST:$AGENT_PORT/v1/device"
+            python3 scripts/prepare-agent-hardware-sdkconfig.py \
+              --sdkconfig "$HARDWARE_SDKCONFIG" \
+              --uri "$AGENT_URI" \
+              --device-id "$AGENT_DEVICE_ID" \
+              --token-file "$AGENT_TMP_DIR/device-token" \
+              --spki-file "$AGENT_TMP_DIR/spki-sha256" \
+              --protocol-version "$AGENT_PROTOCOL_VERSION"
+          fi
+          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
+            grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_P4HOME_SR_ENABLE=y" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_P4HOME_PHASE5B_VALIDATION=y" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED=y" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK=12288" "$HARDWARE_SDKCONFIG"
+            grep -qx "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set" "$HARDWARE_SDKCONFIG"
+            echo "EXPECTED_MAIN_TASK_STACK_SIZE=12288" >> "$GITHUB_ENV"
+          fi
           echo "AGENT_DEVICE_ID=$AGENT_DEVICE_ID" >> "$GITHUB_ENV"
           echo "AGENT_HARNESS_LOG=$AGENT_TMP_DIR/agent-harness.log" >> "$GITHUB_ENV"
           echo "AGENT_HARNESS_READY_FILE=$AGENT_TMP_DIR/ready" >> "$GITHUB_ENV"
@@ -301,16 +325,24 @@ jobs:
                 "${{ inputs.validation_profile }}" == "phase3d_object" ]]; then
             grep -qx "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=$EXPECTED_AGENT_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
           fi
+          if [[ "${{ inputs.validation_profile }}" == "phase5b_voice" ]]; then
+            grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_P4HOME_SR_ENABLE=y" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_P4HOME_PHASE5B_VALIDATION=y" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED=y" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK=12288" "$HARDWARE_SDKCONFIG"
+            grep -qx "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set" "$HARDWARE_SDKCONFIG"
+          fi
           test "$(shasum -a 256 firmware/dependencies.lock | awk '{print $1}')" = "$DEPENDENCY_LOCK_SHA256_BEFORE"
 
       - name: Set up Node for Agent harness
-        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase4c_ha'
+        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase4c_ha' || inputs.validation_profile == 'phase5b_voice'
         uses: actions/setup-node@v4
         with:
           node-version: 24.19.0
 
       - name: Start Agent Runtime harness
-        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object'
+        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase5b_voice'
         shell: zsh {0}
         working-directory: agent
         run: |
@@ -331,8 +363,14 @@ jobs:
           export P4HOME_HARNESS_READY_FILE="$AGENT_HARNESS_READY_FILE"
           export P4HOME_HARNESS_RESULT_FILE="$AGENT_HARNESS_RESULT_FILE"
           export P4HOME_HARNESS_STATUS_FILE="$AGENT_HARNESS_STATUS_FILE"
+          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
+            HARNESS_ENTRYPOINT=apps/device-harness/src/voice-cli.ts
+          else
+            HARNESS_ENTRYPOINT=apps/device-harness/src/cli.ts
+          fi
+          export HARNESS_ENTRYPOINT
           nohup zsh -c '
-            node --import tsx apps/device-harness/src/cli.ts
+            node --import tsx "$HARNESS_ENTRYPOINT"
             exit_code=$?
             echo "$exit_code" > "$P4HOME_HARNESS_STATUS_FILE"
           ' > "$AGENT_HARNESS_LOG" 2>&1 &
@@ -458,6 +496,14 @@ jobs:
           if [[ "$VALIDATION_PROFILE" == "phase5a_voice" ]]; then
             exit 0
           fi
+          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
+            for attempt in {1..300}; do
+              if [[ -s "$AGENT_HARNESS_STATUS_FILE" ]]; then
+                break
+              fi
+              sleep 0.1
+            done
+          fi
           if [[ "$VALIDATION_PROFILE" == "phase4c_ha" && -s "$PHASE4C_OFFLINE_LOG" ]]; then
             printf '\n$ phase4c-robot-gate p4_application=offline\n' >> "$PHASE4C_RAW_MONITOR_LOG"
             tee -a "$PHASE4C_RAW_MONITOR_LOG" < "$PHASE4C_OFFLINE_LOG" > /dev/null
@@ -525,6 +571,9 @@ jobs:
           agent_transport_disabled_line = "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set"
           phase4c_validation_prefix = "CONFIG_P4HOME_PHASE4C_VALIDATION="
           phase5a_validation_prefix = "CONFIG_P4HOME_PHASE5A_VALIDATION="
+          phase5b_validation_prefix = "CONFIG_P4HOME_PHASE5B_VALIDATION="
+          voice_transport_enabled_prefix = "CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED="
+          voice_transport_stack_prefix = "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK="
           sr_enable_prefix = "CONFIG_P4HOME_SR_ENABLE="
           audio_selftest_prefix = "CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST="
           main_stack_size = None
@@ -536,6 +585,10 @@ jobs:
           phase5a_sr_enabled = False
           phase5a_audio_selftest_enabled = False
           phase5a_agent_transport_disabled = False
+          phase5b_validation_enabled = False
+          phase5b_voice_transport_enabled = False
+          phase5b_voice_transport_stack_size = None
+          phase5b_agent_transport_disabled = False
           phase4c_post_robot_p4_standalone = False
           phase4c_post_robot_ui_8fps = False
           monitor_path = pathlib.Path("firmware/monitor.log")
@@ -583,6 +636,18 @@ jobs:
                       phase5a_validation_enabled = (
                           line.removeprefix(phase5a_validation_prefix) == "y"
                       )
+                  elif line.startswith(phase5b_validation_prefix):
+                      phase5b_validation_enabled = (
+                          line.removeprefix(phase5b_validation_prefix) == "y"
+                      )
+                  elif line.startswith(voice_transport_enabled_prefix):
+                      phase5b_voice_transport_enabled = (
+                          line.removeprefix(voice_transport_enabled_prefix) == "y"
+                      )
+                  elif line.startswith(voice_transport_stack_prefix):
+                      phase5b_voice_transport_stack_size = int(
+                          line.removeprefix(voice_transport_stack_prefix)
+                      )
                   elif line.startswith(sr_enable_prefix):
                       phase5a_sr_enabled = line.removeprefix(sr_enable_prefix) == "y"
                   elif line.startswith(audio_selftest_prefix):
@@ -595,6 +660,9 @@ jobs:
               )
               phase5a_agent_transport_disabled = (
                   profile == "phase5a_voice" and agent_transport_disabled
+              )
+              phase5b_agent_transport_disabled = (
+                  profile == "phase5b_voice" and agent_transport_disabled
               )
           manifest = {
               "schema_version": 1,
@@ -623,6 +691,10 @@ jobs:
               "phase5a_sr_enabled": phase5a_sr_enabled,
               "phase5a_audio_selftest_enabled": phase5a_audio_selftest_enabled,
               "phase5a_agent_transport_disabled": phase5a_agent_transport_disabled,
+              "phase5b_validation_enabled": phase5b_validation_enabled,
+              "phase5b_voice_transport_enabled": phase5b_voice_transport_enabled,
+              "phase5b_voice_transport_task_stack_size_bytes": phase5b_voice_transport_stack_size,
+              "phase5b_agent_transport_disabled": phase5b_agent_transport_disabled,
               "phase4c_agent_transport_disabled": phase4c_agent_transport_disabled,
               "phase4c_policy_binding_verified": (
                   binding_status_path.is_file()

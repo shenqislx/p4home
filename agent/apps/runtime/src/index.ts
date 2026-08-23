@@ -9,6 +9,7 @@ export * from "./deterministic-fake-device.ts";
 export * from "./device-action-adapter.ts";
 export * from "./device-protocol.ts";
 export * from "./device-websocket-server.ts";
+export * from "./voice-websocket-server.ts";
 export * from "./model-config.ts";
 export * from "./role-contracts.ts";
 export * from "./role-audit.ts";

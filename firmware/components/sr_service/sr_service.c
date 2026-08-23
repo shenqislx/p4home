@@ -12,6 +12,7 @@
 #include "esp_afe_sr_models.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 #include "esp_mn_models.h"
@@ -63,6 +64,8 @@ static model_iface_data_t *s_command_model_data;
 static char s_command_model_name[MODEL_NAME_MAX_LENGTH];
 static TickType_t s_wake_detected_deadline;
 static TickType_t s_awake_deadline;
+static sr_service_capture_listener_t s_capture_listener;
+static bool s_capture_active;
 
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -171,6 +174,14 @@ static void sr_service_finish_command_window(const char *outcome,
                                              const char *status_text,
                                              const char *reason)
 {
+    if (s_capture_active) {
+        s_capture_active = false;
+        if (s_capture_listener.end_capture != NULL) {
+            s_capture_listener.end_capture(s_capture_listener.context,
+                                           reason != NULL ? reason : "command window ended",
+                                           (uint64_t)esp_timer_get_time());
+        }
+    }
     SR_STATUS_MUTATE(s_status.status_text = status_text;);
     sr_service_log_command_window(outcome);
     sr_service_set_wakenet_enabled(true, reason);
@@ -617,6 +628,10 @@ static void sr_service_runtime_task(void *parameter)
                 s_status.command_window_afe_peak = 0;
             });
             sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_AWAKE, "wake detected hold elapsed");
+            if (s_capture_listener.begin_capture != NULL) {
+                s_capture_active = s_capture_listener.begin_capture(
+                    s_capture_listener.context, (uint64_t)esp_timer_get_time());
+            }
             if (s_command_iface != NULL && s_command_model_data != NULL &&
                 sr_status_command_set_ready_get()) {
                 s_command_iface->clean(s_command_model_data);
@@ -667,6 +682,15 @@ static void sr_service_runtime_task(void *parameter)
                      fetch_result->wake_word_index,
                      fetch_result->wakenet_model_index,
                      fetch_result->trigger_channel_id);
+        }
+
+        if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE && s_capture_active &&
+            s_capture_listener.offer_pcm != NULL && fetch_result->data != NULL &&
+            fetch_result->data_size > 0) {
+            s_capture_listener.offer_pcm(s_capture_listener.context,
+                                         fetch_result->data,
+                                         (size_t)fetch_result->data_size / sizeof(int16_t),
+                                         (uint64_t)esp_timer_get_time());
         }
 
         if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE &&
@@ -779,6 +803,14 @@ static void sr_service_runtime_task(void *parameter)
     }
 
 cleanup:
+    if (s_capture_active) {
+        s_capture_active = false;
+        if (s_capture_listener.end_capture != NULL) {
+            s_capture_listener.end_capture(s_capture_listener.context,
+                                           "sr runtime stopped",
+                                           (uint64_t)esp_timer_get_time());
+        }
+    }
     SR_STATUS_MUTATE({
         s_status.afe_runtime_ready = false;
         s_status.runtime_loop_started = false;
@@ -1021,6 +1053,19 @@ log_and_exit:
     }
 
     s_sr_initialized = true;
+    return ESP_OK;
+}
+
+esp_err_t sr_service_register_capture_listener(const sr_service_capture_listener_t *listener)
+{
+    if (listener == NULL || listener->begin_capture == NULL || listener->offer_pcm == NULL ||
+        listener->end_capture == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_sr_initialized || s_runtime_task != NULL || s_capture_listener.begin_capture != NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_capture_listener = *listener;
     return ESP_OK;
 }
 

@@ -9,4 +9,9 @@ config P4HOME_PHASE5A_VALIDATION
     default n
     depends on P4HOME_SR_ENABLE && P4HOME_AUDIO_STARTUP_SELFTEST
 
+config P4HOME_PHASE5B_VALIDATION
+    bool "Enable Phase 5B voice transport validation markers"
+    default n
+    depends on P4HOME_SR_ENABLE && P4HOME_VOICE_TRANSPORT_ENABLED
+
 endmenu

@@ -1,3 +1,3 @@
 idf_component_register(SRCS "board_support.c"
-                       REQUIRES agent_transport audio_service display_service esp_app_format gateway_service ha_client network_service panel_data_store settings_service sr_service time_service touch_service weather_service world_service
+                       REQUIRES agent_transport audio_service display_service esp_app_format gateway_service ha_client network_service panel_data_store settings_service sr_service time_service touch_service voice_transport weather_service world_service
                        INCLUDE_DIRS "include")

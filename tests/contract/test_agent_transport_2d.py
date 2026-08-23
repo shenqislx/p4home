@@ -141,7 +141,8 @@ class AgentTransportPhase2DContractTests(unittest.TestCase):
         workflow = HARDWARE_WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn("shell: zsh {0}\n        working-directory: agent", workflow)
-        self.assertIn("node --import tsx apps/device-harness/src/cli.ts", workflow)
+        self.assertIn("HARNESS_ENTRYPOINT=apps/device-harness/src/cli.ts", workflow)
+        self.assertIn('node --import tsx "$HARNESS_ENTRYPOINT"', workflow)
         self.assertNotIn("node --import tsx agent/apps/device-harness", workflow)
         self.assertIn("exit_code=$?", workflow)
         self.assertNotIn("status=$?", workflow)

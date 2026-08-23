@@ -1,0 +1,36 @@
+menu "P4Home Voice Transport"
+
+config P4HOME_VOICE_TRANSPORT_ENABLED
+    bool "Enable independent Voice Protocol WebSocket transport"
+    depends on P4HOME_SR_ENABLE
+    default n
+
+config P4HOME_VOICE_TRANSPORT_URI
+    string "Agent Voice WebSocket URI"
+    default ""
+    depends on P4HOME_VOICE_TRANSPORT_ENABLED
+    help
+        Must be a wss:// URI ending in /v1/voice.
+
+config P4HOME_VOICE_DEVICE_ID
+    string "Paired P4 device id reused by Voice transport"
+    default ""
+    depends on P4HOME_VOICE_TRANSPORT_ENABLED
+
+config P4HOME_VOICE_DEVICE_TOKEN
+    string "Paired P4 device token reused by Voice transport"
+    default ""
+    depends on P4HOME_VOICE_TRANSPORT_ENABLED
+
+config P4HOME_VOICE_SPKI_SHA256
+    string "Voice TLS SPKI SHA-256 pin"
+    default ""
+    depends on P4HOME_VOICE_TRANSPORT_ENABLED
+
+config P4HOME_VOICE_TRANSPORT_TASK_STACK
+    int "Voice transport worker stack bytes"
+    range 8192 16384
+    default 12288
+    depends on P4HOME_VOICE_TRANSPORT_ENABLED
+
+endmenu

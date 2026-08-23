@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -11,6 +12,15 @@ typedef enum {
     SR_SERVICE_VOICE_STATE_WAKE_DETECTED,
     SR_SERVICE_VOICE_STATE_AWAKE,
 } sr_service_voice_state_t;
+
+typedef struct {
+    void *context;
+    /* Callbacks run on the SR task and must never block. */
+    bool (*begin_capture)(void *context, uint64_t started_at_us);
+    void (*offer_pcm)(void *context, const int16_t *samples, size_t sample_count,
+                      uint64_t captured_at_us);
+    void (*end_capture)(void *context, const char *reason, uint64_t ended_at_us);
+} sr_service_capture_listener_t;
 
 typedef struct {
     bool dependency_declared;
@@ -57,6 +67,7 @@ typedef struct {
 } sr_service_status_t;
 
 esp_err_t sr_service_init(void);
+esp_err_t sr_service_register_capture_listener(const sr_service_capture_listener_t *listener);
 bool sr_service_dependency_declared(void);
 bool sr_service_models_available(void);
 uint32_t sr_service_model_count(void);

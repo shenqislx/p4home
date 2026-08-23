@@ -20,6 +20,7 @@
 #include "sr_service.h"
 #include "time_service.h"
 #include "touch_service.h"
+#include "voice_transport.h"
 #include "weather_service.h"
 #include "world_service.h"
 
@@ -220,9 +221,21 @@ esp_err_t board_support_init(void)
 #endif
 
 #if CONFIG_P4HOME_SR_ENABLE
+    esp_err_t voice_ret = voice_transport_init(NULL);
+    if (voice_ret != ESP_OK) {
+        ESP_LOGW(TAG, "voice transport init failed: %s", esp_err_to_name(voice_ret));
+    }
     esp_err_t sr_ret = sr_service_init();
     if (sr_ret != ESP_OK) {
         ESP_LOGW(TAG, "sr service init failed: %s", esp_err_to_name(sr_ret));
+    }
+    if (voice_ret == ESP_OK && sr_ret == ESP_OK) {
+        voice_ret = voice_transport_start();
+        if (voice_ret != ESP_OK) {
+            ESP_LOGW(TAG, "voice transport start failed: %s", esp_err_to_name(voice_ret));
+        }
+    } else if (voice_ret == ESP_OK) {
+        ESP_LOGW(TAG, "voice transport not started because SR service is unavailable");
     }
 #else
     ESP_LOGW(TAG, "sr service skipped by config");
