@@ -319,18 +319,22 @@ export class VoicePlaybackSender {
       this.#offset += payloadBytes;
       this.#frames++;
       this.#sequence++;
-      if (eos) {
-        const eosControl = validateVoiceControlMessage({
-          ...base(this.#identity),
-          type: "session.eos",
-          final_sequence: header.sequence,
-          reason: "source_complete",
-        });
-        this.#flow.acceptControl(eosControl);
-        this.#wire.sendControl(eosControl);
-        break;
-      }
+      if (eos) break;
     }
+    this.#sendEosWhenPriorFramesAreAcknowledged();
+  }
+
+  #sendEosWhenPriorFramesAreAcknowledged(): void {
+    if (this.#flow.state !== "ready" || this.#offset !== this.#pcm.byteLength
+        || this.#flow.outstandingFrames > 1) return;
+    const eosControl = validateVoiceControlMessage({
+      ...base(this.#identity),
+      type: "session.eos",
+      final_sequence: this.#sequence - 1,
+      reason: "source_complete",
+    });
+    this.#flow.acceptControl(eosControl);
+    this.#wire.sendControl(eosControl);
   }
 
   #settle(status: VoicePlaybackSummary["status"], droppedFrames: number): void {

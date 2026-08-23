@@ -157,6 +157,47 @@ test("playback sender opens, obeys credit, emits exact EOS PCM and waits for ter
   assert.equal(playback.retained_pcm_bytes, 0);
 });
 
+test("playback sender accepts in-flight credits before emitting EOS control", async () => {
+  const wire = new FakeWire();
+  const playback = sender(new Uint8Array(6_400), wire);
+  const pending = playback.start();
+
+  playback.handleControl(control("session.ready", { initial_credit_frames: 8 }));
+  assert.equal(wire.binaries.length, 8);
+  playback.handleControl(control("credit", { ack_sequence: 0, grant_frames: 1 }));
+  playback.handleControl(control("credit", { ack_sequence: 1, grant_frames: 1 }));
+  assert.equal(wire.binaries.length, 10);
+  assert.equal(decodeVoiceFrame(wire.binaries.at(-1)!).header.flags, VOICE_FLAG_END_OF_STREAM);
+  assert.equal(wire.controls.some((message) => message.type === "session.eos"), false);
+
+  for (let sequence = 2; sequence <= 8; sequence++) {
+    playback.handleControl(control("credit", { ack_sequence: sequence, grant_frames: 1 }));
+  }
+  assert.equal(wire.controls.at(-1)?.type, "session.eos");
+  assert.equal(wire.controls.at(-1)?.final_sequence, 9);
+
+  playback.handleControl(control("session.closed", { status: "completed", dropped_frames: 0 }));
+  assert.equal((await pending).status, "completed");
+});
+
+test("playback sender emits EOS control when a cumulative credit acknowledges the EOS frame", async () => {
+  const wire = new FakeWire();
+  const playback = sender(new Uint8Array(6_400), wire);
+  const pending = playback.start();
+
+  playback.handleControl(control("session.ready", { initial_credit_frames: 8 }));
+  playback.handleControl(control("credit", { ack_sequence: 0, grant_frames: 1 }));
+  playback.handleControl(control("credit", { ack_sequence: 1, grant_frames: 1 }));
+  assert.equal(wire.controls.some((message) => message.type === "session.eos"), false);
+
+  playback.handleControl(control("credit", { ack_sequence: 9, grant_frames: 1 }));
+  assert.equal(wire.controls.at(-1)?.type, "session.eos");
+  assert.equal(wire.controls.at(-1)?.final_sequence, 9);
+
+  playback.handleControl(control("session.closed", { status: "completed", dropped_frames: 0 }));
+  assert.equal((await pending).status, "completed");
+});
+
 test("P4 barge-in terminal stops further frames and preserves cancelled truth", async () => {
   const wire = new FakeWire();
   const playback = sender(new Uint8Array(1_920), wire);
