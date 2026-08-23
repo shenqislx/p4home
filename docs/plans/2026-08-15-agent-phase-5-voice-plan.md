@@ -2,7 +2,7 @@
 
 > Status: `in_progress`
 > Started: 2026-08-23
-> Current Gate: 5B 二进制 Voice 通道技术门禁通过；P4 可听播放人工观察待补，当前进入 5C STT/统一 Router
+> Current Gate: 5C STT/统一 Role Runtime 技术门禁通过；P4 可听播放人工观察待补，当前进入 5D TTS/播放/barge-in
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用
 
@@ -84,14 +84,19 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
 
 只有 5B review 通过后开始：
 
-- [ ] 以独立固定 Python 3.11/3.12 环境或容器接入版本锁定的 STT Provider，不复用 ESP-IDF Python；
-- [ ] 定义 VAD end-of-speech、最短/最长 utterance、静音、噪声、STT timeout、空 transcript、语言和
+- [x] 以独立固定 Python 3.11/3.12 环境或容器接入版本锁定的 STT Provider，不复用 ESP-IDF Python；
+- [x] 定义 VAD end-of-speech、最短/最长 utterance、静音、噪声、STT timeout、空 transcript、语言和
   provider error 的确定性状态与指标；
-- [ ] 只有活动 session 的 final transcript 可创建 Voice Interaction；partial transcript 只用于 UI，
+- [x] 只有活动 session 的 final transcript 可创建 Voice Interaction；partial transcript 只用于 UI，
   不进入 Router、SQLite role history 或 Tool Runtime；
-- [ ] final transcript 原样进入 Phase 4 统一 Router/Orchestrator，继续执行 UTF-16 span、Human/Robot
+- [x] final transcript 原样进入 Phase 4 统一 Router/Orchestrator，继续执行 UTF-16 span、Human/Robot
   会话隔离、Robot policy 和确定性 Composer；Cat 不获得 transcript；
-- [ ] 分别评测 wake/VAD、STT、Router span、Human、Robot ToolCall/policy 和 Composer，不生成综合分。
+- [x] 分别评测 wake/VAD、STT、Router span、Human、Robot ToolCall/policy 和 Composer，不生成综合分。
+
+证据：[Phase 5C STT & Unified Role Runtime](../../evidence/agent-phase-5/phase-5c-stt-unified-runtime.md)。
+最终 run `32635742553` 证明 Mac 扬声器输入的现场中文经真实 P4 PCM/VAD/固定 MLX STT 后，只通过
+统一 Human Runtime 创建审计完整的 Run；预期 transcript 哈希匹配、Cat history 为 0、原始音频未
+保留。54 条 UI PASS 与 HA 冷启动 burst 的 1 条瞬态 FAIL 分开披露，480 秒内只有预期烧录后上电。
 
 退出门禁：预录和现场语音只能通过统一文本入口创建审计完整的 Human/Robot Run；空白、迟到、重复
 或错误 session transcript 零执行；STT 离线不生成猜测性文本或 ToolCall。

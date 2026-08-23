@@ -763,7 +763,9 @@ Human 回应情绪片段、Robot 处理命令片段，权限和执行结果不�
 二进制通道、5C STT/统一 Router、5D 分角色 TTS 与 barge-in、5E 安全/评测/实机总门禁。5A 的
 Voice Protocol v1、自动化硬件、真实 wake 与固定命令动作门禁已通过；5B 最终 run `32627837273`
 证明真实 P4 PCM 有界抵达 Agent fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 review
-后技术门禁关闭。P4 可听 startup tone 人工观察待补；当前进入 5C，尚未打开默认 SR 或接入真实 TTS。
+后技术门禁关闭。5C 最终 run `32635742553` 已证明真实 P4 中文输入经固定 MLX STT 后只进入统一
+Human Runtime，transcript 哈希、SQLite 审计、Cat 零泄漏和原始音频不保留均满足门禁。P4 可听
+startup tone 人工观察待补；当前进入 5D 分角色 TTS、播放与 barge-in，尚未打开默认 SR。
 
 ### Phase 6 — Memory
 
