@@ -59,12 +59,18 @@ importers:
       '@p4home/provider-stt':
         specifier: workspace:*
         version: link:../../packages/provider-stt
+      '@p4home/provider-tts':
+        specifier: workspace:*
+        version: link:../../packages/provider-tts
       '@p4home/runtime':
         specifier: workspace:*
         version: link:../runtime
       '@p4home/storage-sqlite':
         specifier: workspace:*
         version: link:../../packages/storage-sqlite
+      '@p4home/transport-ha':
+        specifier: workspace:*
+        version: link:../../packages/transport-ha
 
   apps/eval-cli:
     dependencies:

@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Fail closed if Phase 5E upload candidates contain credentials or raw audio."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import re
+import sqlite3
+
+BASE64_CANDIDATE = re.compile(rb"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{256,}={0,2}(?![A-Za-z0-9+/=])")
+RAW_FIELD = re.compile(
+    rb'''(?ix)["']?(?:raw[_-]?audio|pcm[_-]?(?:base64|data|blob|path)|audio[_-]?(?:base64|data|blob|path))["']?\s*[:=]'''
+)
+RESULT_KEYS = {
+    "schema_version", "profile", "passed", "interactions", "stt_provider_version",
+    "stt_model_revision", "stt_calls", "stt_transcript_mismatches", "stt_total_ms",
+    "tts_provider_version", "tts_model_revision", "tts_calls", "tts_total_ms",
+    "audit_events", "restored", "read_passed", "write_passed", "barge_in_passed",
+    "followup_passed", "composition_audits_persisted", "playback_segments",
+    "playback_bytes", "raw_audio_retained",
+}
+INTERACTION_KEYS = {
+    "kind", "role_id", "role_status", "voice_outcome", "playback_statuses", "pcm_bytes",
+}
+
+
+def read_secret(path: pathlib.Path) -> bytes:
+    return path.read_bytes().strip()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--artifact", action="append", required=True, type=pathlib.Path)
+    parser.add_argument("--secret-file", action="append", required=True, type=pathlib.Path)
+    parser.add_argument("--audit-db", required=True, type=pathlib.Path)
+    parser.add_argument("--result", required=True, type=pathlib.Path)
+    parser.add_argument("--status-file", required=True, type=pathlib.Path)
+    args = parser.parse_args()
+    reasons: set[str] = set()
+    secrets = [secret for path in args.secret_file if (secret := read_secret(path))]
+    for artifact in args.artifact:
+        data = artifact.read_bytes()
+        if any(secret in data for secret in secrets):
+            reasons.add("secret_leak")
+        try:
+            data.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            reasons.add("non_utf8_artifact")
+        if b"\x00" in data or any(byte < 32 and byte not in (9, 10, 13, 27) for byte in data):
+            reasons.add("binary_artifact")
+        if RAW_FIELD.search(data):
+            reasons.add("raw_audio_field")
+        if BASE64_CANDIDATE.search(data):
+            reasons.add("long_base64")
+    result = json.loads(args.result.read_text(encoding="utf-8"))
+    if not isinstance(result, dict) or set(result) != RESULT_KEYS:
+        reasons.add("result_schema")
+    interactions = result.get("interactions") if isinstance(result, dict) else None
+    if (not isinstance(interactions, list) or len(interactions) != 4
+            or any(not isinstance(item, dict) or set(item) != INTERACTION_KEYS for item in interactions)):
+        reasons.add("interaction_schema")
+    if not isinstance(result, dict) or result.get("raw_audio_retained") is not False:
+        reasons.add("retention_claim")
+    with sqlite3.connect(f"file:{args.audit_db}?mode=ro", uri=True) as connection:
+        tables = [row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )]
+        for table in tables:
+            if not isinstance(table, str) or not table.replace("_", "").isalnum():
+                reasons.add("sqlite_shape")
+                continue
+            columns = list(connection.execute(f'PRAGMA table_info("{table}")'))
+            names = [str(row[1]).lower() for row in columns]
+            normalized_names = [re.sub(r"[^a-z0-9]", "", name) for name in names]
+            if any("audio" in name or "pcm" in name for name in normalized_names):
+                reasons.add("raw_audio_column")
+            blob_columns = [str(row[1]) for row in columns if "BLOB" in str(row[2]).upper()]
+            for column in blob_columns:
+                count = connection.execute(
+                    f'SELECT COUNT(*) FROM "{table}" WHERE "{column}" IS NOT NULL'
+                ).fetchone()[0]
+                if count:
+                    reasons.add("sqlite_blob")
+            text_columns = [str(row[1]) for row in columns if "TEXT" in str(row[2]).upper()]
+            for column in text_columns:
+                for (value,) in connection.execute(
+                    f'SELECT "{column}" FROM "{table}" WHERE "{column}" IS NOT NULL'
+                ):
+                    encoded = str(value).encode("utf-8")
+                    if RAW_FIELD.search(encoded) or BASE64_CANDIDATE.search(encoded):
+                        reasons.add("sqlite_raw_audio_value")
+    passed = not reasons
+    args.status_file.write_text("pass\n" if passed else "fail\n", encoding="ascii")
+    print(
+        "VERIFY:phase5e:artifact_audit:PASS secrets=absent raw_audio=absent"
+        if passed else f"VERIFY:phase5e:artifact_audit:FAIL reasons={','.join(sorted(reasons))}"
+    )
+    return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

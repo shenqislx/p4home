@@ -103,6 +103,35 @@ class Phase4CHaProfileTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse((directory / "entity").exists())
 
+    def test_agent_ha_only_keeps_binding_but_disables_firmware_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as value:
+            directory = Path(value)
+            sdkconfig = directory / "sdkconfig"
+            sdkconfig.write_text("CONFIG_EXAMPLE=y\n", encoding="utf-8")
+            policy = directory / "policy.json"
+            policy.write_text(json.dumps({"entities": [{
+                "alias": "study_ceiling_light",
+                "entity_id": "switch.private_fixture",
+                "domain": "switch",
+                "read": True,
+                "write_actions": ["turn_on", "turn_off"],
+            }]}), encoding="utf-8")
+            panel = directory / "panel.json"
+            panel.write_text(json.dumps({"entities": [{
+                "entity_id": "switch.private_fixture", "kind": "binary"
+            }]}), encoding="utf-8")
+            result = subprocess.run([
+                sys.executable, str(PREPARE), "--sdkconfig", str(sdkconfig),
+                "--policy", str(policy), "--panel-entities", str(panel),
+                "--entity-output", str(directory / "entity"),
+                "--binding-output", str(directory / "binding"), "--agent-ha-only",
+            ], check=False, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            text = sdkconfig.read_text(encoding="utf-8")
+            self.assertIn("# CONFIG_P4HOME_PHASE4C_VALIDATION is not set", text)
+            self.assertNotIn("CONFIG_P4HOME_PHASE4C_VALIDATION_ENTITY_ID", text)
+            self.assertEqual((directory / "entity").read_text().strip(), "switch.private_fixture")
+
     def test_serial_sanitizer_is_exact_length_and_marks_success(self) -> None:
         with tempfile.TemporaryDirectory() as value:
             directory = Path(value)

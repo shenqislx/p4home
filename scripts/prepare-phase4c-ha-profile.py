@@ -17,6 +17,7 @@ def prepare_profile(
     entity_path: Path,
     binding_path: Path,
     alias: str,
+    firmware_validation: bool = True,
 ) -> None:
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
     entities = policy.get("entities") if isinstance(policy, dict) else None
@@ -57,11 +58,16 @@ def prepare_profile(
     ]
     lines.extend(
         [
-            "CONFIG_P4HOME_PHASE4C_VALIDATION=y",
-            f'CONFIG_P4HOME_PHASE4C_VALIDATION_ENTITY_ID="{entity_id}"',
+            (
+                "CONFIG_P4HOME_PHASE4C_VALIDATION=y"
+                if firmware_validation
+                else "# CONFIG_P4HOME_PHASE4C_VALIDATION is not set"
+            ),
             "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set",
         ]
     )
+    if firmware_validation:
+        lines.append(f'CONFIG_P4HOME_PHASE4C_VALIDATION_ENTITY_ID="{entity_id}"')
     sdkconfig_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     sdkconfig_path.chmod(0o600)
     entity_path.write_text(f"{entity_id}\n", encoding="utf-8")
@@ -78,6 +84,7 @@ def main() -> None:
     parser.add_argument("--entity-output", required=True, type=Path)
     parser.add_argument("--binding-output", required=True, type=Path)
     parser.add_argument("--alias", default="study_ceiling_light")
+    parser.add_argument("--agent-ha-only", action="store_true")
     args = parser.parse_args()
     prepare_profile(
         args.sdkconfig,
@@ -86,6 +93,7 @@ def main() -> None:
         args.entity_output,
         args.binding_output,
         args.alias,
+        not args.agent_ha_only,
     )
 
 
