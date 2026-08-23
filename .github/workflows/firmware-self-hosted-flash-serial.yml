@@ -364,6 +364,11 @@ jobs:
           test -n "$PNPM_BIN"
           test "$("$PNPM_BIN" --version)" = "11.19.0"
           "$PNPM_BIN" install --frozen-lockfile
+          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
+            # The Voice harness is launched after flashing so its bounded
+            # capture deadline measures device runtime, not flash time.
+            exit 0
+          fi
           export P4HOME_AGENT_DEVICE_ID="$AGENT_DEVICE_ID"
           export P4HOME_AGENT_DEVICE_TOKEN_FILE="$AGENT_TMP_DIR/device-token"
           export P4HOME_AGENT_TLS_KEY_FILE="$AGENT_TMP_DIR/agent-key.pem"
@@ -373,11 +378,7 @@ jobs:
           export P4HOME_HARNESS_READY_FILE="$AGENT_HARNESS_READY_FILE"
           export P4HOME_HARNESS_RESULT_FILE="$AGENT_HARNESS_RESULT_FILE"
           export P4HOME_HARNESS_STATUS_FILE="$AGENT_HARNESS_STATUS_FILE"
-          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
-            HARNESS_ENTRYPOINT=apps/device-harness/src/voice-cli.ts
-          else
-            HARNESS_ENTRYPOINT=apps/device-harness/src/cli.ts
-          fi
+          HARNESS_ENTRYPOINT=apps/device-harness/src/cli.ts
           export HARNESS_ENTRYPOINT
           nohup zsh -c '
             node --import tsx "$HARNESS_ENTRYPOINT"
@@ -453,6 +454,37 @@ jobs:
             -D SDKCONFIG="$HARDWARE_SDKCONFIG" \
             -p "$SERIAL_PORT" \
             flash > "$monitor_log" 2>&1
+          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
+            (
+              cd agent
+              export P4HOME_AGENT_DEVICE_ID="$AGENT_DEVICE_ID"
+              export P4HOME_AGENT_DEVICE_TOKEN_FILE="$AGENT_TMP_DIR/device-token"
+              export P4HOME_AGENT_TLS_KEY_FILE="$AGENT_TMP_DIR/agent-key.pem"
+              export P4HOME_AGENT_TLS_CERT_FILE="$AGENT_TMP_DIR/agent-cert.pem"
+              export P4HOME_AGENT_PORT="$AGENT_PORT"
+              export P4HOME_HARDWARE_PROFILE="$VALIDATION_PROFILE"
+              export P4HOME_HARNESS_READY_FILE="$AGENT_HARNESS_READY_FILE"
+              export P4HOME_HARNESS_RESULT_FILE="$AGENT_HARNESS_RESULT_FILE"
+              export P4HOME_HARNESS_STATUS_FILE="$AGENT_HARNESS_STATUS_FILE"
+              nohup zsh -c '
+                node --import tsx apps/device-harness/src/voice-cli.ts
+                exit_code=$?
+                echo "$exit_code" > "$P4HOME_HARNESS_STATUS_FILE"
+              ' > "$AGENT_HARNESS_LOG" 2>&1 &
+              echo "$!" > "$AGENT_TMP_DIR/pid"
+            )
+            for attempt in {1..300}; do
+              if [[ -s "$AGENT_HARNESS_READY_FILE" ]]; then
+                break
+              fi
+              if [[ -s "$AGENT_HARNESS_STATUS_FILE" ]]; then
+                tail -n 50 "$AGENT_HARNESS_LOG"
+                exit 1
+              fi
+              sleep 0.1
+            done
+            test -s "$AGENT_HARNESS_READY_FILE"
+          fi
           if [[ "$VALIDATION_PROFILE" == "phase4c_ha" ]]; then
             python scripts/capture-esp-serial.py \
               --port "$SERIAL_PORT" \
