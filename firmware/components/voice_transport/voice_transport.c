@@ -41,6 +41,11 @@ static const char *TAG = "voice_transport";
 #define VOICE_TRANSPORT_EPOCH_TASK_STACK 4096U
 #define VOICE_TRANSPORT_NVS_NAMESPACE "p4voice"
 #define VOICE_TRANSPORT_NVS_EPOCH_END "epoch_end"
+#define VOICE_WS_OPCODE_CONTINUATION 0x0U
+#define VOICE_WS_OPCODE_TEXT 0x1U
+#define VOICE_WS_OPCODE_CLOSE 0x8U
+#define VOICE_WS_OPCODE_PING 0x9U
+#define VOICE_WS_OPCODE_PONG 0xAU
 
 #ifndef CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK
 #define CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK 12288
@@ -568,8 +573,13 @@ static void voice_ws_event(void *handler_args, esp_event_base_t base,
         voice_request_abort();
         break;
     case WEBSOCKET_EVENT_DATA:
-        if (data != NULL && (data->op_code == 0x1U || data->op_code == 0x0U)) {
+        if (data != NULL && (data->op_code == VOICE_WS_OPCODE_TEXT ||
+                             data->op_code == VOICE_WS_OPCODE_CONTINUATION)) {
             voice_handle_ws_data(data);
+        } else if (data != NULL && (data->op_code == VOICE_WS_OPCODE_CLOSE ||
+                                    data->op_code == VOICE_WS_OPCODE_PING ||
+                                    data->op_code == VOICE_WS_OPCODE_PONG)) {
+            /* esp_websocket_client owns RFC 6455 control-frame lifecycle. */
         } else if (data != NULL) {
             voice_metric_protocol_error();
             voice_request_reconnect();

@@ -77,6 +77,23 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
             ROOT / "agent/packages/contracts/src/voice-protocol.ts"
         ).read_text(encoding="utf-8"))
 
+    def test_websocket_control_frames_do_not_reconnect_the_voice_channel(self) -> None:
+        firmware = VOICE_SOURCE.read_text(encoding="utf-8")
+        event_handler = firmware[firmware.index("static void voice_ws_event("):
+                                 firmware.index("static bool voice_queue_frame(")]
+
+        for marker in (
+            "VOICE_WS_OPCODE_CLOSE",
+            "VOICE_WS_OPCODE_PING",
+            "VOICE_WS_OPCODE_PONG",
+            "esp_websocket_client owns RFC 6455 control-frame lifecycle",
+        ):
+            self.assertIn(marker, event_handler)
+        control_branch = event_handler[event_handler.index("VOICE_WS_OPCODE_CLOSE"):
+                                       event_handler.index("else if (data != NULL) {")]
+        self.assertNotIn("voice_request_reconnect", control_branch)
+        self.assertNotIn("voice_metric_protocol_error", control_branch)
+
     def test_sr_capture_registration_precedes_runtime_start(self) -> None:
         board = BOARD_SOURCE.read_text(encoding="utf-8")
         sr = SR_SOURCE.read_text(encoding="utf-8")
