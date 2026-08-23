@@ -47,7 +47,7 @@ class Phase5BVoiceProfileTest(unittest.TestCase):
                 "CONFIG_P4HOME_VOICE_TRANSPORT_TASK_STACK=12288",
                 "CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK=6144",
                 "CONFIG_P4HOME_VOICE_RECONNECT_TIMEOUT_MS=10000",
-                "CONFIG_P4HOME_HA_CLIENT_WS_TASK_STACK=6144",
+                "CONFIG_P4HOME_HA_CLIENT_WS_TASK_STACK=8192",
                 "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set",
                 'CONFIG_P4HOME_VOICE_TRANSPORT_URI="wss://192.0.2.10:8443/v1/voice"',
             ):
