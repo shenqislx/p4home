@@ -12,12 +12,14 @@
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_http_client.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "network_service.h"
@@ -25,6 +27,13 @@
 #include "time_service.h"
 
 static const char *TAG = "ha_client";
+
+#define HA_CLIENT_STOP_POLL_MS 250U
+#define HA_CLIENT_WORKER_STOP_WAIT_MS 7500U
+#define HA_CLIENT_REST_OPERATION_TIMEOUT_MS 1500
+#define HA_CLIENT_REST_REQUEST_DEADLINE_MS 5000U
+
+static bool ha_client_stop_requested(void);
 
 #define HA_CLIENT_READY_BIT         BIT0
 #define HA_CLIENT_AUTH_FAIL_BIT     BIT1
@@ -876,7 +885,7 @@ static esp_err_t ha_client_fetch_one_initial_state(const char *base_url, const c
     esp_http_client_config_t config = {
         .url = state_url,
         .method = HTTP_METHOD_GET,
-        .timeout_ms = 5000,
+        .timeout_ms = HA_CLIENT_REST_OPERATION_TIMEOUT_MS,
         .buffer_size = CONFIG_P4HOME_HA_CLIENT_BUFFER_SIZE,
         .crt_bundle_attach = use_tls && verify_tls ? esp_crt_bundle_attach : NULL,
         .skip_cert_common_name_check = use_tls && !verify_tls,
@@ -890,13 +899,33 @@ static esp_err_t ha_client_fetch_one_initial_state(const char *base_url, const c
     esp_http_client_set_header(client, "Authorization", auth_header);
     esp_http_client_set_header(client, "Content-Type", "application/json");
 
+    int64_t deadline_us = esp_timer_get_time() +
+                          ((int64_t)HA_CLIENT_REST_REQUEST_DEADLINE_MS * 1000LL);
+    if (ha_client_stop_requested()) {
+        esp_http_client_cleanup(client);
+        return ESP_ERR_INVALID_STATE;
+    }
+
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
         esp_http_client_cleanup(client);
         return err;
     }
 
+    if (ha_client_stop_requested() || esp_timer_get_time() >= deadline_us) {
+        err = ha_client_stop_requested() ? ESP_ERR_INVALID_STATE : ESP_ERR_TIMEOUT;
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return err;
+    }
+
     (void)esp_http_client_fetch_headers(client);
+    if (ha_client_stop_requested() || esp_timer_get_time() >= deadline_us) {
+        err = ha_client_stop_requested() ? ESP_ERR_INVALID_STATE : ESP_ERR_TIMEOUT;
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return err;
+    }
     int status = esp_http_client_get_status_code(client);
     if (status != 200) {
         ESP_LOGW(TAG, "HA initial state fetch status=%d entity=%s", status, entity_id);
@@ -914,6 +943,10 @@ static esp_err_t ha_client_fetch_one_initial_state(const char *base_url, const c
 
     int total = 0;
     while (total < CONFIG_P4HOME_HA_CLIENT_MAX_EVENT_JSON_BYTES) {
+        if (ha_client_stop_requested() || esp_timer_get_time() >= deadline_us) {
+            err = ha_client_stop_requested() ? ESP_ERR_INVALID_STATE : ESP_ERR_TIMEOUT;
+            break;
+        }
         int read_len = esp_http_client_read(client, body + total,
                                            CONFIG_P4HOME_HA_CLIENT_MAX_EVENT_JSON_BYTES - total);
         if (read_len < 0) {
@@ -924,6 +957,10 @@ static esp_err_t ha_client_fetch_one_initial_state(const char *base_url, const c
             break;
         }
         total += read_len;
+    }
+
+    if (err == ESP_OK && esp_timer_get_time() >= deadline_us) {
+        err = ESP_ERR_TIMEOUT;
     }
 
     if (err == ESP_OK && total > 0) {
@@ -1033,6 +1070,36 @@ static uint32_t ha_client_apply_jitter(uint32_t base_ms)
     return base_ms - span + rnd;
 }
 
+static bool ha_client_stop_requested(void)
+{
+    EventBits_t bits = xEventGroupGetBits(s_ctx.event_group);
+    return s_ctx.stop_requested || (bits & HA_CLIENT_STOP_BIT) != 0U;
+}
+
+static esp_err_t ha_client_wait_network_interruptible(uint32_t timeout_ms)
+{
+    uint32_t remaining_ms = timeout_ms;
+    do {
+        if (ha_client_stop_requested()) return ESP_ERR_INVALID_STATE;
+        uint32_t wait_ms = remaining_ms < HA_CLIENT_STOP_POLL_MS ? remaining_ms : HA_CLIENT_STOP_POLL_MS;
+        if (network_service_wait_connected(wait_ms) == ESP_OK) return ESP_OK;
+        remaining_ms -= wait_ms;
+    } while (remaining_ms > 0U);
+    return ESP_ERR_TIMEOUT;
+}
+
+static esp_err_t ha_client_wait_time_interruptible(uint32_t timeout_ms)
+{
+    uint32_t remaining_ms = timeout_ms;
+    do {
+        if (ha_client_stop_requested()) return ESP_ERR_INVALID_STATE;
+        uint32_t wait_ms = remaining_ms < HA_CLIENT_STOP_POLL_MS ? remaining_ms : HA_CLIENT_STOP_POLL_MS;
+        if (time_service_wait_synced(wait_ms) == ESP_OK) return ESP_OK;
+        remaining_ms -= wait_ms;
+    } while (remaining_ms > 0U);
+    return ESP_ERR_TIMEOUT;
+}
+
 static void ha_client_worker(void *arg)
 {
     (void)arg;
@@ -1051,7 +1118,10 @@ static void ha_client_worker(void *arg)
         }
 
         if (first_dial && CONFIG_P4HOME_HA_CLIENT_START_DELAY_MS > 0) {
-            vTaskDelay(pdMS_TO_TICKS(CONFIG_P4HOME_HA_CLIENT_START_DELAY_MS));
+            EventBits_t stop_bits = xEventGroupWaitBits(
+                s_ctx.event_group, HA_CLIENT_STOP_BIT, pdFALSE, pdFALSE,
+                pdMS_TO_TICKS(CONFIG_P4HOME_HA_CLIENT_START_DELAY_MS));
+            if ((stop_bits & HA_CLIENT_STOP_BIT) != 0U || s_ctx.stop_requested) break;
         }
         first_dial = false;
 
@@ -1069,7 +1139,8 @@ static void ha_client_worker(void *arg)
             break;
         }
 
-        if (network_service_wait_connected(CONFIG_P4HOME_HA_CLIENT_NET_WAIT_MS) != ESP_OK) {
+        if (ha_client_wait_network_interruptible(CONFIG_P4HOME_HA_CLIENT_NET_WAIT_MS) != ESP_OK) {
+            if (ha_client_stop_requested()) break;
             taskENTER_CRITICAL(&s_ctx.lock);
             ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
             ha_client_set_error_locked("net_wait_timeout");
@@ -1080,7 +1151,8 @@ static void ha_client_worker(void *arg)
             ha_client_set_error_locked("url_parse_failed");
             taskEXIT_CRITICAL(&s_ctx.lock);
         } else if (strncmp(s_ctx.normalized_url, "wss://", 6) == 0 && verify_tls &&
-                   time_service_wait_synced(CONFIG_P4HOME_HA_CLIENT_TIME_WAIT_MS) != ESP_OK) {
+                   ha_client_wait_time_interruptible(CONFIG_P4HOME_HA_CLIENT_TIME_WAIT_MS) != ESP_OK) {
+            if (ha_client_stop_requested()) break;
             taskENTER_CRITICAL(&s_ctx.lock);
             ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
             ha_client_set_error_locked("time_wait_timeout");
@@ -1103,17 +1175,26 @@ static void ha_client_worker(void *arg)
             if (start_err == ESP_OK) {
                 EventBits_t bits = xEventGroupWaitBits(s_ctx.event_group,
                                                        HA_CLIENT_READY_BIT | HA_CLIENT_AUTH_FAIL_BIT |
-                                                           HA_CLIENT_FATAL_ERROR_BIT,
+                                                           HA_CLIENT_FATAL_ERROR_BIT | HA_CLIENT_STOP_BIT,
                                                        pdFALSE, pdFALSE,
                                                        pdMS_TO_TICKS(CONFIG_P4HOME_HA_CLIENT_HANDSHAKE_TIMEOUT_MS));
+                if ((bits & HA_CLIENT_STOP_BIT) != 0U || s_ctx.stop_requested) {
+                    ha_client_stop_socket();
+                    break;
+                }
                 if ((bits & HA_CLIENT_READY_BIT) != 0U) {
                     allow_one_shot_retry = false;
                     backoff_ms = CONFIG_P4HOME_HA_CLIENT_RECONNECT_BASE_MS;
                     EventBits_t sub_bits = xEventGroupWaitBits(s_ctx.event_group,
                                                                HA_CLIENT_SUB_READY_BIT |
-                                                                   HA_CLIENT_SUB_FAILED_BIT,
+                                                                   HA_CLIENT_SUB_FAILED_BIT |
+                                                                   HA_CLIENT_STOP_BIT,
                                                                pdFALSE, pdFALSE,
                                                                pdMS_TO_TICKS(CONFIG_P4HOME_HA_CLIENT_INITIAL_STATES_TIMEOUT_MS));
+                    if ((sub_bits & HA_CLIENT_STOP_BIT) != 0U || s_ctx.stop_requested) {
+                        ha_client_stop_socket();
+                        break;
+                    }
                     if ((sub_bits & HA_CLIENT_SUB_READY_BIT) != 0U) {
                         ha_client_fetch_initial_states(url, token, verify_tls);
                         while (!s_ctx.stop_requested) {
@@ -1126,7 +1207,10 @@ static void ha_client_worker(void *arg)
                             if (!connected) {
                                 break;
                             }
-                            vTaskDelay(pdMS_TO_TICKS(1000));
+                            EventBits_t stop_bits = xEventGroupWaitBits(
+                                s_ctx.event_group, HA_CLIENT_STOP_BIT, pdFALSE, pdFALSE,
+                                pdMS_TO_TICKS(1000));
+                            if ((stop_bits & HA_CLIENT_STOP_BIT) != 0U) break;
                         }
 
                         ha_client_stop_socket();
@@ -1172,7 +1256,10 @@ static void ha_client_worker(void *arg)
 
         if (allow_one_shot_retry) {
             allow_one_shot_retry = false;
-            vTaskDelay(pdMS_TO_TICKS(2000));
+            EventBits_t stop_bits = xEventGroupWaitBits(
+                s_ctx.event_group, HA_CLIENT_STOP_BIT, pdFALSE, pdFALSE,
+                pdMS_TO_TICKS(2000));
+            if ((stop_bits & HA_CLIENT_STOP_BIT) != 0U || s_ctx.stop_requested) break;
             continue;
         }
 
@@ -1181,7 +1268,10 @@ static void ha_client_worker(void *arg)
         taskEXIT_CRITICAL(&s_ctx.lock);
 
         uint32_t sleep_ms = ha_client_apply_jitter(backoff_ms);
-        vTaskDelay(pdMS_TO_TICKS(sleep_ms));
+        EventBits_t stop_bits = xEventGroupWaitBits(
+            s_ctx.event_group, HA_CLIENT_STOP_BIT, pdFALSE, pdFALSE,
+            pdMS_TO_TICKS(sleep_ms));
+        if ((stop_bits & HA_CLIENT_STOP_BIT) != 0U || s_ctx.stop_requested) break;
         if (backoff_ms < CONFIG_P4HOME_HA_CLIENT_RECONNECT_MAX_MS) {
             backoff_ms *= 2U;
             if (backoff_ms > CONFIG_P4HOME_HA_CLIENT_RECONNECT_MAX_MS) {
@@ -1193,12 +1283,27 @@ static void ha_client_worker(void *arg)
     ha_client_stop_socket();
     taskENTER_CRITICAL(&s_ctx.lock);
     s_ctx.running = false;
-    s_ctx.worker_task = NULL;
     if (s_ctx.state != HA_CLIENT_STATE_ERROR) {
         ha_client_set_state_locked(HA_CLIENT_STATE_IDLE);
     }
     taskEXIT_CRITICAL(&s_ctx.lock);
-    vTaskDelete(NULL);
+    for (;;) vTaskSuspend(NULL);
+}
+
+static esp_err_t ha_client_delete_worker_task(void)
+{
+    TaskHandle_t worker = s_ctx.worker_task;
+    if (worker == NULL) return ESP_OK;
+    for (uint32_t waited_ms = 0U; waited_ms < HA_CLIENT_WORKER_STOP_WAIT_MS;
+         waited_ms += 10U) {
+        if (eTaskGetState(worker) == eSuspended) {
+            vTaskDeleteWithCaps(worker);
+            s_ctx.worker_task = NULL;
+            return ESP_OK;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return ESP_ERR_TIMEOUT;
 }
 
 esp_err_t ha_client_init(void)
@@ -1224,6 +1329,7 @@ esp_err_t ha_client_start(void)
     if (s_ctx.running) {
         return ESP_OK;
     }
+    ESP_RETURN_ON_ERROR(ha_client_delete_worker_task(), TAG, "failed to reap previous HA worker task");
 
     char token[P4HOME_HA_TOKEN_MAX_LEN];
     settings_service_ha_get_token(token, sizeof(token));
@@ -1240,10 +1346,22 @@ esp_err_t ha_client_start(void)
     }
 
     s_ctx.stop_requested = false;
-    BaseType_t ok = xTaskCreate(ha_client_worker, "p4home_ha_ws", CONFIG_P4HOME_HA_CLIENT_WORKER_STACK, NULL,
-                                tskIDLE_PRIORITY + 4, &s_ctx.worker_task);
-    ESP_RETURN_ON_FALSE(ok == pdPASS, ESP_ERR_NO_MEM, TAG, "failed to create HA worker task");
+    xEventGroupClearBits(s_ctx.event_group, HA_CLIENT_STOP_BIT);
+    taskENTER_CRITICAL(&s_ctx.lock);
     s_ctx.running = true;
+    taskEXIT_CRITICAL(&s_ctx.lock);
+    BaseType_t ok = xTaskCreateWithCaps(
+        ha_client_worker, "p4home_ha_ws", CONFIG_P4HOME_HA_CLIENT_WORKER_STACK,
+        NULL, tskIDLE_PRIORITY + 4, &s_ctx.worker_task,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (ok != pdPASS) {
+        taskENTER_CRITICAL(&s_ctx.lock);
+        s_ctx.running = false;
+        s_ctx.worker_task = NULL;
+        taskEXIT_CRITICAL(&s_ctx.lock);
+        ESP_LOGE(TAG, "failed to create HA worker task");
+        return ESP_ERR_NO_MEM;
+    }
     return ESP_OK;
 }
 
@@ -1254,7 +1372,7 @@ esp_err_t ha_client_stop(void)
     }
     s_ctx.stop_requested = true;
     xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_STOP_BIT);
-    ha_client_stop_socket();
+    ESP_RETURN_ON_ERROR(ha_client_delete_worker_task(), TAG, "failed to stop HA worker task");
     taskENTER_CRITICAL(&s_ctx.lock);
     s_ctx.running = false;
     s_ctx.subscription_ready = false;

@@ -10,6 +10,7 @@ VOICE_SOURCE = ROOT / "firmware/components/voice_transport/voice_transport.c"
 VOICE_HEADER = ROOT / "firmware/components/voice_transport/include/voice_transport.h"
 VOICE_KCONFIG = ROOT / "firmware/components/voice_transport/Kconfig.projbuild"
 BOARD_SOURCE = ROOT / "firmware/components/board_support/board_support.c"
+HA_SOURCE = ROOT / "firmware/components/ha_client/ha_client.c"
 SR_SOURCE = ROOT / "firmware/components/sr_service/sr_service.c"
 RUNTIME_SOURCE = ROOT / "agent/apps/runtime/src/voice-websocket-server.ts"
 
@@ -82,6 +83,33 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         self.assertIn("sr_service_register_capture_listener", sr)
         self.assertIn("s_capture_listener.offer_pcm", sr)
         self.assertIn("s_capture_listener.end_capture", sr)
+
+    def test_phase5b_preserves_internal_dma_memory_for_ha_and_hosted_wifi(self) -> None:
+        firmware = VOICE_SOURCE.read_text(encoding="utf-8")
+        ha = HA_SOURCE.read_text(encoding="utf-8")
+        kconfig = VOICE_KCONFIG.read_text(encoding="utf-8")
+
+        self.assertIn("CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK 6144", firmware)
+        self.assertIn("default 6144", kconfig)
+        self.assertIn("xTaskCreateWithCaps(\n        ha_client_worker", ha)
+        self.assertIn("MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT", ha)
+        self.assertIn("vTaskDeleteWithCaps(worker)", ha)
+        self.assertIn("eTaskGetState(worker) == eSuspended", ha)
+        self.assertIn("HA_CLIENT_READY_BIT | HA_CLIENT_AUTH_FAIL_BIT |\n                                                           HA_CLIENT_FATAL_ERROR_BIT | HA_CLIENT_STOP_BIT", ha)
+        self.assertIn("HA_CLIENT_SUB_FAILED_BIT |\n                                                                   HA_CLIENT_STOP_BIT", ha)
+        self.assertIn("HA_CLIENT_REST_OPERATION_TIMEOUT_MS 1500", ha)
+        self.assertIn("HA_CLIENT_REST_REQUEST_DEADLINE_MS 5000U", ha)
+        self.assertIn("esp_timer_get_time() >= deadline_us", ha)
+        stop = ha[ha.index("esp_err_t ha_client_stop(void)"):
+                  ha.index("esp_err_t ha_client_restart(void)")]
+        self.assertNotIn("ha_client_stop_socket()", stop)
+        start = ha[ha.index("esp_err_t ha_client_start(void)"):
+                   ha.index("esp_err_t ha_client_stop(void)")]
+        self.assertLess(start.index("s_ctx.running = true"), start.index("xTaskCreateWithCaps("))
+        self.assertIn("ha_client_delete_worker_task()", start)
+        worker = ha[ha.index("static void ha_client_worker("):
+                    ha.index("static esp_err_t ha_client_delete_worker_task(")]
+        self.assertNotIn("nvs_", worker)
 
     def test_defaults_remain_disabled_and_diagnostics_are_aggregate_only(self) -> None:
         defaults = (ROOT / "firmware/sdkconfig.defaults").read_text(encoding="utf-8")
