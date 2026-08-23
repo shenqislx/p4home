@@ -74,6 +74,12 @@ static playback_receiver_state_t s_playback = {
     .lock = portMUX_INITIALIZER_UNLOCKED,
 };
 
+static TickType_t playback_delay_ticks(uint32_t milliseconds)
+{
+    const TickType_t ticks = pdMS_TO_TICKS(milliseconds);
+    return ticks == 0 ? 1 : ticks;
+}
+
 static bool json_uint32(const cJSON *item, uint32_t *value, bool positive)
 {
     if (!cJSON_IsNumber(item) || item->valuedouble < (positive ? 1.0 : 0.0) ||
@@ -212,7 +218,7 @@ static void wait_for_rx_idle(void)
         const bool busy = s_playback.rx_busy;
         taskEXIT_CRITICAL(&s_playback.lock);
         if (!busy) return;
-        vTaskDelay(pdMS_TO_TICKS(1));
+        vTaskDelay(playback_delay_ticks(1U));
     }
 }
 
@@ -301,6 +307,7 @@ static void fail_session(void)
 static void playback_task(void *argument)
 {
     (void)argument;
+    const TickType_t interval_ticks = playback_delay_ticks(PLAYBACK_TASK_INTERVAL_MS);
     while (s_playback.running) {
         bool open_requested, cancel_requested, fail_requested, suppress;
         playback_state_t state;
@@ -359,7 +366,7 @@ static void playback_task(void *argument)
 
         if (state == PLAYBACK_READY) {
             playback_frame_t frame;
-            if (xQueueReceive(s_playback.queue, &frame, pdMS_TO_TICKS(PLAYBACK_TASK_INTERVAL_MS)) == pdTRUE) {
+            if (xQueueReceive(s_playback.queue, &frame, interval_ticks) == pdTRUE) {
                 if (audio_service_write_speaker_samples(&s_playback.speaker_lease,
                                                         frame.samples,
                                                         frame.sample_count,
@@ -395,7 +402,7 @@ static void playback_task(void *argument)
         s_playback.metrics.stack_high_water_bytes =
             (uint32_t)uxTaskGetStackHighWaterMark(NULL);
         taskEXIT_CRITICAL(&s_playback.lock);
-        vTaskDelay(pdMS_TO_TICKS(PLAYBACK_TASK_INTERVAL_MS));
+        vTaskDelay(interval_ticks);
     }
     if (s_playback.state != PLAYBACK_IDLE) finish_session("cancelled", false, NULL);
     for (;;) vTaskSuspend(NULL);

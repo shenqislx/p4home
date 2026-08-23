@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 VOICE_SOURCE = ROOT / "firmware/components/voice_transport/voice_transport.c"
+PLAYBACK_SOURCE = ROOT / "firmware/components/voice_transport/voice_playback_receiver.c"
 VOICE_HEADER = ROOT / "firmware/components/voice_transport/include/voice_transport.h"
 VOICE_KCONFIG = ROOT / "firmware/components/voice_transport/Kconfig.projbuild"
 BOARD_KCONFIG = ROOT / "firmware/components/board_support/Kconfig.projbuild"
@@ -93,6 +94,19 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
                                        event_handler.index("else if (data != NULL) {")]
         self.assertNotIn("voice_request_reconnect", control_branch)
         self.assertNotIn("voice_metric_protocol_error", control_branch)
+
+    def test_playback_waits_are_never_rounded_down_to_zero_ticks(self) -> None:
+        playback = PLAYBACK_SOURCE.read_text(encoding="utf-8")
+
+        self.assertIn("return ticks == 0 ? 1 : ticks;", playback)
+        self.assertIn("vTaskDelay(playback_delay_ticks(1U));", playback)
+        self.assertIn(
+            "const TickType_t interval_ticks = "
+            "playback_delay_ticks(PLAYBACK_TASK_INTERVAL_MS);",
+            playback,
+        )
+        self.assertIn("xQueueReceive(s_playback.queue, &frame, interval_ticks)", playback)
+        self.assertIn("vTaskDelay(interval_ticks);", playback)
 
     def test_sr_capture_registration_precedes_runtime_start(self) -> None:
         board = BOARD_SOURCE.read_text(encoding="utf-8")
