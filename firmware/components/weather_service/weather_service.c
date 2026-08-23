@@ -8,9 +8,11 @@
 #include "cJSON.h"
 #include "esp_check.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "network_service.h"
 #include "panel_data_store.h"
@@ -22,6 +24,11 @@ static const char *TAG = "weather_service";
 #ifndef CONFIG_P4HOME_WEATHER_ENABLE
 #define CONFIG_P4HOME_WEATHER_ENABLE 0
 #endif
+#ifndef CONFIG_P4HOME_BACKGROUND_TASKS_EXTERNAL_STACK
+#define CONFIG_P4HOME_BACKGROUND_TASKS_EXTERNAL_STACK 0
+#endif
+
+#define WEATHER_SERVICE_TASK_STACK_SIZE 8192U
 
 typedef struct {
     bool initialized;
@@ -414,9 +421,22 @@ esp_err_t weather_service_start(void)
     if (s_weather.started) {
         return ESP_OK;
     }
-    BaseType_t ok = xTaskCreate(weather_service_task, "p4home_weather", 8192, NULL,
+#if CONFIG_P4HOME_BACKGROUND_TASKS_EXTERNAL_STACK
+    BaseType_t ok = xTaskCreateWithCaps(
+        weather_service_task, "p4home_weather", WEATHER_SERVICE_TASK_STACK_SIZE, NULL,
+        tskIDLE_PRIORITY + 3, &s_weather.task, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    BaseType_t ok = xTaskCreate(weather_service_task, "p4home_weather",
+                                WEATHER_SERVICE_TASK_STACK_SIZE, NULL,
                                 tskIDLE_PRIORITY + 3, &s_weather.task);
+#endif
     ESP_RETURN_ON_FALSE(ok == pdPASS, ESP_ERR_NO_MEM, TAG, "failed to create weather task");
+#if CONFIG_P4HOME_PHASE5B_VALIDATION
+    ESP_LOGW(TAG,
+             "VERIFY:phase5b:background_stack:PASS task=weather external=%s size=%u",
+             CONFIG_P4HOME_BACKGROUND_TASKS_EXTERNAL_STACK ? "yes" : "no",
+             WEATHER_SERVICE_TASK_STACK_SIZE);
+#endif
     s_weather.started = true;
     return ESP_OK;
 #endif

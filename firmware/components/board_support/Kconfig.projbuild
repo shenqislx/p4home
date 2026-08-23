@@ -8,4 +8,12 @@ config P4HOME_GATEWAY_RUNTIME_POLL_ENABLE
     bool "Enable gateway runtime polling loop"
     default n
 
+config P4HOME_BACKGROUND_TASKS_EXTERNAL_STACK
+    bool "Place persistent background task stacks in external RAM"
+    depends on FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
+    default n
+    help
+        Keeps the persistent weather and energy worker stacks out of scarce
+        internal DMA-capable RAM. Enable only on targets with reliable PSRAM.
+
 endmenu

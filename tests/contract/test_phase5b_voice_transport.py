@@ -9,10 +9,13 @@ ROOT = Path(__file__).resolve().parents[2]
 VOICE_SOURCE = ROOT / "firmware/components/voice_transport/voice_transport.c"
 VOICE_HEADER = ROOT / "firmware/components/voice_transport/include/voice_transport.h"
 VOICE_KCONFIG = ROOT / "firmware/components/voice_transport/Kconfig.projbuild"
+BOARD_KCONFIG = ROOT / "firmware/components/board_support/Kconfig.projbuild"
 BOARD_SOURCE = ROOT / "firmware/components/board_support/board_support.c"
 HA_SOURCE = ROOT / "firmware/components/ha_client/ha_client.c"
 SR_SOURCE = ROOT / "firmware/components/sr_service/sr_service.c"
 RUNTIME_SOURCE = ROOT / "agent/apps/runtime/src/voice-websocket-server.ts"
+WEATHER_SOURCE = ROOT / "firmware/components/weather_service/weather_service.c"
+ENERGY_SOURCE = ROOT / "firmware/components/ui_pages/ui_page_energy.c"
 
 
 class Phase5BVoiceTransportContractTest(unittest.TestCase):
@@ -88,11 +91,14 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         firmware = VOICE_SOURCE.read_text(encoding="utf-8")
         ha = HA_SOURCE.read_text(encoding="utf-8")
         kconfig = VOICE_KCONFIG.read_text(encoding="utf-8")
+        board_kconfig = BOARD_KCONFIG.read_text(encoding="utf-8")
 
         self.assertIn("CONFIG_P4HOME_VOICE_WEBSOCKET_TASK_STACK 6144", firmware)
         self.assertIn("CONFIG_P4HOME_VOICE_RECONNECT_TIMEOUT_MS 10000", firmware)
         self.assertIn(".reconnect_timeout_ms = CONFIG_P4HOME_VOICE_RECONNECT_TIMEOUT_MS", firmware)
         self.assertIn("default 6144", kconfig)
+        self.assertIn("config P4HOME_BACKGROUND_TASKS_EXTERNAL_STACK", board_kconfig)
+        self.assertIn("depends on FREERTOS_TASK_CREATE_ALLOW_EXT_MEM", board_kconfig)
         self.assertIn("xTaskCreateWithCaps(\n        ha_client_worker", ha)
         self.assertIn("MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT", ha)
         self.assertIn("vTaskDeleteWithCaps(worker)", ha)
@@ -112,6 +118,12 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         worker = ha[ha.index("static void ha_client_worker("):
                     ha.index("static esp_err_t ha_client_delete_worker_task(")]
         self.assertNotIn("nvs_", worker)
+        for source in (WEATHER_SOURCE, ENERGY_SOURCE):
+            background = source.read_text(encoding="utf-8")
+            self.assertIn("CONFIG_P4HOME_BACKGROUND_TASKS_EXTERNAL_STACK", background)
+            self.assertIn("xTaskCreateWithCaps", background)
+            self.assertIn("MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT", background)
+            self.assertIn("VERIFY:phase5b:background_stack:PASS", background)
 
     def test_defaults_remain_disabled_and_diagnostics_are_aggregate_only(self) -> None:
         defaults = (ROOT / "firmware/sdkconfig.defaults").read_text(encoding="utf-8")
@@ -127,9 +139,11 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         self.assertIn("worker_stack_high_water_bytes", header)
         self.assertNotIn("ESP_LOG_BUFFER", firmware)
         self.assertIsNone(re.search(r"ESP_LOG\w*\([^;]*s_voice\.token", firmware))
-        self.assertIn("raw_audio_retained=false", (
-            ROOT / "agent/apps/device-harness/src/voice-cli.ts"
-        ).read_text(encoding="utf-8"))
+        voice_cli = (ROOT / "agent/apps/device-harness/src/voice-cli.ts").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("raw_audio_retained=false", voice_cli)
+        self.assertIn("DIAG:phase5b:voice_capture_summary", voice_cli)
 
     def test_agent_bounds_pending_connections_and_response_backpressure(self) -> None:
         runtime = RUNTIME_SOURCE.read_text(encoding="utf-8")

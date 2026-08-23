@@ -10,8 +10,10 @@
 
 #include "cJSON.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "ha_client.h"
 #include "time_service.h"
@@ -24,6 +26,11 @@ static const char *TAG = "ui_energy";
 #define UI_ENERGY_DAYS 7U
 #define UI_ENERGY_SEGMENTS 12U
 #define UI_ENERGY_MAX_SOURCES 4U
+#define UI_ENERGY_TASK_STACK_SIZE 8192U
+
+#ifndef CONFIG_P4HOME_BACKGROUND_TASKS_EXTERNAL_STACK
+#define CONFIG_P4HOME_BACKGROUND_TASKS_EXTERNAL_STACK 0
+#endif
 
 typedef struct {
     double days[UI_ENERGY_DAYS];
@@ -380,9 +387,22 @@ esp_err_t ui_page_energy_init(void)
     lv_obj_set_style_text_color(s_status, lv_color_hex(UI_PIXEL_COLOR_MUTED), LV_PART_MAIN);
     lv_obj_align(s_status, LV_ALIGN_BOTTOM_LEFT, 4, -2);
 
-    ESP_RETURN_ON_FALSE(xTaskCreate(ui_page_energy_fetch_task, "p4home_energy", 8192, NULL,
-                                    tskIDLE_PRIORITY + 2, NULL) == pdPASS,
-                        ESP_ERR_NO_MEM, TAG, "energy task alloc failed");
+#if CONFIG_P4HOME_BACKGROUND_TASKS_EXTERNAL_STACK
+    BaseType_t task_ok = xTaskCreateWithCaps(
+        ui_page_energy_fetch_task, "p4home_energy", UI_ENERGY_TASK_STACK_SIZE, NULL,
+        tskIDLE_PRIORITY + 2, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    BaseType_t task_ok = xTaskCreate(ui_page_energy_fetch_task, "p4home_energy",
+                                     UI_ENERGY_TASK_STACK_SIZE, NULL,
+                                     tskIDLE_PRIORITY + 2, NULL);
+#endif
+    ESP_RETURN_ON_FALSE(task_ok == pdPASS, ESP_ERR_NO_MEM, TAG, "energy task alloc failed");
+#if CONFIG_P4HOME_PHASE5B_VALIDATION
+    ESP_LOGW(TAG,
+             "VERIFY:phase5b:background_stack:PASS task=energy external=%s size=%u",
+             CONFIG_P4HOME_BACKGROUND_TASKS_EXTERNAL_STACK ? "yes" : "no",
+             UI_ENERGY_TASK_STACK_SIZE);
+#endif
     s_ready = true;
     ESP_LOGW(TAG, "energy page ready bars=%u segments=%u",
              (unsigned)UI_ENERGY_DAYS, (unsigned)UI_ENERGY_SEGMENTS);

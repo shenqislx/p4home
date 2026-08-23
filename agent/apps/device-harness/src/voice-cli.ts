@@ -90,6 +90,11 @@ async function main(): Promise<void> {
     const summary = sink.completed.at(-1)!;
     if (summary.status !== "completed" || !summary.eos || summary.frames < 1
         || summary.bytes < 2 || summary.peak_abs < 1 || summary.dropped_frames !== 0) {
+      process.stdout.write(
+        `DIAG:phase5b:voice_capture_summary status=${summary.status} eos=${summary.eos} `
+        + `frames=${summary.frames} bytes=${summary.bytes} `
+        + `dropped=${summary.dropped_frames} peak=${summary.peak_abs}\n`,
+      );
       throw new Error("voice_capture_summary_invalid");
     }
     const result = {
