@@ -93,16 +93,17 @@ class Phase5BVoiceProfileTest(unittest.TestCase):
             '"phase5b_voice_websocket_task_stack_size_bytes": phase5b_voice_websocket_stack_size',
             '"phase5b_background_tasks_external_stack": phase5b_background_tasks_external_stack',
             '"phase5b_mbedtls_external_mem_alloc": phase5b_mbedtls_external_mem_alloc',
-            '[[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]',
-            "node --import tsx apps/device-harness/src/voice-cli.ts",
+            '[[ "$VALIDATION_PROFILE" == "phase5b_voice" ||',
+            "HARNESS_ENTRYPOINT=apps/device-harness/src/voice-cli.ts",
+            'node --import tsx "$HARNESS_ENTRYPOINT"',
             'test -s "$AGENT_HARNESS_READY_FILE"',
             'if [[ -s "$AGENT_HARNESS_STATUS_FILE" ]]',
-            '[[ "${{ inputs.validation_profile }}" == "phase5b_voice" ]]',
+            '[[ "${{ inputs.validation_profile }}" == "phase5b_voice" ||',
         ):
             self.assertIn(marker, workflow)
         flash_index = workflow.index('flash > "$monitor_log" 2>&1')
         voice_harness_index = workflow.index(
-            "node --import tsx apps/device-harness/src/voice-cli.ts"
+            "HARNESS_ENTRYPOINT=apps/device-harness/src/voice-cli.ts"
         )
         capture_index = workflow.index("python scripts/capture-esp-serial.py", flash_index)
         self.assertLess(flash_index, voice_harness_index)

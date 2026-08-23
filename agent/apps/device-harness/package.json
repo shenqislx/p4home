@@ -4,6 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "dependencies": {
-    "@p4home/runtime": "workspace:*"
+    "@p4home/provider-stt": "workspace:*",
+    "@p4home/runtime": "workspace:*",
+    "@p4home/storage-sqlite": "workspace:*"
   }
 }

@@ -14,6 +14,7 @@ on:
           - phase4c_ha
           - phase5a_voice
           - phase5b_voice
+          - phase5c_stt
         default: generic
       serial_port:
         description: macOS serial device path
@@ -99,12 +100,12 @@ jobs:
           if not 10 <= seconds <= 7200:
               raise SystemExit("monitor_seconds must be between 10 and 7200")
           profile = os.environ["VALIDATION_PROFILE"]
-          if profile not in {"generic", "phase2d_agent", "phase3d_object", "phase4c_ha", "phase5a_voice", "phase5b_voice"}:
+          if profile not in {"generic", "phase2d_agent", "phase3d_object", "phase4c_ha", "phase5a_voice", "phase5b_voice", "phase5c_stt"}:
               raise SystemExit("unsupported validation_profile")
           port = int(os.environ["AGENT_PORT"])
           if not 1 <= port <= 65535:
               raise SystemExit("agent_port must be between 1 and 65535")
-          if profile in {"phase2d_agent", "phase3d_object", "phase5b_voice"}:
+          if profile in {"phase2d_agent", "phase3d_object", "phase5b_voice", "phase5c_stt"}:
               host = os.environ["AGENT_HOST"]
               if not host or re.fullmatch(r"[A-Za-z0-9.-]+", host) is None:
                   raise SystemExit("Agent profiles require a safe runner LAN agent_host")
@@ -119,6 +120,8 @@ jobs:
               raise SystemExit("phase5a_voice requires monitor_seconds>=180")
           if profile == "phase5b_voice" and seconds < 180:
               raise SystemExit("phase5b_voice requires monitor_seconds>=180")
+          if profile == "phase5c_stt" and seconds < 300:
+              raise SystemExit("phase5c_stt requires monitor_seconds>=300")
           PY
           test -f scripts/activate-idf-v5.5.4.sh
           test -s firmware/dependencies.lock
@@ -133,8 +136,9 @@ jobs:
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 120))" >> "$GITHUB_ENV"
           elif [[ "$VALIDATION_PROFILE" == "phase4c_ha" ]]; then
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 180))" >> "$GITHUB_ENV"
-          elif [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
-            echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 120))" >> "$GITHUB_ENV"
+          elif [[ "$VALIDATION_PROFILE" == "phase5b_voice" || \
+                  "$VALIDATION_PROFILE" == "phase5c_stt" ]]; then
+            echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 180))" >> "$GITHUB_ENV"
           else
             echo "CAPTURE_SECONDS=$MONITOR_SECONDS" >> "$GITHUB_ENV"
           fi
@@ -204,7 +208,7 @@ jobs:
           echo "EXPECTED_MAIN_TASK_STACK_SIZE=12288" >> "$GITHUB_ENV"
 
       - name: Prepare ephemeral Agent profile
-        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase5b_voice'
+        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase5b_voice' || inputs.validation_profile == 'phase5c_stt'
         run: |
           set -euo pipefail
           mkdir -p "$AGENT_TMP_DIR"
@@ -222,7 +226,8 @@ jobs:
             | awk '{print $2}' > "$AGENT_TMP_DIR/spki-sha256"
           chmod 600 "$AGENT_TMP_DIR"/*
           AGENT_DEVICE_ID="p4-hardware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
+          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" || \
+                "$VALIDATION_PROFILE" == "phase5c_stt" ]]; then
             AGENT_URI="wss://$AGENT_HOST:$AGENT_PORT/v1/voice"
             python3 scripts/prepare-phase5b-voice-profile.py \
               --sdkconfig "$HARDWARE_SDKCONFIG" \
@@ -240,7 +245,8 @@ jobs:
               --spki-file "$AGENT_TMP_DIR/spki-sha256" \
               --protocol-version "$AGENT_PROTOCOL_VERSION"
           fi
-          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
+          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" || \
+                "$VALIDATION_PROFILE" == "phase5c_stt" ]]; then
             grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_SR_ENABLE=y" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_PHASE5B_VALIDATION=y" "$HARDWARE_SDKCONFIG"
@@ -331,7 +337,8 @@ jobs:
                 "${{ inputs.validation_profile }}" == "phase3d_object" ]]; then
             grep -qx "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=$EXPECTED_AGENT_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
           fi
-          if [[ "${{ inputs.validation_profile }}" == "phase5b_voice" ]]; then
+          if [[ "${{ inputs.validation_profile }}" == "phase5b_voice" || \
+                "${{ inputs.validation_profile }}" == "phase5c_stt" ]]; then
             grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_SR_ENABLE=y" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_PHASE5B_VALIDATION=y" "$HARDWARE_SDKCONFIG"
@@ -348,13 +355,13 @@ jobs:
           test "$(shasum -a 256 firmware/dependencies.lock | awk '{print $1}')" = "$DEPENDENCY_LOCK_SHA256_BEFORE"
 
       - name: Set up Node for Agent harness
-        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase4c_ha' || inputs.validation_profile == 'phase5b_voice'
+        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase4c_ha' || inputs.validation_profile == 'phase5b_voice' || inputs.validation_profile == 'phase5c_stt'
         uses: actions/setup-node@v4
         with:
           node-version: 24.19.0
 
       - name: Start Agent Runtime harness
-        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase5b_voice'
+        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase5b_voice' || inputs.validation_profile == 'phase5c_stt'
         shell: zsh {0}
         working-directory: agent
         run: |
@@ -366,7 +373,8 @@ jobs:
           test -n "$PNPM_BIN"
           test "$("$PNPM_BIN" --version)" = "11.19.0"
           "$PNPM_BIN" install --frozen-lockfile
-          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
+          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" || \
+                "$VALIDATION_PROFILE" == "phase5c_stt" ]]; then
             # The Voice harness is launched after flashing so its bounded
             # capture deadline measures device runtime, not flash time.
             exit 0
@@ -400,6 +408,41 @@ jobs:
           done
           echo "Agent Runtime harness did not become ready" >&2
           exit 1
+
+      - name: Prepare pinned Phase 5C STT runtime
+        if: inputs.validation_profile == 'phase5c_stt'
+        shell: zsh {0}
+        working-directory: agent/packages/provider-stt/python
+        run: |
+          set -euo pipefail
+          UV_BIN="$(command -v uv || true)"
+          if [[ -z "$UV_BIN" && -x /opt/homebrew/bin/uv ]]; then
+            UV_BIN=/opt/homebrew/bin/uv
+          fi
+          PYTHON312_BIN=/opt/homebrew/bin/python3.12
+          test -x "$UV_BIN"
+          test -x "$PYTHON312_BIN"
+          test "$($PYTHON312_BIN -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')" = "3.12"
+          "$UV_BIN" sync --frozen --python "$PYTHON312_BIN"
+          export HF_HUB_DISABLE_XET=1
+          STT_PYTHON="$PWD/.venv/bin/python"
+          STT_WORKER="$PWD/p4home_stt_worker.py"
+          STT_MODEL_REVISION="$($STT_PYTHON -c 'from prepare_model import MODEL_REVISION; print(MODEL_REVISION)')"
+          STT_MODEL="$HOME/Library/Caches/p4home/stt/whisper-small-$STT_MODEL_REVISION"
+          mkdir -p "${STT_MODEL:h}"
+          if [[ -e "$STT_MODEL" ]]; then
+            "$STT_PYTHON" prepare_model.py --verify "$STT_MODEL"
+          else
+            "$STT_PYTHON" prepare_model.py --output "$STT_MODEL"
+          fi
+          "$STT_PYTHON" prepare_model.py --verify "$STT_MODEL"
+          STT_MODEL_MANIFEST_SHA256="$(shasum -a 256 "$STT_MODEL/p4home-model-manifest.json" | awk '{print $1}')"
+          echo "P4HOME_STT_PYTHON=$STT_PYTHON" >> "$GITHUB_ENV"
+          echo "P4HOME_STT_WORKER=$STT_WORKER" >> "$GITHUB_ENV"
+          echo "P4HOME_STT_MODEL=$STT_MODEL" >> "$GITHUB_ENV"
+          echo "P4HOME_STT_MODEL_REVISION=$STT_MODEL_REVISION" >> "$GITHUB_ENV"
+          echo "P4HOME_STT_MODEL_MANIFEST_SHA256=$STT_MODEL_MANIFEST_SHA256" >> "$GITHUB_ENV"
+          echo "P4HOME_STT_AUDIT_DB=$AGENT_TMP_DIR/phase5c-audit.db" >> "$GITHUB_ENV"
 
       - name: Install Phase 4C gate dependencies
         if: inputs.validation_profile == 'phase4c_ha'
@@ -456,7 +499,8 @@ jobs:
             -D SDKCONFIG="$HARDWARE_SDKCONFIG" \
             -p "$SERIAL_PORT" \
             flash > "$monitor_log" 2>&1
-          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
+          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" || \
+                "$VALIDATION_PROFILE" == "phase5c_stt" ]]; then
             (
               cd agent
               export P4HOME_AGENT_DEVICE_ID="$AGENT_DEVICE_ID"
@@ -468,8 +512,18 @@ jobs:
               export P4HOME_HARNESS_READY_FILE="$AGENT_HARNESS_READY_FILE"
               export P4HOME_HARNESS_RESULT_FILE="$AGENT_HARNESS_RESULT_FILE"
               export P4HOME_HARNESS_STATUS_FILE="$AGENT_HARNESS_STATUS_FILE"
+              if [[ "$VALIDATION_PROFILE" == "phase5c_stt" ]]; then
+                export P4HOME_STT_PYTHON
+                export P4HOME_STT_WORKER
+                export P4HOME_STT_MODEL
+                export P4HOME_STT_AUDIT_DB
+                HARNESS_ENTRYPOINT=apps/device-harness/src/voice-stt-cli.ts
+              else
+                HARNESS_ENTRYPOINT=apps/device-harness/src/voice-cli.ts
+              fi
+              export HARNESS_ENTRYPOINT
               nohup zsh -c '
-                node --import tsx apps/device-harness/src/voice-cli.ts
+                node --import tsx "$HARNESS_ENTRYPOINT"
                 exit_code=$?
                 echo "$exit_code" > "$P4HOME_HARNESS_STATUS_FILE"
               ' > "$AGENT_HARNESS_LOG" 2>&1 &
@@ -486,6 +540,33 @@ jobs:
               sleep 0.1
             done
             test -s "$AGENT_HARNESS_READY_FILE"
+          fi
+          if [[ "$VALIDATION_PROFILE" == "phase5c_stt" ]]; then
+            (
+              sleep 25
+              for attempt in {1..3}; do
+                if [[ -s "$AGENT_HARNESS_STATUS_FILE" ]]; then
+                  break
+                fi
+                capture_count_before="$(grep -c 'voice_transport: capture opened epoch=' \
+                  firmware/monitor.log || true)"
+                say -v Samantha "Hi ESP"
+                capture_opened=no
+                for poll in {1..250}; do
+                  capture_count_after="$(grep -c 'voice_transport: capture opened epoch=' \
+                    firmware/monitor.log || true)"
+                  if (( capture_count_after > capture_count_before )); then
+                    capture_opened=yes
+                    break
+                  fi
+                  sleep 0.02
+                done
+                if [[ "$capture_opened" == "yes" ]]; then
+                  say -v Tingting "你好，请介绍一下你自己"
+                fi
+                sleep 45
+              done
+            ) &
           fi
           if [[ "$VALIDATION_PROFILE" == "phase4c_ha" ]]; then
             python scripts/capture-esp-serial.py \
@@ -540,7 +621,8 @@ jobs:
           if [[ "$VALIDATION_PROFILE" == "phase5a_voice" ]]; then
             exit 0
           fi
-          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" ]]; then
+          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" || \
+                "$VALIDATION_PROFILE" == "phase5c_stt" ]]; then
             for attempt in {1..300}; do
               if [[ -s "$AGENT_HARNESS_STATUS_FILE" ]]; then
                 break
@@ -643,6 +725,10 @@ jobs:
           phase5b_ha_websocket_stack_size = None
           phase5b_mbedtls_external_mem_alloc = False
           phase5b_agent_transport_disabled = False
+          phase5c_model_revision = os.environ.get("P4HOME_STT_MODEL_REVISION")
+          phase5c_model_manifest_sha256 = os.environ.get(
+              "P4HOME_STT_MODEL_MANIFEST_SHA256"
+          )
           phase4c_post_robot_p4_standalone = False
           phase4c_post_robot_ui_8fps = False
           monitor_path = pathlib.Path("firmware/monitor.log")
@@ -736,7 +822,8 @@ jobs:
                   profile == "phase5a_voice" and agent_transport_disabled
               )
               phase5b_agent_transport_disabled = (
-                  profile == "phase5b_voice" and agent_transport_disabled
+                  profile in {"phase5b_voice", "phase5c_stt"}
+                  and agent_transport_disabled
               )
           manifest = {
               "schema_version": 1,
@@ -774,6 +861,8 @@ jobs:
               "phase5b_ha_websocket_task_stack_size_bytes": phase5b_ha_websocket_stack_size,
               "phase5b_mbedtls_external_mem_alloc": phase5b_mbedtls_external_mem_alloc,
               "phase5b_agent_transport_disabled": phase5b_agent_transport_disabled,
+              "phase5c_stt_model_revision": phase5c_model_revision,
+              "phase5c_stt_model_manifest_sha256": phase5c_model_manifest_sha256,
               "phase4c_agent_transport_disabled": phase4c_agent_transport_disabled,
               "phase4c_policy_binding_verified": (
                   binding_status_path.is_file()

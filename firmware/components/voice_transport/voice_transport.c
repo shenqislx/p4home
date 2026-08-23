@@ -657,6 +657,7 @@ static bool voice_begin_capture(void *context, uint64_t started_at_us)
     }
     uint32_t stream_id = esp_random();
     if (stream_id == 0U) stream_id = 1U;
+    uint32_t accepted_epoch = 0U;
 
     xQueueReset(s_voice.frame_queue);
     taskENTER_CRITICAL(&s_voice.lock);
@@ -696,8 +697,12 @@ static bool voice_begin_capture(void *context, uint64_t started_at_us)
         s_voice.metrics.session_active = true;
         s_voice.metrics.sessions_started++;
         s_voice.metrics.last_epoch = next_epoch;
+        accepted_epoch = next_epoch;
     }
     taskEXIT_CRITICAL(&s_voice.lock);
+    if (accepted) {
+        ESP_LOGI(TAG, "capture opened epoch=%" PRIu32, accepted_epoch);
+    }
     return accepted;
 }
 

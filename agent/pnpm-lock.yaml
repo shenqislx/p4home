@@ -23,6 +23,9 @@ importers:
       '@p4home/provider-ollama':
         specifier: workspace:*
         version: link:packages/provider-ollama
+      '@p4home/provider-stt':
+        specifier: workspace:*
+        version: link:packages/provider-stt
       '@p4home/runtime':
         specifier: workspace:*
         version: link:apps/runtime
@@ -50,9 +53,15 @@ importers:
 
   apps/device-harness:
     dependencies:
+      '@p4home/provider-stt':
+        specifier: workspace:*
+        version: link:../../packages/provider-stt
       '@p4home/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@p4home/storage-sqlite':
+        specifier: workspace:*
+        version: link:../../packages/storage-sqlite
 
   apps/eval-cli:
     dependencies:
@@ -86,6 +95,9 @@ importers:
       '@p4home/provider-ollama':
         specifier: workspace:*
         version: link:../../packages/provider-ollama
+      '@p4home/provider-stt':
+        specifier: workspace:*
+        version: link:../../packages/provider-stt
       '@p4home/storage-sqlite':
         specifier: workspace:*
         version: link:../../packages/storage-sqlite
@@ -115,6 +127,8 @@ importers:
       ajv:
         specifier: ^8.17.1
         version: 8.20.0
+
+  packages/provider-stt: {}
 
   packages/storage-sqlite:
     dependencies:
