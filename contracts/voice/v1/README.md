@@ -1,6 +1,6 @@
 # P4 Voice Protocol v1
 
-> Status: candidate in Phase 5A
+> Status: frozen after Phase 5A gate (2026-08-23)
 > Protocol version: `1`
 > Data plane: independent authenticated WebSocket; not Device Protocol v1/v2
 
@@ -52,4 +52,5 @@ window。ready 之前、terminal 之后或旧 epoch 的 credit 一律拒绝。
 Control messages are JSON text frames validated by `control-message.schema.json`. Audio bytes never appear in a
 control message. A reconnect always creates a higher epoch; messages and audio from older epochs are stale.
 
-This contract remains `candidate` until 5A host, firmware build and real P4 audio/SR gates pass and review closes.
+This contract is frozen after the Phase 5A host, firmware build, independent review and real P4 audio/SR gates
+passed. Later Phase 5 slices must version any incompatible change instead of editing v1 in place.

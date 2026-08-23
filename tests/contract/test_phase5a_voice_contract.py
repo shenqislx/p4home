@@ -13,7 +13,7 @@ class Phase5AVoiceContractTest(unittest.TestCase):
         header = (
             ROOT / "firmware/components/voice_protocol/include/voice_protocol.h"
         ).read_text(encoding="utf-8")
-        self.assertIn("> Status: candidate in Phase 5A", readme)
+        self.assertIn("> Status: frozen after Phase 5A gate (2026-08-23)", readme)
         for expected in (
             "#define VOICE_PROTOCOL_VERSION 1U",
             "#define VOICE_PROTOCOL_HEADER_BYTES 56U",

@@ -161,3 +161,27 @@ profile 继续使用 tracked 5120 bytes。workflow 在 build 前后验证 profil
 speech frame、合格 frame 与 MultiNet detect call。`DIAG:` 与 `VERIFY:` 前缀严格分离，只有真实本地
 动作递增 `command_action_count` 后，app_main 才会输出 `VERIFY:phase5a:fixed_command:PASS`。该候选
 在提交、推送和新硬件 artifact 前不改变 Phase 5A 判定。
+
+### 最终自动化候选：PASS；P4 可听播放人工观察待补
+
+- commit：`d2841de76ad49eb51fdcd6fee32e00d742bc43d6`；run：`32615794192`；workflow
+  conclusion：`success`；profile：`phase5a_voice`；串口：`/dev/cu.usbserial-210`；capture：180 秒；
+- manifest 精确匹配 commit/run/profile/serial，确认 12288-byte main stack、Phase 5A/SR/audio
+  selftest enabled、Agent transport disabled；原始日志确认 `ESP32-P4 (revision v1.0)` 与四次
+  `Hash of data verified`；
+- codec speaker/microphone、startup tone、mic capture、PCM contract、非零 PCM、AFE stream、audio
+  lease、main stack headroom 与全部 UI 8 FPS marker 均 PASS；after-init/heartbeat 最低剩余 main
+  stack 为 7260/7032 bytes，180 秒内无 panic、stack overflow 或 watchdog；
+- Mac mini 系统扬声器作为输入替代播放三组唤醒/固定命令。第一命令窗口按 hard deadline 安全恢复；
+  聚合诊断为 157 frames、51 VAD speech frames、157 detect calls、raw/AFE peak 3603。第二组输入形成
+  `outcome=detected_action_applied`（98 frames、49 VAD speech frames、98 detect calls、raw/AFE peak
+  2043），随后原始日志输出 `VERIFY:phase5a:wake_detected:PASS` 与
+  `VERIFY:phase5a:fixed_command:PASS`；
+- artifact SHA-256：`monitor.log`
+  `101ecf6c1d8fe3784539321f1450600277351b868dba25e5cd0c99d8c0eae066`；manifest
+  `a4e83113b1132d320cff3bc8945106543dc54866c0226708df18868333822e48`；
+- 上述证据足以判定 5A 自动化、真实 wake 与固定命令动作门禁 **PASS**，并冻结 Voice Protocol v1；
+  默认配置仍未打开 SR/音频自检，也没有向 Agent 节点传输或持久化真实音频。`speaker` 与
+  `tone_played` marker 只证明 codec 数字播放路径调用成功，不能证明 P4 扬声器实际可听；Mac 系统
+  扬声器是麦克风声学输入替代，不是 P4 输出观察。因此 P4 startup tone 的独立人工听觉项保持待补，
+  不由自动 marker 冒充。按用户要求继续后续 coding，但该人工项必须在 Phase 5 最终关闭前补齐。

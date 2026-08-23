@@ -2,7 +2,7 @@
 
 > Status: `in_progress`
 > Started: 2026-08-23
-> Current Gate: 启动准备已完成；进入 5A Audio/ESP-SR Baseline & Voice Contract
+> Current Gate: 5A 自动化/固定命令门禁通过、P4 可听播放人工观察待补；按用户的 Mac 扬声器替代指示继续 5B coding
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用
 
@@ -44,16 +44,19 @@ P4 固定离线命令、触摸、HA 与 UI 主链。
 
 ## 4. 纵切 5A — Audio/ESP-SR Baseline & Voice Contract
 
-- [ ] 在独立配置中恢复 `audio_service` 与 `sr_service`，验证 codec、麦克风采集、AFE feed/fetch、
+- [x] 在独立配置中恢复 `audio_service` 与 `sr_service`，验证 codec、麦克风采集、AFE feed/fetch、
   WakeNet、MultiNet 固定离线命令和播放路径；默认配置保持关闭，直到实机门禁通过；
-- [ ] 冻结 Voice Protocol v1 控制状态机和二进制 frame header：session/stream/epoch、单调 sequence、
+- [x] 冻结 Voice Protocol v1 控制状态机和二进制 frame header：session/stream/epoch、单调 sequence、
   capture timestamp、PCM geometry、EOS/cancel/error 与有界 credit/window；
-- [ ] 把音频 owner 从借用字符串升级为可验证的枚举 lease/generation，覆盖 open/close 失败、任务退出、
+- [x] 把音频 owner 从借用字符串升级为可验证的枚举 lease/generation，覆盖 open/close 失败、任务退出、
   重复释放和 owner 抢占；
-- [ ] 建立 P4 host contract/fake 测试，覆盖 PCM 几何、frame 顺序、丢帧、过期 epoch、所有权竞争和
+- [x] 建立 P4 host contract/fake 测试，覆盖 PCM 几何、frame 顺序、丢帧、过期 epoch、所有权竞争和
   固定命令优先级；本纵切不连接真实 STT/TTS；
 - [ ] 通过专用 P4 profile 验证真实非零 PCM、AFE 持续 feed/fetch、真实 wake、固定离线命令、speaker
   播放、资源/栈/看门狗和 UI 8 FPS；人工听觉或口令观察与自动 marker 分开报告。
+  - [x] manifest、P4/flash、codec write、麦克风、AFE、wake、固定命令动作、资源/栈/看门狗与 UI；
+  - [ ] P4 startup tone 的独立可听人工观察（用户离开设备期间不得由自动 marker 冒充；Mac 扬声器
+    仅替代口播输入）。
 
 退出门禁：Voice Protocol v1 与 PCM/所有权边界冻结；真实 P4 可稳定 wake、采集、AFE、固定命令和
 播放，默认配置不受影响；尚未向 Agent 节点传输音频。
