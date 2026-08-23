@@ -701,7 +701,7 @@ static bool voice_begin_capture(void *context, uint64_t started_at_us)
     }
     taskEXIT_CRITICAL(&s_voice.lock);
     if (accepted) {
-        ESP_LOGI(TAG, "capture opened epoch=%" PRIu32, accepted_epoch);
+        ESP_LOGW(TAG, "capture opened epoch=%" PRIu32, accepted_epoch);
     }
     return accepted;
 }

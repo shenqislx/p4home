@@ -76,7 +76,7 @@ class Phase5CSttProfileTest(unittest.TestCase):
         voice_transport = (ROOT / "firmware/components/voice_transport/voice_transport.c").read_text(
             encoding="utf-8"
         )
-        self.assertIn('ESP_LOGI(TAG, "capture opened epoch=%" PRIu32', voice_transport)
+        self.assertIn('ESP_LOGW(TAG, "capture opened epoch=%" PRIu32', voice_transport)
 
 
 if __name__ == "__main__":
