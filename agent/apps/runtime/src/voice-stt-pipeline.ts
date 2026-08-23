@@ -416,7 +416,7 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
       epoch: state.summary.epoch,
       outcome,
       interaction_id: interactionId,
-      pcm_bytes: state.frames.length * FRAME_BYTES,
+      pcm_bytes: state.frames.reduce((total, frame) => total + frame.byteLength, 0),
       speech_frames: state.speechFrames,
       partials_seen: partialsSeen,
     });

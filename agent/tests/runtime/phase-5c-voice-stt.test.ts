@@ -190,6 +190,7 @@ test("a legal short EOS tail reaches STT without inflating the minimum speech du
   await pipeline.drain();
 
   assert.equal(provider.requests[0]?.pcm.byteLength, 25 * 640 + 2);
+  assert.equal(pipeline.results[0]?.pcm_bytes, 25 * 640 + 2);
   assert.equal(pipeline.results[0]?.speech_frames, 15);
   assert.equal(pipeline.results[0]?.outcome, "dispatched");
 
