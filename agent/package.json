@@ -17,6 +17,7 @@
     "test": "node scripts/check-runtime.mjs && node --import tsx --test tests/contracts/*.test.ts tests/core/*.test.ts tests/domain/*.test.ts tests/eval/*.test.ts tests/provider/*.test.ts tests/runtime/*.test.ts tests/storage/*.test.ts",
     "test:ollama-live": "node scripts/check-runtime.mjs && node --import tsx --test tests/integration/ollama-live.test.ts",
     "test:stt-live": "node scripts/check-runtime.mjs && node --import tsx --test tests/integration/stt-live.test.ts",
+    "test:tts-live": "node scripts/check-runtime.mjs && node --import tsx --test tests/integration/tts-live.test.ts",
     "validate:contracts": "node scripts/check-runtime.mjs && node --import tsx packages/contracts/src/cli.ts",
     "validate:object-runtime": "node scripts/check-runtime.mjs && node --import tsx packages/contracts/src/cli-object-runtime.ts",
     "validate:ha-runtime": "node scripts/check-runtime.mjs && node --import tsx packages/contracts/src/cli-ha-runtime.ts"
@@ -28,6 +29,7 @@
     "@p4home/eval-cli": "workspace:*",
     "@p4home/provider-ollama": "workspace:*",
     "@p4home/provider-stt": "workspace:*",
+    "@p4home/provider-tts": "workspace:*",
     "@p4home/runtime": "workspace:*",
     "@p4home/storage-sqlite": "workspace:*",
     "@p4home/transport-ha": "workspace:*",
