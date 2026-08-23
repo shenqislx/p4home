@@ -50,11 +50,15 @@ class Phase5CSttProfileTest(unittest.TestCase):
             "export HF_HUB_DISABLE_XET=1",
             'prepare_model.py --verify "$STT_MODEL"',
             "HARNESS_ENTRYPOINT=apps/device-harness/src/voice-stt-cli.ts",
+            'test "$("$AGENT_NODE_BIN" --version)" = "v24.19.0"',
+            '"$AGENT_NODE_BIN" --import tsx "$HARNESS_ENTRYPOINT"',
             'say -v Samantha "Hi ESP"',
             'say -v Tingting "你好，请介绍一下你自己"',
             "voice_transport: capture opened epoch=",
             '"phase5c_stt_model_revision": phase5c_model_revision',
             '"phase5c_stt_model_manifest_sha256": phase5c_model_manifest_sha256',
+            'grep -qx "0" "$AGENT_HARNESS_STATUS_FILE"',
+            "grep -q '^VERIFY:phase5c:voice_stt_unified:PASS '",
         ):
             self.assertIn(marker, workflow)
         for marker in (

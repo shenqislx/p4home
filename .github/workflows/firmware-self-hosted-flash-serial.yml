@@ -372,6 +372,10 @@ jobs:
           fi
           test -n "$PNPM_BIN"
           test "$("$PNPM_BIN" --version)" = "11.19.0"
+          AGENT_NODE_BIN="$(command -v node)"
+          test -x "$AGENT_NODE_BIN"
+          test "$("$AGENT_NODE_BIN" --version)" = "v24.19.0"
+          echo "AGENT_NODE_BIN=$AGENT_NODE_BIN" >> "$GITHUB_ENV"
           "$PNPM_BIN" install --frozen-lockfile
           if [[ "$VALIDATION_PROFILE" == "phase5b_voice" || \
                 "$VALIDATION_PROFILE" == "phase5c_stt" ]]; then
@@ -512,6 +516,7 @@ jobs:
               export P4HOME_HARNESS_READY_FILE="$AGENT_HARNESS_READY_FILE"
               export P4HOME_HARNESS_RESULT_FILE="$AGENT_HARNESS_RESULT_FILE"
               export P4HOME_HARNESS_STATUS_FILE="$AGENT_HARNESS_STATUS_FILE"
+              export AGENT_NODE_BIN
               if [[ "$VALIDATION_PROFILE" == "phase5c_stt" ]]; then
                 export P4HOME_STT_PYTHON
                 export P4HOME_STT_WORKER
@@ -523,7 +528,7 @@ jobs:
               fi
               export HARNESS_ENTRYPOINT
               nohup zsh -c '
-                node --import tsx "$HARNESS_ENTRYPOINT"
+                "$AGENT_NODE_BIN" --import tsx "$HARNESS_ENTRYPOINT"
                 exit_code=$?
                 echo "$exit_code" > "$P4HOME_HARNESS_STATUS_FILE"
               ' > "$AGENT_HARNESS_LOG" 2>&1 &
@@ -912,6 +917,15 @@ jobs:
           set -euo pipefail
           test -s firmware/monitor.log
           test -s firmware/hardware-validation-manifest.json
+          if [[ "$VALIDATION_PROFILE" == "phase5b_voice" || \
+                "$VALIDATION_PROFILE" == "phase5c_stt" ]]; then
+            test -s "$AGENT_HARNESS_STATUS_FILE"
+            grep -qx "0" "$AGENT_HARNESS_STATUS_FILE"
+            test -s "$AGENT_HARNESS_RESULT_FILE"
+          fi
+          if [[ "$VALIDATION_PROFILE" == "phase5c_stt" ]]; then
+            grep -q '^VERIFY:phase5c:voice_stt_unified:PASS ' firmware/monitor.log
+          fi
 
       - name: Write job summary
         if: always()
