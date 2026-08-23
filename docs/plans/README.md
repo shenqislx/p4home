@@ -57,9 +57,10 @@ standalone/UI 与矛盾证据判定；用户也已独立确认物理灯态变化
 4A–4E 其余技术/真实环境门禁均已关闭。2026-08-23 用户最终 review 通过，Phase 4 已完成并归档。
 用户在同一条指令中另行授权启动 Phase 5。5A 的 Voice Protocol v1 已冻结；run `32615794192`
 通过 manifest-first 身份、ESP32-P4/flash hash、codec write/microphone、稳定 AFE/lease/栈/UI、真实
-wake 与固定命令动作 marker。Mac 系统扬声器只替代口播输入，P4 startup tone 的独立可听人工观察
-仍明确待补，不能由 `tone_played` marker 冒充。按用户要求不中断后续 coding，当前继续 5B Binary
-Voice Channel & Session Lifecycle；尚未接入真实 STT/TTS。
+wake 与固定命令动作 marker。5B 已由 run `32627837273` 证明真实 P4 PCM 有界抵达 Agent fake sink、
+丢帧 0、HA/固定命令与稳态 UI 主链不回归，并在最终独立 review 后关闭技术门禁。Mac 系统扬声器只
+替代口播输入，P4 startup tone 的独立可听人工观察仍明确待补，不能由 `tone_played` marker 冒充。
+当前进入 5C STT/VAD 与统一 Role Runtime；默认 SR 仍关闭，尚未接入真实 TTS。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 已在 Phase 2 完成并通过实机证据验证。

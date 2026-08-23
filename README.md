@@ -46,8 +46,9 @@ assignment/确定性 Composer 和 4E 安全评测也已通过。最终硬件 run
 在线 HA/P4 回刷、1800 秒长稳、post-Robot standalone/UI 8 FPS 与无矛盾证据；用户另行确认物理灯态
 变化/恢复和实际触摸交互。4A–4E 技术与真实环境门禁均已关闭；2026-08-23 用户最终 review 通过，
 Phase 4 已完成并归档。用户另行明确授权启动 Phase 5；5A 的 Voice Protocol v1、自动化硬件、真实
-wake 与固定命令动作门禁已通过，P4 可听 startup tone 人工观察在用户离开设备期间明确待补。按用户
-要求以 Mac 扬声器替代口播输入并继续 5B coding；默认 SR 仍关闭，尚未接入真实 STT/TTS。
+wake 与固定命令动作门禁已通过；5B 最终 run `32627837273` 已证明真实 P4 PCM 有界抵达 Agent
+fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 review 后技术门禁关闭。P4 可听
+startup tone 人工观察在用户离开设备期间仍明确待补；当前进入 5C，默认 SR 仍关闭，尚未接入真实 TTS。
 
 ## 工作规则
 

@@ -2,7 +2,7 @@
 
 > Status: `in_progress`
 > Started: 2026-08-23
-> Current Gate: 5A 自动化/固定命令门禁通过、P4 可听播放人工观察待补；按用户的 Mac 扬声器替代指示继续 5B coding
+> Current Gate: 5B 二进制 Voice 通道技术门禁通过；P4 可听播放人工观察待补，当前进入 5C STT/统一 Router
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用
 
@@ -65,13 +65,17 @@ P4 固定离线命令、触摸、HA 与 UI 主链。
 
 只有 5A review 通过后开始：
 
-- [ ] 实现独立于 Device JSON 的受认证二进制 Voice channel；复用设备身份，但连接、backpressure、
+- [x] 实现独立于 Device JSON 的受认证二进制 Voice channel；复用设备身份，但连接、backpressure、
   消息大小、速率和并发上限独立；
-- [ ] P4 只在 wake 后创建有界 capture session，按 credit 上行 AFE PCM；Agent 明确 ack、EOS、cancel
+- [x] P4 只在 wake 后创建有界 capture session，按 credit 上行 AFE PCM；Agent 明确 ack、EOS、cancel
   与 terminal error，不能无限缓存；
-- [ ] 实现断线、重连和 epoch fencing，旧连接、旧 session 或迟到 frame 不能污染新 Interaction；
-- [ ] Agent 离线、慢消费者或帧洪水时快速释放音频 owner，恢复 WakeNet 与固定离线命令；
-- [ ] 建立 loopback/fake transport 与真实 LAN 吞吐、抖动、丢帧和恢复测试，仍使用 fake STT/TTS。
+- [x] 实现断线、重连和 epoch fencing，旧连接、旧 session 或迟到 frame 不能污染新 Interaction；
+- [x] Agent 离线、慢消费者或帧洪水时快速释放音频 owner，恢复 WakeNet 与固定离线命令；
+- [x] 建立 loopback/fake transport 与真实 LAN 吞吐、抖动、丢帧和恢复测试，仍使用 fake STT/TTS。
+
+证据：[Phase 5B Binary Voice Channel](../../evidence/agent-phase-5/phase-5b-binary-voice-channel.md)。
+最终 run `32627837273` 证明真实 P4 PCM 有界抵达 Agent fake sink、丢帧 0，并在 HA READY、固定命令
+和稳态 UI 主链同时运行时保持无 crash；32 条 UI PASS 与 HA 冷启动 burst 的 1 条瞬态 FAIL 分开披露。
 
 退出门禁：真实 P4 PCM 可在有界内存内抵达 Agent fake sink；断线、慢端和迟到帧可恢复且不串 session；
 Device JSON、HA、触摸、固定命令和 UI 主链不回归。
