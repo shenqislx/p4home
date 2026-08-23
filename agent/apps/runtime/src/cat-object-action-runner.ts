@@ -20,6 +20,10 @@ import {
 } from "./device-action-adapter.ts";
 import { QWEN_THINKING_ENABLED } from "./model-config.ts";
 import {
+  defaultLowPriorityCatRunRegistry,
+  type LowPriorityCatRunRegistry,
+} from "./low-priority-cat-run-registry.ts";
+import {
   assertRoleToolAuthorization,
   buildRoleContext,
   getRoleProfile,
@@ -44,6 +48,7 @@ export interface RunCatObjectSitEventOptions {
   readonly signal?: AbortSignal;
   readonly clock?: () => number;
   readonly audit_store?: AuditStore;
+  readonly cat_run_registry?: LowPriorityCatRunRegistry;
 }
 
 export interface CatObjectStepResult {
@@ -480,25 +485,30 @@ async function auditFinish(
  * the first has an explicit completed lifecycle.
  */
 export async function runCatObjectSitEvent(
-  options: RunCatObjectSitEventOptions,
+  input: RunCatObjectSitEventOptions,
 ): Promise<CatObjectActionRunResult> {
   for (const [label, value] of [
-    ["run_id", options.run_id],
-    ["session_id", options.session_id],
-    ["tool_call_ids[0]", options.tool_call_ids[0]],
-    ["tool_call_ids[1]", options.tool_call_ids[1]],
-    ["action_ids[0]", options.action_ids[0]],
-    ["action_ids[1]", options.action_ids[1]],
+    ["run_id", input.run_id],
+    ["session_id", input.session_id],
+    ["tool_call_ids[0]", input.tool_call_ids[0]],
+    ["tool_call_ids[1]", input.tool_call_ids[1]],
+    ["action_ids[0]", input.action_ids[0]],
+    ["action_ids[1]", input.action_ids[1]],
   ] as const) {
     assertId(value, label);
   }
-  if (new Set(options.tool_call_ids).size !== 2 || new Set(options.action_ids).size !== 2) {
+  if (new Set(input.tool_call_ids).size !== 2 || new Set(input.action_ids).size !== 2) {
     throw new TypeError("Cat object tool_call_ids and action_ids must be unique");
   }
-  validateExecutionOptions(options);
-  const approved = options.policy.approve(options.event);
-  const clock = options.clock ?? Date.now;
-  return await options.scheduler.schedule({
+  validateExecutionOptions(input);
+  const lease = (input.cat_run_registry ?? defaultLowPriorityCatRunRegistry).begin(
+    input.run_id, input.signal,
+  );
+  try {
+    const options: RunCatObjectSitEventOptions = { ...input, signal: lease.signal };
+    const approved = options.policy.approve(options.event);
+    const clock = options.clock ?? Date.now;
+    return await options.scheduler.schedule({
     role_id: "cat",
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     execute: async () => {
@@ -648,5 +658,8 @@ export async function runCatObjectSitEvent(
         steps,
       };
     },
-  });
+    });
+  } finally {
+    lease.release();
+  }
 }

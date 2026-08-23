@@ -12,6 +12,7 @@ import {
   DeterministicFakeDeviceSocket,
   DeviceWebSocketActionAdapter,
   getRoleProfile,
+  LowPriorityCatRunRegistry,
   RoleScheduler,
   runCatObjectSitEvent,
 } from "@p4home/runtime";
@@ -247,13 +248,17 @@ test("Cat role context rejects extra execution metadata and malformed capability
 test("Cat executes go_to then sit and audits the coordinate-free capability observation", async () => {
   const now = 110_000;
   const harness = connectedV2({ now: () => now });
-  const model = objectSequenceProvider();
+  const catRuns = new LowPriorityCatRunRegistry();
+  const model = objectSequenceProvider(undefined, () => {
+    assert.equal(catRuns.active_count, 1);
+  });
   using store = new SqliteAuditStore(":memory:");
   const result = await runCatObjectSitEvent(
-    runOptions("success", now, harness, model.provider, store),
+    runOptions("success", now, harness, model.provider, store, { cat_run_registry: catRuns }),
   );
 
   assert.equal(result.status, "completed");
+  assert.equal(catRuns.active_count, 0);
   assert.deepEqual(result.steps.map((step) => [step.tool, step.executed, step.outcome.status]), [
     ["character.go_to", true, "completed"],
     ["character.sit", true, "completed"],

@@ -69,6 +69,14 @@ export interface VoiceCaptureSink {
   onSessionOpen(summary: VoiceCaptureSummary): void;
   onFrame(summary: VoiceCaptureSummary, frame: DecodedVoiceFrame): void;
   onSessionClosed(summary: VoiceCaptureSummary): void;
+  onDeviceDisconnect?(deviceId: string): void;
+}
+
+export interface VoiceDispatchContext {
+  readonly device_id: string;
+  readonly session_id: string;
+  readonly stream_id: number;
+  readonly epoch: number;
 }
 
 export class AggregateVoiceCaptureSink implements VoiceCaptureSink {
@@ -129,6 +137,7 @@ export interface VoiceWebSocketServerOptions {
   readonly max_buffered_response_bytes?: number;
   readonly handshake_timeout_ms?: number;
   readonly sink?: VoiceCaptureSink;
+  readonly on_device_disconnect?: (deviceId: string) => void;
 }
 
 export interface VoiceWebSocketServerAddress {
@@ -518,13 +527,21 @@ export class VoiceWebSocketServer {
           });
         },
         sendBinary: (message) => {
-          if (webSocket.readyState !== WebSocket.OPEN
-              || webSocket.bufferedAmount + message.byteLength > this.#maxBufferedResponseBytes) {
-            throw new VoicePlaybackError("LIMIT_EXCEEDED", "playback binary backpressure limit exceeded");
+          try {
+            if (webSocket.readyState !== WebSocket.OPEN
+                || webSocket.bufferedAmount + message.byteLength > this.#maxBufferedResponseBytes) {
+              throw new VoicePlaybackError(
+                "LIMIT_EXCEEDED", "playback binary backpressure limit exceeded",
+              );
+            }
+            webSocket.send(message, { binary: true }, (error) => {
+              message.fill(0);
+              if (error) sender.disconnect();
+            });
+          } catch (error) {
+            message.fill(0);
+            throw error;
           }
-          webSocket.send(message, { binary: true }, (error) => {
-            if (error) sender.disconnect();
-          });
         },
       },
     });
@@ -604,6 +621,8 @@ export class VoiceWebSocketServer {
         const previous = this.#connections.get(deviceId);
         if (previous !== undefined && previous.readyState !== WebSocket.CLOSED) {
           this.#playbacks.get(deviceId)?.disconnect();
+          this.#sink.onDeviceDisconnect?.(deviceId);
+          this.#options.on_device_disconnect?.(deviceId);
           previous.terminate();
         }
         this.#connections.set(deviceId, webSocket);
@@ -707,9 +726,13 @@ export class VoiceWebSocketServer {
           }
         });
         webSocket.once("close", () => {
-          this.#playbacks.get(deviceId)?.disconnect();
           receiver.disconnect();
-          if (this.#connections.get(deviceId) === webSocket) this.#connections.delete(deviceId);
+          if (this.#connections.get(deviceId) === webSocket) {
+            this.#playbacks.get(deviceId)?.disconnect();
+            this.#sink.onDeviceDisconnect?.(deviceId);
+            this.#options.on_device_disconnect?.(deviceId);
+            this.#connections.delete(deviceId);
+          }
         });
       });
     });
@@ -750,7 +773,11 @@ export class VoiceWebSocketServer {
     for (const socket of this.#pendingSockets.keys()) socket.destroy();
     for (const timer of this.#pendingSockets.values()) clearTimeout(timer);
     this.#pendingSockets.clear();
-    for (const connection of this.#connections.values()) connection.terminate();
+    for (const [deviceId, connection] of this.#connections) {
+      this.#sink.onDeviceDisconnect?.(deviceId);
+      this.#options.on_device_disconnect?.(deviceId);
+      connection.terminate();
+    }
     for (const playback of this.#playbacks.values()) playback.disconnect();
     this.#playbacks.clear();
     this.#connections.clear();

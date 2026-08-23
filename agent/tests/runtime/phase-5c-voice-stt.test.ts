@@ -175,6 +175,28 @@ test("only an active final transcript enters the existing user_text voice bounda
   assert.equal(dispatched.length, 1, "duplicate terminal must not create another Interaction");
 });
 
+test("device disconnect aborts in-flight STT before any final transcript dispatch", async () => {
+  let providerStarted = false;
+  let dispatches = 0;
+  const provider: SttProvider = {
+    async transcribe(): Promise<SttFinalTranscript> {
+      providerStarted = true;
+      return await new Promise<SttFinalTranscript>(() => undefined);
+    },
+  };
+  const pipeline = new VoiceSttPipeline({
+    provider,
+    dispatch_final: async () => { dispatches++; },
+  });
+  completeSession(pipeline, 101);
+  while (!providerStarted) await new Promise((resolve) => setImmediate(resolve));
+  pipeline.onDeviceDisconnect("p4-test");
+  await pipeline.drain();
+
+  assert.equal(dispatches, 0);
+  assert.equal(pipeline.results[0]?.outcome, "stale");
+});
+
 test("a legal short EOS tail reaches STT without inflating the minimum speech duration", async () => {
   const provider = new FakeSttProvider();
   const pipeline = new VoiceSttPipeline({ provider, dispatch_final: async () => undefined });

@@ -13,7 +13,11 @@ import {
 import { VOICE_FLAG_END_OF_STREAM, type DecodedVoiceFrame } from "@p4home/contracts";
 
 import type { UserTextInteraction } from "./role-contracts.ts";
-import type { VoiceCaptureSink, VoiceCaptureSummary } from "./voice-websocket-server.ts";
+import type {
+  VoiceCaptureSink,
+  VoiceCaptureSummary,
+  VoiceDispatchContext,
+} from "./voice-websocket-server.ts";
 
 const FRAME_MS = 20;
 const FRAME_BYTES = 640;
@@ -53,7 +57,9 @@ export interface VoiceSttPipelineOptions {
   readonly dispatch_final: (
     interaction: UserTextInteraction,
     signal: AbortSignal,
+    context: VoiceDispatchContext,
   ) => Promise<void>;
+  readonly on_capture_open?: (summary: VoiceCaptureSummary) => void;
   readonly on_partial_ui?: (partial: SttPartialTranscript) => void;
   readonly clock?: () => number;
   readonly vad_peak_threshold?: number;
@@ -181,6 +187,7 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
     this.#latestEpoch.set(summary.device_id, summary.epoch);
     this.#inflightByDevice.get(summary.device_id)?.abort(new DOMException("superseded", "AbortError"));
     this.#inflightByDevice.delete(summary.device_id);
+    this.#options.on_capture_open?.(structuredClone(summary));
     this.#active.set(sessionKey(summary), {
       summary: structuredClone(summary),
       frames: [],
@@ -242,6 +249,11 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
     const operation = this.#transcribeAndDispatch(state);
     this.#pending.add(operation);
     void operation.finally(() => this.#pending.delete(operation));
+  }
+
+  public onDeviceDisconnect(deviceId: string): void {
+    this.#inflightByDevice.get(deviceId)?.abort(new DOMException("device disconnected", "AbortError"));
+    this.#inflightByDevice.delete(deviceId);
   }
 
   public async drain(): Promise<void> {
@@ -371,7 +383,12 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
         received_at_ms: (this.#options.clock ?? Date.now)(),
       };
       try {
-        await this.#options.dispatch_final(interaction, controller.signal);
+        await this.#options.dispatch_final(interaction, controller.signal, {
+          device_id: state.summary.device_id,
+          session_id: state.summary.session_id,
+          stream_id: state.summary.stream_id,
+          epoch: state.summary.epoch,
+        });
       } catch {
         this.#record(
           state,

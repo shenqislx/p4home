@@ -19,6 +19,10 @@ import {
 } from "./device-action-adapter.ts";
 import { QWEN_THINKING_ENABLED } from "./model-config.ts";
 import {
+  defaultLowPriorityCatRunRegistry,
+  type LowPriorityCatRunRegistry,
+} from "./low-priority-cat-run-registry.ts";
+import {
   assertRoleToolAuthorization,
   buildRoleContext,
   getRoleProfile,
@@ -43,6 +47,7 @@ export interface RunCatRoomTargetEventOptions {
   readonly signal?: AbortSignal;
   readonly clock?: () => number;
   readonly audit_store?: AuditStore;
+  readonly cat_run_registry?: LowPriorityCatRunRegistry;
 }
 
 export interface CatActionRunResult {
@@ -332,19 +337,24 @@ async function decideCatAction(
  * The approved test event maps to one fixed Cat tool; no user text is retained.
  */
 export async function runCatRoomTargetEvent(
-  options: RunCatRoomTargetEventOptions,
+  input: RunCatRoomTargetEventOptions,
 ): Promise<CatActionRunResult> {
   for (const [label, value] of [
-    ["run_id", options.run_id],
-    ["session_id", options.session_id],
-    ["tool_call_id", options.tool_call_id],
-    ["action_id", options.action_id],
+    ["run_id", input.run_id],
+    ["session_id", input.session_id],
+    ["tool_call_id", input.tool_call_id],
+    ["action_id", input.action_id],
   ] as const) {
     assertId(value, label);
   }
-  const approved = options.policy.approve(options.event);
-  const clock = options.clock ?? Date.now;
-  return await options.scheduler.schedule({
+  const lease = (input.cat_run_registry ?? defaultLowPriorityCatRunRegistry).begin(
+    input.run_id, input.signal,
+  );
+  try {
+    const options: RunCatRoomTargetEventOptions = { ...input, signal: lease.signal };
+    const approved = options.policy.approve(options.event);
+    const clock = options.clock ?? Date.now;
+    return await options.scheduler.schedule({
     role_id: "cat",
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     execute: async () => {
@@ -427,5 +437,8 @@ export async function runCatRoomTargetEvent(
       );
       return result;
     },
-  });
+    });
+  } finally {
+    lease.release();
+  }
 }

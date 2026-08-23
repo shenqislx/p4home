@@ -154,6 +154,7 @@ test("playback sender opens, obeys credit, emits exact EOS PCM and waits for ter
     bytes: 1_280,
     dropped_frames: 0,
   });
+  assert.equal(playback.retained_pcm_bytes, 0);
 });
 
 test("P4 barge-in terminal stops further frames and preserves cancelled truth", async () => {
@@ -162,6 +163,7 @@ test("P4 barge-in terminal stops further frames and preserves cancelled truth", 
   const pending = playback.start();
   playback.handleControl(control("session.ready", { initial_credit_frames: 1 }));
   assert.equal(wire.binaries.length, 1);
+  assert.equal(playback.retained_pcm_bytes, 0);
   playback.handleControl(control("session.cancel", { reason: "barge_in" }));
   playback.handleControl(control("session.closed", { status: "cancelled", dropped_frames: 0 }));
   const result = await pending;
@@ -201,6 +203,33 @@ test("abort during session.open synchronously emits one bounded cancel", async (
 test("playback input and concurrent sender count are bounded before any wire output", () => {
   assert.throws(() => sender(new Uint8Array(1), new FakeWire()), /even/);
   assert.throws(() => sender(new Uint8Array(1_920_002), new FakeWire()), /1,920,000/);
+});
+
+test("pre-aborted playback wipes its private PCM clone before rejecting", async () => {
+  const controller = new AbortController();
+  controller.abort(new Error("already cancelled"));
+  const playback = sender(Uint8Array.from({ length: 640 }, () => 9), new FakeWire());
+  await assert.rejects(playback.start(controller.signal), /cancelled before open/);
+  assert.equal(playback.retained_pcm_bytes, 0);
+});
+
+test("a synchronous binary wire failure wipes the temporary PCM frame", async () => {
+  let retainedFrame: Uint8Array | null = null;
+  const wire: VoicePlaybackWire = {
+    sendControl: () => undefined,
+    sendBinary: (message) => {
+      retainedFrame = message;
+      throw new Error("injected synchronous send failure");
+    },
+  };
+  const playback = sender(Uint8Array.from({ length: 640 }, () => 5), wire);
+  const pending = playback.start();
+  playback.handleControl(control("session.ready", { initial_credit_frames: 1 }));
+  assert.notEqual(retainedFrame, null);
+  assert.ok((retainedFrame as unknown as Uint8Array).every((value) => value === 0));
+  playback.disconnect();
+  await assert.rejects(pending);
+  assert.equal(playback.retained_pcm_bytes, 0);
 });
 
 test("playback timeout keeps its identity alive long enough to absorb P4 terminal", async () => {
@@ -284,4 +313,41 @@ test("WakeNet capture open sends playback barge-in before capture ready", async 
   socket.send(reply(playbackOpen, "session.cancel", { reason: "barge_in" }));
   socket.send(reply(playbackOpen, "session.closed", { status: "cancelled", dropped_frames: 0 }));
   assert.equal((await pending).status, "cancelled");
+});
+
+test("same-device reconnect notifies once and stale socket close cannot cancel new playback", async (t) => {
+  const disconnected: string[] = [];
+  const server = new VoiceWebSocketServer({
+    host: "127.0.0.1",
+    port: 0,
+    allow_insecure_loopback_test: true,
+    device_tokens: { "p4-playback-test": "phase-5d-test-token-0123456789abcdef" },
+    on_device_disconnect: (deviceId) => { disconnected.push(deviceId); },
+  });
+  t.after(async () => { await server.close(); });
+  const first = await connectPlaybackTestServer(server);
+  const address = server.address!;
+  const secondSocket = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, {
+    headers: {
+      Authorization: "Bearer phase-5d-test-token-0123456789abcdef",
+      "X-P4-Device-ID": "p4-playback-test",
+    },
+  });
+  await new Promise<void>((resolve, reject) => {
+    secondSocket.once("open", resolve);
+    secondSocket.once("error", reject);
+  });
+  const second = { socket: secondSocket, inbox: new SocketInbox(secondSocket) };
+  t.after(() => second.socket.terminate());
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(disconnected, ["p4-playback-test"]);
+
+  const pending = server.playback("p4-playback-test", new Uint8Array(640));
+  const open = await second.inbox.control();
+  second.socket.send(reply(open, "session.ready", { initial_credit_frames: 1 }));
+  assert.equal((await second.inbox.next()).binary, true);
+  assert.equal((await second.inbox.control()).type, "session.eos");
+  second.socket.send(reply(open, "session.closed", { status: "completed", dropped_frames: 0 }));
+  assert.equal((await pending).status, "completed");
+  first.socket.terminate();
 });

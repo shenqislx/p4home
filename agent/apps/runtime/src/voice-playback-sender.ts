@@ -159,6 +159,10 @@ export class VoicePlaybackSender {
     return { ...this.#identity, session_id_bytes: this.#identity.session_id_bytes.slice() };
   }
 
+  public get retained_pcm_bytes(): number {
+    return this.#pcm.some((value) => value !== 0) ? this.#pcm.byteLength : 0;
+  }
+
   public matches(message: VoiceControlMessage): boolean {
     return message.session_id === this.#identity.session_id
       && message.stream_id === this.#identity.stream_id
@@ -169,6 +173,8 @@ export class VoicePlaybackSender {
     if (this.#started) throw new VoicePlaybackError("INVALID_CONTROL", "playback sender can start only once");
     this.#started = true;
     if (signalAborted(signal)) {
+      this.#settled = true;
+      this.#pcm.fill(0);
       return Promise.reject(new VoicePlaybackError("CANCELLED", "playback was cancelled before open"));
     }
     const result = new Promise<VoicePlaybackSummary>((resolve, reject) => {
@@ -304,7 +310,12 @@ export class VoicePlaybackSender {
       message.set(encodeVoiceFrameHeader(header));
       message.set(this.#pcm.subarray(this.#offset, this.#offset + payloadBytes), VOICE_HEADER_BYTES);
       this.#flow.recordFrameSent(header);
-      this.#wire.sendBinary(message);
+      try {
+        this.#wire.sendBinary(message);
+      } catch (error) {
+        message.fill(0);
+        throw error;
+      }
       this.#offset += payloadBytes;
       this.#frames++;
       this.#sequence++;
@@ -326,6 +337,7 @@ export class VoicePlaybackSender {
     if (this.#settled) return;
     this.#settled = true;
     this.#clearTimer();
+    this.#pcm.fill(0);
     this.#resolve?.({
       schema_version: 1,
       device_id: this.#deviceId,
@@ -345,6 +357,7 @@ export class VoicePlaybackSender {
     if (this.#settled) return;
     this.#settled = true;
     this.#clearTimer();
+    this.#pcm.fill(0);
     this.#reject?.(error);
     this.#resolve = null;
     this.#reject = null;
@@ -395,6 +408,7 @@ export class VoicePlaybackSender {
     this.#pendingError = null;
     this.#settled = true;
     this.#clearTimer();
+    this.#pcm.fill(0);
     this.#reject?.(error);
     this.#resolve = null;
     this.#reject = null;

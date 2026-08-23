@@ -7,6 +7,7 @@ import {
   TtsProviderError,
   type TtsProvider,
   type TtsRole,
+  type TtsSynthesisRequest,
   type TtsSynthesisResult,
 } from "@p4home/provider-tts";
 
@@ -121,6 +122,43 @@ function isAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
 }
 
+function discardGeneratedPcm(value: unknown): void {
+  if (typeof value === "object" && value !== null && "pcm" in value
+      && value.pcm instanceof Uint8Array) {
+    value.pcm.fill(0);
+  }
+}
+
+function assertGeneratedResult(
+  value: TtsSynthesisResult,
+  request: {
+    readonly interaction_id: string;
+    readonly assignment_id: string;
+    readonly segment_index: number;
+    readonly role_id: TtsRole;
+    readonly voice: typeof TTS_ROLE_VOICES[TtsRole];
+  },
+): void {
+  const expectedDurationMs = value.samples / TTS_SAMPLE_RATE_HZ * 1_000;
+  if (value.schema_version !== 1 || value.kind !== "final_pcm"
+      || value.interaction_id !== request.interaction_id
+      || value.assignment_id !== request.assignment_id
+      || value.segment_index !== request.segment_index
+      || value.role_id !== request.role_id || value.voice !== request.voice
+      || value.sample_rate_hz !== TTS_SAMPLE_RATE_HZ
+      || value.channels !== TTS_CHANNELS || value.sample_bits !== TTS_SAMPLE_BITS
+      || !(value.pcm instanceof Uint8Array) || value.pcm.byteLength < 2
+      || value.pcm.byteLength > TTS_MAX_PCM_BYTES || value.pcm.byteLength % 2 !== 0
+      || !Number.isInteger(value.samples) || value.samples !== value.pcm.byteLength / 2
+      || !Number.isFinite(value.duration_ms) || value.duration_ms <= 0
+      || Math.abs(value.duration_ms - expectedDurationMs) > 0.000_51) {
+    discardGeneratedPcm(value);
+    throw new RoleAwareTtsError(
+      "PROVIDER_ERROR", "role-aware TTS provider returned invalid identity or PCM geometry",
+    );
+  }
+}
+
 export class RoleAwareTtsPipeline {
   readonly #provider: TtsProvider;
 
@@ -140,59 +178,72 @@ export class RoleAwareTtsPipeline {
     const segments: RoleAwareTtsSegment[] = [];
     let totalBytes = 0;
     let totalDurationMs = 0;
-    for (const [segmentIndex, part] of roleResponse.parts.entries()) {
-      if (isAborted(signal)) aborted(signal);
-      const text = renderText(part);
-      const voice = TTS_ROLE_VOICES[part.role_id];
-      let generated: TtsSynthesisResult;
-      try {
-        generated = await this.#provider.synthesize({
+    try {
+      for (const [segmentIndex, part] of roleResponse.parts.entries()) {
+        if (isAborted(signal)) aborted(signal);
+        const text = renderText(part);
+        const voice = TTS_ROLE_VOICES[part.role_id];
+        let generated: TtsSynthesisResult;
+        const request = {
           interaction_id: interactionId,
           assignment_id: part.assignment_id,
           segment_index: segmentIndex,
           role_id: part.role_id,
           text,
           voice,
-          language: "zh",
+          language: "zh" as const,
           sample_rate_hz: TTS_SAMPLE_RATE_HZ,
           channels: TTS_CHANNELS,
           sample_bits: TTS_SAMPLE_BITS,
-        }, signal === undefined ? {} : { signal });
-      } catch (error) {
-        if (isAborted(signal) || (error instanceof TtsProviderError && error.code === "CANCELLED")) {
+        } satisfies TtsSynthesisRequest;
+        try {
+          generated = await this.#provider.synthesize(
+            request, signal === undefined ? {} : { signal },
+          );
+        } catch (error) {
+          if (isAborted(signal) || (error instanceof TtsProviderError && error.code === "CANCELLED")) {
+            aborted(signal);
+          }
+          throw new RoleAwareTtsError("PROVIDER_ERROR", "role-aware TTS provider failed", { cause: error });
+        }
+        assertGeneratedResult(generated, request);
+        if (isAborted(signal)) {
+          generated.pcm.fill(0);
           aborted(signal);
         }
-        throw new RoleAwareTtsError("PROVIDER_ERROR", "role-aware TTS provider failed", { cause: error });
+        totalBytes += generated.pcm.byteLength;
+        totalDurationMs += generated.duration_ms;
+        if (totalBytes > TTS_MAX_PCM_BYTES) {
+          generated.pcm.fill(0);
+          throw new RoleAwareTtsError("LIMIT_EXCEEDED", "composed TTS PCM exceeded the total bound");
+        }
+        segments.push({
+          schema_version: 1,
+          interaction_id: interactionId,
+          assignment_id: part.assignment_id,
+          segment_index: segmentIndex,
+          role_id: part.role_id,
+          voice,
+          text,
+          source_status: part.status,
+          source_outcome: part.outcome,
+          robot_tool_terminals: terminalMetadata(part),
+          pcm: generated.pcm,
+          samples: generated.samples,
+          duration_ms: generated.duration_ms,
+        });
       }
-      if (isAborted(signal)) aborted(signal);
-      totalBytes += generated.pcm.byteLength;
-      totalDurationMs += generated.duration_ms;
-      if (totalBytes > TTS_MAX_PCM_BYTES) {
-        throw new RoleAwareTtsError("LIMIT_EXCEEDED", "composed TTS PCM exceeded the total bound");
-      }
-      segments.push({
+      return {
         schema_version: 1,
         interaction_id: interactionId,
-        assignment_id: part.assignment_id,
-        segment_index: segmentIndex,
-        role_id: part.role_id,
-        voice,
-        text,
-        source_status: part.status,
-        source_outcome: part.outcome,
-        robot_tool_terminals: terminalMetadata(part),
-        pcm: generated.pcm,
-        samples: generated.samples,
-        duration_ms: generated.duration_ms,
-      });
+        role_response: structuredClone(roleResponse),
+        segments,
+        pcm_bytes: totalBytes,
+        duration_ms: totalDurationMs,
+      };
+    } catch (error) {
+      for (const segment of segments) segment.pcm.fill(0);
+      throw error;
     }
-    return {
-      schema_version: 1,
-      interaction_id: interactionId,
-      role_response: structuredClone(roleResponse),
-      segments,
-      pcm_bytes: totalBytes,
-      duration_ms: totalDurationMs,
-    };
   }
 }

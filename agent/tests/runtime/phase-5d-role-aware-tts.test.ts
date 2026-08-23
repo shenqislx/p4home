@@ -15,6 +15,7 @@ import {
 
 class FakeTtsProvider implements TtsProvider {
   readonly requests: TtsSynthesisRequest[] = [];
+  readonly generated: Uint8Array[] = [];
   failAt = -1;
 
   public async synthesize(request: TtsSynthesisRequest): Promise<TtsSynthesisResult> {
@@ -22,6 +23,7 @@ class FakeTtsProvider implements TtsProvider {
     if (request.segment_index === this.failAt) throw new Error("injected provider failure");
     const pcm = new Uint8Array(640);
     pcm.fill(request.role_id === "human" ? 1 : 2);
+    this.generated.push(pcm);
     return {
       schema_version: 1,
       kind: "final_pcm",
@@ -155,6 +157,7 @@ test("provider failure discards the render result without rewriting the Role exe
   );
   assert.deepEqual(response, before);
   assert.equal(response.parts[1]?.tool_results[0]?.status, "success");
+  assert.ok(provider.generated.every((pcm) => pcm.every((sample) => sample === 0)));
 });
 
 test("invalid composition, Human tool terminals and pre-aborted renders fail closed", async () => {
@@ -176,4 +179,33 @@ test("invalid composition, Human tool terminals and pre-aborted renders fail clo
     ),
     (error: unknown) => error instanceof RoleAwareTtsError && error.code === "CANCELLED",
   );
+});
+
+test("provider identity and PCM geometry are revalidated and malformed PCM is wiped", async () => {
+  const generated = new Uint8Array(640);
+  generated.fill(7);
+  const provider: TtsProvider = {
+    async synthesize(request): Promise<TtsSynthesisResult> {
+      return {
+        schema_version: 1,
+        kind: "final_pcm",
+        interaction_id: request.interaction_id,
+        assignment_id: "foreign-assignment",
+        segment_index: request.segment_index,
+        role_id: request.role_id,
+        voice: request.voice,
+        pcm: generated,
+        sample_rate_hz: 16_000,
+        channels: 1,
+        sample_bits: 16,
+        samples: 319,
+        duration_ms: 20,
+      };
+    },
+  };
+  await assert.rejects(
+    new RoleAwareTtsPipeline(provider).render("voice:interaction:invalid-provider", mixedResponse()),
+    (error: unknown) => error instanceof RoleAwareTtsError && error.code === "PROVIDER_ERROR",
+  );
+  assert.ok(generated.every((sample) => sample === 0));
 });

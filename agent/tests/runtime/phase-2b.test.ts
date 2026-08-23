@@ -11,6 +11,7 @@ import {
   DeviceActionAdapterError,
   DeviceProtocolBoundaryError,
   DeviceWebSocketActionAdapter,
+  LowPriorityCatRunRegistry,
   RoleScheduler,
   runCatRoomTargetEvent,
 } from "@p4home/runtime";
@@ -525,6 +526,7 @@ test("approved Cat event creates an audited Cat Run; rejected event sends no act
   const policy = new CatEventPolicy({ now: () => now, minimum_interval_ms: 0 });
   const scheduler = new RoleScheduler();
   const catModel = catToolProvider("primary_bedroom");
+  const catRuns = new LowPriorityCatRunRegistry();
   using store = new SqliteAuditStore(":memory:");
 
   const result = await runCatRoomTargetEvent({
@@ -537,11 +539,18 @@ test("approved Cat event creates an audited Cat Run; rejected event sends no act
     policy,
     scheduler,
     adapter,
-    provider: catModel.provider,
+    provider: {
+      async chat(request) {
+        assert.equal(catRuns.active_count, 1);
+        return await catModel.provider.chat(request);
+      },
+    },
+    cat_run_registry: catRuns,
     clock: () => now,
     audit_store: store,
   });
   assert.equal(result.status, "completed");
+  assert.equal(catRuns.active_count, 0);
   assert.equal(result.model_turns, 1);
   assert.equal(catModel.requests.length, 1);
   assert.equal(catModel.requests[0]?.think, false);
