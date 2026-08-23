@@ -162,7 +162,7 @@ speech frame、合格 frame 与 MultiNet detect call。`DIAG:` 与 `VERIFY:` 前
 动作递增 `command_action_count` 后，app_main 才会输出 `VERIFY:phase5a:fixed_command:PASS`。该候选
 在提交、推送和新硬件 artifact 前不改变 Phase 5A 判定。
 
-### 最终自动化候选：PASS；P4 可听播放人工观察待补
+### 最终自动化候选：PASS；P4 可听播放人工观察：PASS
 
 - commit：`d2841de76ad49eb51fdcd6fee32e00d742bc43d6`；run：`32615794192`；workflow
   conclusion：`success`；profile：`phase5a_voice`；串口：`/dev/cu.usbserial-210`；capture：180 秒；
@@ -183,5 +183,5 @@ speech frame、合格 frame 与 MultiNet detect call。`DIAG:` 与 `VERIFY:` 前
 - 上述证据足以判定 5A 自动化、真实 wake 与固定命令动作门禁 **PASS**，并冻结 Voice Protocol v1；
   默认配置仍未打开 SR/音频自检，也没有向 Agent 节点传输或持久化真实音频。`speaker` 与
   `tone_played` marker 只证明 codec 数字播放路径调用成功，不能证明 P4 扬声器实际可听；Mac 系统
-  扬声器是麦克风声学输入替代，不是 P4 输出观察。因此 P4 startup tone 的独立人工听觉项保持待补，
-  不由自动 marker 冒充。按用户要求继续后续 coding，但该人工项必须在 Phase 5 最终关闭前补齐。
+  扬声器是麦克风声学输入替代，不是 P4 输出观察。2026-08-24，用户在设备现场完成人工听觉确认，
+  明确确认 P4 startup tone 实际可听；因此该独立人工项判定为 **PASS**，且不由自动 marker 冒充。

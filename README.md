@@ -49,8 +49,8 @@ Phase 4 已完成并归档。用户另行明确授权启动 Phase 5；5A 的 Voi
 wake 与固定命令动作门禁已通过；5B 最终 run `32627837273` 已证明真实 P4 PCM 有界抵达 Agent
 fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 review 后技术门禁关闭。5C 最终 run
 `32635742553` 已证明真实 P4 中文输入经固定 STT 后只进入统一 Human Runtime，审计完整且 Cat 零
-泄漏；P4 可听 startup tone 人工观察在用户离开设备期间仍明确待补。当前进入 5D 分角色 TTS、播放
-与 barge-in，默认 SR 仍关闭。
+泄漏；2026-08-24 用户现场确认 P4 startup tone 实际可听，5A 最后一项人工门禁关闭。5D 分角色
+TTS、播放与 barge-in 技术门禁已通过，当前进入 5E 安全/评测/真实硬件总门禁；默认 SR 仍关闭。
 
 ## 工作规则
 
