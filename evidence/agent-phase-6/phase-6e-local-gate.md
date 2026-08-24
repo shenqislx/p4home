@@ -182,7 +182,7 @@ tracked in [phase-6-real-environment-gates.md](./phase-6-real-environment-gates.
    - reproduction entry: `pnpm gate:phase6-sqlite-live` now covers real-filesystem
      permissions, permissive-path rejection, integrity/corruption, controlled
      process kill, atomic online backup and checkpointed cold backup, with evidence bound
-     to implementation commit `db42974`. Real power-loss, total DB quota, retention,
+     to implementation commit `8438b8f`. Real power-loss, total DB quota, retention,
      encryption and media-level deletion
      remain pending.
 6. **Multi-user and subject identity model**

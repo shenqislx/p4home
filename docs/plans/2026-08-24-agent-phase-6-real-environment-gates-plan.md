@@ -83,7 +83,7 @@ self-hosted hardware run. It has not started and no P4 was flashed in 6F/6G/6I.
   recovery retains committed records and passes `integrity_check`.
 - [x] The online backup API publishes a new `0600` file atomically, rejects an existing
   destination/insecure parent, passes `integrity_check`, and has an explicit snapshot boundary.
-- [x] Clean-commit rerun passed and binds implementation commit `db42974`.
+- [x] Clean-commit rerun passed and binds implementation commit `8438b8f`.
   Real power-loss remains a separate
   result and is not closed by the controlled kill or backup probes.
 - [ ] Database/WAL/index quota and per-class retention fail closed at their limits.
@@ -96,7 +96,7 @@ Artifact:
 [phase-6i-sqlite-filesystem.json](../../evidence/agent-phase-6/phase-6i-sqlite-filesystem.json)
 
 The current result is labeled `commit_bound` and binds implementation commit
-`db429744a7074ad38e918eb9e966d6862bbaa674`. No production SQLite item is closed by
+`8438b8fa0e90f517a1d287d344987820d6c6bb7f`. No production SQLite item is closed by
 the 6F/6G temporary `:memory:` stores, and the bounded 6I gate does not close the
 unchecked items above.
 

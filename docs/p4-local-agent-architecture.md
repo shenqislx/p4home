@@ -794,7 +794,7 @@ Memory 均为 owner-role private，`shared_acl/hybrid` 继续 evaluator-only。�
 grounded/prompt-injection 门禁已通过；6G 真实 HA 只读门禁证明 Memory 不覆盖 HA
 真值且无 service call，并已在干净工作树上绑定提交。6I APFS 权限、WAL/NORMAL、受控进程终止、
 完整性/损坏拒绝、在线备份和 checkpoint 冷备份子门禁已从干净工作树复跑通过并绑定提交
-`db42974`。Current Gate 仅为
+`8438b8f`。Current Gate 仅为
 代表性家庭数据、P4 Cat/Voice 端到端、家庭身份模型和 SQLite 真实断电、quota/retention/
 加密/secure-delete，均保持 `pending`；Phase 5 仍为 `pending_real_environment`，Phase 7
 等待另行明确授权且未启动。确定性 FTS 已满足当前冻结场景，因此 Vector DB 当前不立项，但真实

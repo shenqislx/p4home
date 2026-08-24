@@ -59,7 +59,7 @@ fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 r
 `shared_acl/hybrid` 仅限 experimental evaluator，跨角色产品召回未启用。6F 真实 35B
 门禁已通过，6G 真实 HA 只读门禁已从干净工作树复跑通过并绑定提交。6I APFS 权限、WAL/NORMAL、
 受控进程终止、完整性/损坏拒绝、在线备份和 checkpoint 冷备份子门禁已从干净工作树复跑通过，
-证据绑定提交 `db42974`。
+证据绑定提交 `8438b8f`。
 Current Gate 仅剩代表性家庭数据、P4/Voice 端到端、家庭身份模型和 SQLite 真实断电、
 quota/retention/加密/secure-delete 证据；这些项目全部保持 `pending`。
 Vector DB 仍不立项。Phase 5 仍为 `pending_real_environment`；Phase 7 仍为 `pending`，需另行明确

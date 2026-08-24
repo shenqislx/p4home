@@ -90,7 +90,7 @@ Result on macOS/APFS with Node `v24.19.0`:
 - actual Store pragmas: `journal_mode=wal`, `synchronous=1` (`NORMAL`);
 - clean reopen and `integrity_check=ok`;
 - synthetic truncation corruption: rejected;
-- controlled child-process `SIGKILL`: recovered `99` committed synthetic records,
+- controlled child-process `SIGKILL`: recovered `97` committed synthetic records,
   post-kill `integrity_check=ok`, checkpoint busy count `0`, and bounded reopen read passed;
 - online backup while the Store remains open: atomically published mode `0600`,
   `integrity_check=ok`, expected pre-snapshot record restored, post-snapshot record absent;
@@ -98,7 +98,7 @@ Result on macOS/APFS with Node `v24.19.0`:
   synthetic record restored;
 - artifact contains verdicts/counts only and is mode `0600`.
 
-Deletion-remnant boundary (local pre-commit follow-up):
+Deletion-remnant boundary (commit-bound follow-up):
 
 - logical cascade deletion removes the Memory from SQL/FTS/ACL and from a new
   online backup, while the deletion audit remains body-free;
@@ -120,7 +120,7 @@ Regression:
 - the sandboxed attempt passed `376/399`; all 23 failures were localhost server
   `listen EPERM` restrictions. Re-running the identical command with local bind
   permission passed all WebSocket/HA/Voice and SQLite tests.
-- deletion-remnant local follow-up: typecheck PASS, storage plus Phase 6I `50/50`
+- deletion-remnant commit-bound follow-up: typecheck PASS, storage plus Phase 6I `50/50`
   PASS and `pnpm gate:phase6` PASS;
 - follow-up full suite: `399/400`; the only failure was the pre-existing Phase 4C
   unavailable-socket timing classification (`transport_error` instead of
@@ -131,7 +131,7 @@ Artifact:
 [phase-6i-sqlite-filesystem.json](./phase-6i-sqlite-filesystem.json)
 
 The result is `commit_bound`: it was produced from a clean worktree and binds
-implementation commit `db429744a7074ad38e918eb9e966d6862bbaa674`. It does not claim
+implementation commit `8438b8fa0e90f517a1d287d344987820d6c6bb7f`. It does not claim
 real power-loss, quota, retention, encryption/key rotation or media-level secure delete.
 
 ## Still pending
