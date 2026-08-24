@@ -792,8 +792,8 @@ pnpm `11.19.0` 下通过。用户已批准
 Memory 均为 owner-role private，`shared_acl/hybrid` 继续 evaluator-only。三策略 deterministic
 通过只说明各自实现符合冻结矩阵，不说明共享更优。2026-08-24，6F 真实 35B
 grounded/prompt-injection 门禁已通过；6G 真实 HA 只读门禁证明 Memory 不覆盖 HA
-真值且无 service call，但需 clean commit 复跑。Current Gate 仅为代表性家庭数据、HA
-提交绑定、P4 Cat/Voice 端到端、家庭身份模型和长期 SQLite/WAL/断电/备份/quota/retention/
+真值且无 service call，并已在干净工作树上绑定提交。Current Gate 仅为代表性家庭数据、
+P4 Cat/Voice 端到端、家庭身份模型和长期 SQLite/WAL/断电/备份/quota/retention/
 权限/加密/secure-delete，均保持 `pending`；Phase 5 仍为 `pending_real_environment`，Phase 7
 等待另行明确授权且未启动。确定性 FTS 已满足当前冻结场景，因此 Vector DB 当前不立项，但真实
 数据证据不足，后续仍可在独立计划中重新评估。

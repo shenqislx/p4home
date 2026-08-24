@@ -36,7 +36,7 @@ Artifact:
 The real-model portion is passed. The consented representative-household dataset
 is a separate pending gate and is not replaced by this redacted fixture.
 
-## 6G real HA + Memory read gate — LOCAL PRE-COMMIT PASS
+## 6G real HA + Memory read gate — COMMIT-BOUND PASS
 
 Environment and boundary:
 
@@ -65,14 +65,12 @@ Result:
 Artifact:
 [phase-6g-ha-memory-read.json](./phase-6g-ha-memory-read.json)
 
-The result is labeled `evidence_scope=local_precommit` because the worktree was
-dirty. It is functional evidence, but it is not the final commit-bound gate. A
-clean-commit rerun is required before this item can be marked completed.
+The result is labeled `evidence_scope=commit_bound`: it was produced from a clean
+worktree and binds commit `7e9aa4d4b334b89c899007b13dddc745a6546dd8`.
 
 ## Still pending
 
 - consented, redacted, labeled representative household Memory dataset;
-- commit-bound rerun of 6G;
 - P4 Cat + Memory artifact-first hardware profile and run;
 - Voice + Memory artifact-first hardware profile and run;
 - SQLite production durability, backup, quota, retention, permissions,

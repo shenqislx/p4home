@@ -2,7 +2,7 @@
 
 > Status: `local_complete_pending_real_environment`
 > Started: 2026-08-24
-> Current Gate: 6F 真实模型已通过；6G HA 需 clean-commit 复跑；其余真实环境证据 pending；
+> Current Gate: 6F 真实模型和 6G HA 提交绑定只读门禁已通过；其余真实环境证据 pending；
 > Phase 7 等待另行明确授权
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2 stable; Router/Robot/Human/Cat 专项 eval 骨架 established
@@ -11,8 +11,8 @@
 
 2026-08-24 已启动独立的
 [Phase 6 真实环境门禁计划](./2026-08-24-agent-phase-6-real-environment-gates-plan.md)。
-6F 真实 35B + 脱敏合成 Memory 门禁已通过；6G 真实 HA 只读真值门禁已本地通过，
-但因工作树未提交仍需 clean commit 绑定复跑。P4/Voice、真实家庭数据、SQLite
+6F 真实 35B + 脱敏合成 Memory 门禁已通过；6G 真实 HA 只读真值门禁已从
+干净工作树复跑通过并绑定提交 `7e9aa4d`。P4/Voice、真实家庭数据、SQLite
 生产耐久与家庭身份门禁继续 `pending`。
 
 ## 1. 目标

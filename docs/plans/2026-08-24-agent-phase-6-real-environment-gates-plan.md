@@ -3,9 +3,8 @@
 > Status: `in_progress`
 > Started: 2026-08-24
 > Parent: [Phase 6 — Memory](./2026-08-15-agent-phase-6-memory-plan.md)
-> Current Gate: 6F real-model passed; 6G real HA read passed locally but remains
-> `pending_commit_bound_rerun`; P4/Voice, representative household data, production
-> SQLite and household identity remain pending
+> Current Gate: 6F real-model and commit-bound 6G real HA read passed; P4/Voice,
+> representative household data, production SQLite and household identity remain pending
 
 ## 1. Boundaries
 
@@ -50,9 +49,8 @@ Artifact:
   and exclude the stale Memory signal.
 - [x] Require `service_calls=0`, zero invalid outbound frames and zero token/entity
   id leakage in model request and runtime result.
-- [x] Local pre-commit run passed with one real 35B call and one successful read.
-- [ ] Rerun from a clean commit and bind the result to that commit before closing
-  the gate. The current result is deliberately labeled `local_precommit`.
+- [x] Clean-commit rerun passed with one real 35B call and one successful read;
+  the result is labeled `commit_bound` and binds commit `7e9aa4d`.
 
 Artifact:
 [phase-6g-ha-memory-read.json](../../evidence/agent-phase-6/phase-6g-ha-memory-read.json)

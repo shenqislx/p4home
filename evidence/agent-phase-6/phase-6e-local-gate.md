@@ -162,12 +162,12 @@ tracked in [phase-6-real-environment-gates.md](./phase-6-real-environment-gates.
    - reproduction entry: a new dataset-governance and live-evaluation plan is
      required; deterministic fixture metrics are not a substitute.
 3. **Real HA Robot + Memory end to end, with HA remaining truth**
-   - status: `local_precommit_pass_pending_commit_bound_rerun`
+   - status: `completed_commit_bound_read_gate`
    - required environment: real HA, dedicated low-privilege Robot identity,
      representative entities, real Ollama, and Agent Runtime.
    - reproduction entry: use `pnpm gate:phase6-ha-live` with the repository-external
-     Phase 6G URL/token/policy/result-file environment variables; rerun from a
-     clean commit before closing the gate.
+     Phase 6G URL/token/policy/result-file environment variables; the clean-worktree
+     result binds commit `7e9aa4d` and proves `service_calls=0`.
 4. **Real P4 Cat + Memory end to end, with World remaining truth**
    - status: `pending`
    - required environment: real ESP32-P4, Device WebSocket, Cat World/Object
