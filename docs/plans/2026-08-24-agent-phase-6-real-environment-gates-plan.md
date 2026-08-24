@@ -3,9 +3,9 @@
 > Status: `in_progress`
 > Started: 2026-08-24
 > Parent: [Phase 6 — Memory](./2026-08-15-agent-phase-6-memory-plan.md)
-> Current Gate: 6F real-model and commit-bound 6G real HA read passed; the bounded
-> 6I filesystem/process-kill/online-and-cold-backup gate passed locally and needs a clean-commit
-> rerun; P4/Voice, representative household data, remaining SQLite gates and household
+> Current Gate: 6F real-model, commit-bound 6G real HA read and the bounded commit-bound
+> 6I filesystem/process-kill/online-and-cold-backup gate passed; P4/Voice,
+> representative household data, remaining SQLite gates and household
 > identity remain pending
 
 ## 1. Boundaries
@@ -83,7 +83,8 @@ self-hosted hardware run. It has not started and no P4 was flashed in 6F/6G/6I.
   recovery retains committed records and passes `integrity_check`.
 - [x] The online backup API publishes a new `0600` file atomically, rejects an existing
   destination/insecure parent, passes `integrity_check`, and has an explicit snapshot boundary.
-- [ ] Rerun the bounded gate from a clean commit. Real power-loss remains a separate
+- [x] Clean-commit rerun passed and binds implementation commit `db42974`.
+  Real power-loss remains a separate
   result and is not closed by the controlled kill or backup probes.
 - [ ] Database/WAL/index quota and per-class retention fail closed at their limits.
 - [ ] Encryption/key rotation design and identity binding are approved.
@@ -93,9 +94,10 @@ self-hosted hardware run. It has not started and no P4 was flashed in 6F/6G/6I.
 Artifact:
 [phase-6i-sqlite-filesystem.json](../../evidence/agent-phase-6/phase-6i-sqlite-filesystem.json)
 
-The current result is labeled `local_precommit`. No production SQLite item is
-closed by the 6F/6G temporary `:memory:` stores, and the bounded 6I gate does not
-close the unchecked items above.
+The current result is labeled `commit_bound` and binds implementation commit
+`db429744a7074ad38e918eb9e966d6862bbaa674`. No production SQLite item is closed by
+the 6F/6G temporary `:memory:` stores, and the bounded 6I gate does not close the
+unchecked items above.
 
 ## 6. Exit rule
 

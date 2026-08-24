@@ -68,7 +68,7 @@ Artifact:
 The result is labeled `evidence_scope=commit_bound`: it was produced from a clean
 worktree and binds commit `7e9aa4d4b334b89c899007b13dddc745a6546dd8`.
 
-## 6I real SQLite filesystem subset — LOCAL PRE-COMMIT PASS
+## 6I real SQLite filesystem subset — COMMIT-BOUND PASS
 
 Command:
 
@@ -90,7 +90,7 @@ Result on macOS/APFS with Node `v24.19.0`:
 - actual Store pragmas: `journal_mode=wal`, `synchronous=1` (`NORMAL`);
 - clean reopen and `integrity_check=ok`;
 - synthetic truncation corruption: rejected;
-- controlled child-process `SIGKILL`: recovered `116` committed synthetic records,
+- controlled child-process `SIGKILL`: recovered `99` committed synthetic records,
   post-kill `integrity_check=ok`, checkpoint busy count `0`, and bounded reopen read passed;
 - online backup while the Store remains open: atomically published mode `0600`,
   `integrity_check=ok`, expected pre-snapshot record restored, post-snapshot record absent;
@@ -111,15 +111,15 @@ Regression:
 Artifact:
 [phase-6i-sqlite-filesystem.json](./phase-6i-sqlite-filesystem.json)
 
-The result is `local_precommit`. It does not claim real power-loss, quota, retention,
-encryption/key rotation or media-level secure delete.
+The result is `commit_bound`: it was produced from a clean worktree and binds
+implementation commit `db429744a7074ad38e918eb9e966d6862bbaa674`. It does not claim
+real power-loss, quota, retention, encryption/key rotation or media-level secure delete.
 
 ## Still pending
 
 - consented, redacted, labeled representative household Memory dataset;
 - P4 Cat + Memory artifact-first hardware profile and run;
 - Voice + Memory artifact-first hardware profile and run;
-- clean-commit rerun of the bounded 6I filesystem gate;
 - SQLite real power-loss, quota, retention, encryption/key rotation
   and media-level secure-delete evidence;
 - household multi-user/subject identity model.

@@ -33,7 +33,7 @@ M7.6 的稳定本地结论是：Memory contract/SQLite、确定性写入/冲突/
 visibility evaluator 和 `pnpm gate:phase6` 已通过；2026-08-24 用户已批准 matrix v1 保持
 `private`，三类 Memory 均为 owner-role private，`shared_acl/hybrid` 仍为 evaluator-only，未启用
 跨角色产品召回。6I APFS 权限、WAL/NORMAL、受控进程终止、完整性/损坏拒绝、在线备份和 checkpoint
-冷备份子门禁已本地通过，待 clean-commit 复跑。代表性家庭数据、P4 Cat/Voice 端到端、SQLite
+冷备份子门禁已从干净工作树复跑通过并绑定提交 `db42974`。代表性家庭数据、P4 Cat/Voice 端到端、SQLite
 真实断电/quota/retention/加密/secure-delete、家庭身份模型证据仍为 `pending`。
 Current Gate 仅为这些真实环境项；[visibility matrix](../evidence/agent-phase-6/visibility-matrix.md)
 用户裁决已完成。这不改变 M7.5 `pending_real_environment`；Vector DB 仍不立项，M7.7 需另行明确
@@ -41,8 +41,8 @@ Current Gate 仅为这些真实环境项；[visibility matrix](../evidence/agent
 
 2026-08-24 补充门禁：真实 `qwen3.6:35b-mlx` 在脱敏合成 Memory 上的 grounded
 recall/prompt-injection/private 隔离已通过；真实 HA 只读门禁也证明 Memory 不覆盖
-HA 真值且无 service call，结果已从干净工作树复跑并绑定提交；6I 文件系统子门禁已本地通过，
-待 clean-commit 复跑；真实家庭数据、P4/Voice、剩余 SQLite 生产耐久和身份模型仍为 `pending`。
+HA 真值且无 service call，结果已从干净工作树复跑并绑定提交；6I 文件系统子门禁也已从干净
+工作树复跑通过并绑定提交 `db42974`；真实家庭数据、P4/Voice、剩余 SQLite 生产耐久和身份模型仍为 `pending`。
 
 ## 3. M6 遗留裁决
 
