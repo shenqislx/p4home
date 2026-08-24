@@ -19,9 +19,13 @@ import {
 } from "./role-contracts.ts";
 import {
   assertRoleToolAuthorization,
-  buildRoleContext,
   type RoleInput,
 } from "./role-profiles.ts";
+import {
+  recallPrivateRoleMemory,
+  type MemoryRecallMetadata,
+  type RoleMemoryRuntime,
+} from "./role-memory.ts";
 import {
   runRobotHaRead,
   type RobotHaReadRuntime,
@@ -50,6 +54,7 @@ export interface RunAssignedRoleOptions {
   readonly robot_ha?: RobotHaReadRuntime | RobotHaWriteRuntime;
   /** Internal orchestration latch used to preserve unknown write outcomes. */
   readonly on_side_effect_dispatched?: () => void;
+  readonly memory?: RoleMemoryRuntime;
 }
 
 export interface RoleRunError {
@@ -69,6 +74,7 @@ export interface RoleRunResult {
   readonly outcome: "response" | "capability_unavailable" | "error";
   readonly tool_results: readonly ToolResult[];
   readonly error: RoleRunError | null;
+  readonly memory?: MemoryRecallMetadata;
 }
 
 export class RoleRunAuditFinalizeError extends Error {
@@ -118,6 +124,7 @@ function failure(
   error: RoleRunError,
   modelTurns: 0 | 1,
   toolResults: readonly ToolResult[] = [],
+  memory?: MemoryRecallMetadata,
 ): RoleRunResult {
   return {
     run_id: options.run_id,
@@ -129,6 +136,7 @@ function failure(
     outcome: "error",
     tool_results: toolResults,
     error,
+    ...(memory === undefined ? {} : { memory }),
   };
 }
 
@@ -174,9 +182,28 @@ async function executeAssignedRole(
     }, 0);
   }
 
+  const profile = options.session.profile;
+  const memory = options.memory === undefined
+    ? undefined
+    : await recallPrivateRoleMemory(options.memory, {
+        role_id: roleId,
+        query: input.text,
+        memory_token_budget: profile.memory_token_budget,
+        context_token_budget: options.session.memoryContextTokenHeadroom(input),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      });
+  if (isAborted(options.signal)) {
+    return failure(options, roleId, "cancelled", {
+      source: "runtime",
+      code: "CANCELLED",
+      message: "role run was cancelled while recalling memory",
+      retryable: false,
+    }, 0, [], memory?.metadata);
+  }
+
   if (roleId === "robot") {
     if (options.robot_ha !== undefined) {
-      const context = buildRoleContext(options.session.profile, input);
+      const context = options.session.buildContext(input, memory);
       let execution;
       if (isWriteRuntime(options.robot_ha)) {
         assertRoleToolAuthorization(options.session.profile, [
@@ -218,6 +245,7 @@ async function executeAssignedRole(
         run_id: options.run_id,
         role_id: "robot",
         ...execution,
+        ...(memory === undefined ? {} : { memory: memory.metadata }),
       };
     }
     return {
@@ -230,14 +258,14 @@ async function executeAssignedRole(
       outcome: "capability_unavailable",
       tool_results: [],
       error: null,
+      ...(memory === undefined ? {} : { memory: memory.metadata }),
     };
   }
 
-  const profile = options.session.profile;
   let response;
   try {
     response = await options.provider.chat({
-      messages: options.session.buildContext(input),
+      messages: options.session.buildContext(input, memory),
       options: {
         temperature: profile.temperature,
         num_ctx: profile.num_ctx,
@@ -258,14 +286,14 @@ async function executeAssignedRole(
         code: error.code,
         message: error.message,
         retryable: error.retryable,
-      }, 1);
+      }, 1, [], memory?.metadata);
     }
     return failure(options, "human", "failed", {
       source: "provider",
       code: "UNEXPECTED_PROVIDER_ERROR",
       message: "Human provider failed unexpectedly",
       retryable: false,
-    }, 1);
+    }, 1, [], memory?.metadata);
   }
 
   if (isAborted(options.signal)) {
@@ -274,7 +302,7 @@ async function executeAssignedRole(
       code: "CANCELLED",
       message: "role run was cancelled while waiting for the model",
       retryable: false,
-    }, 1);
+    }, 1, [], memory?.metadata);
   }
   if (
     (response.message.tool_calls?.length ?? 0) > 0
@@ -285,7 +313,7 @@ async function executeAssignedRole(
       code: "ROLE_POLICY_VIOLATION",
       message: "Human returned tool calls or thinking content",
       retryable: true,
-    }, 1);
+    }, 1, [], memory?.metadata);
   }
   const finalText = response.message.content.trim();
   if (finalText.length === 0 || finalText.length > 8_192) {
@@ -296,7 +324,7 @@ async function executeAssignedRole(
         ? "Human returned an empty response"
         : "Human response exceeded 8192 characters",
       retryable: true,
-    }, 1);
+    }, 1, [], memory?.metadata);
   }
   const policy = assessHumanResponsePolicy(finalText, input.mode);
   if (!policy.compliant) {
@@ -305,7 +333,7 @@ async function executeAssignedRole(
       code: "ROLE_POLICY_VIOLATION",
       message: `Human response violated policy: ${policy.violation ?? "UNKNOWN"}`,
       retryable: true,
-    }, 1);
+    }, 1, [], memory?.metadata);
   }
   return {
     run_id: options.run_id,
@@ -317,6 +345,7 @@ async function executeAssignedRole(
     outcome: "response",
     tool_results: [],
     error: null,
+    ...(memory === undefined ? {} : { memory: memory.metadata }),
   };
 }
 

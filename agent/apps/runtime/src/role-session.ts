@@ -2,6 +2,11 @@ import type { OllamaChatMessage } from "@p4home/provider-ollama";
 
 import { assertContractId, type RoleId } from "./role-contracts.ts";
 import {
+  buildRoleContextWithMemory,
+  memoryContextTokenHeadroom,
+} from "./role-context-builder.ts";
+import type { MemoryContextResult } from "./role-memory.ts";
+import {
   buildRoleContext,
   getRoleProfile,
   type RoleInput,
@@ -40,15 +45,17 @@ export class RoleSession {
     return this.#history.map((message) => ({ ...message }));
   }
 
-  public buildContext(input: RoleInput): readonly OllamaChatMessage[] {
-    const base = buildRoleContext(this.#profile, input);
-    const system = base[0];
-    const current = base[1];
-    if (system === undefined || current === undefined) {
-      throw new Error("role context builder returned an incomplete context");
-    }
+  public buildContext(
+    input: RoleInput,
+    memory?: MemoryContextResult,
+  ): readonly OllamaChatMessage[] {
     const retained = this.#history.slice(-this.#profile.history_message_limit);
-    return [system, ...retained, current];
+    return buildRoleContextWithMemory(this.#profile, input, retained, memory);
+  }
+
+  public memoryContextTokenHeadroom(input: RoleInput): number {
+    const retained = this.#history.slice(-this.#profile.history_message_limit);
+    return memoryContextTokenHeadroom(this.#profile, input, retained);
   }
 
   public commitExchange(input: RoleInput, assistantText: string): void {

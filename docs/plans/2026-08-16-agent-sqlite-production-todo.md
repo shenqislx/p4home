@@ -2,8 +2,9 @@
 
 > Status: `deferred`
 > Created: 2026-08-16
-> Current scope: 不阻塞 Phase 1 单用户、单进程、Mock Tool Demo
-> Review before: Phase 2 真实设备写入及任何长期运行部署
+> Updated: 2026-08-24
+> Current scope: Phase 6 本地正确性已覆盖；生产耐久、容量、安全与运维仍 deferred
+> Review before: 任何真实家庭长期 Memory 部署
 
 ## 已在 Demo 阶段解决
 
@@ -16,6 +17,14 @@
 - `DatabaseSync` 已移入专用 Worker，单个 Store 的请求串行执行；锁等待不阻塞主线程 timer；
 - 默认启动恢复会原子关闭遗留 `pending/running` Run，并记录 outcome unknown、禁止盲目重放；
   Phase 2 真实设备结果仍由 snapshot reconciliation 决定。
+- SQLite 数据库 `user_version=4`（Memory record 独立为 `schema_version=1`）对 ID、正文、subject、
+  tags、ACL、时间、confidence、policy revision 等字段执行长度、类型、枚举、数量和 canonical
+  shape 校验，restricted/lineage/idempotency 另有 schema 约束；
+- Memory 的 list/search/recall/purge 均有稳定上限和确定性分页/排序；FTS 查询按字面量转义，
+  owner/ACL/restricted/policy revision/expiry 过滤位于 SQL 内；
+- expiry 边界、bounded purge、正文 revision、ACL 撤销、跨 Worker 重开/迁移和并发 revision 已有测试；
+- 普通硬删除、lineage 级联删除会同步清理 tags、ACL 和 FTS，并保持无正文删除审计；这不等于
+  WAL、备份或存储介质上的 secure delete。
 
 ## 延后到生产化阶段
 
@@ -26,9 +35,12 @@
 | 明确加密、密钥管理和防篡改策略 | 多用户主机或正式家庭部署前 | 敏感字段分类、静态加密、密钥轮换和审计完整性方案通过 review |
 | AgentProfile 使用不可变 revision，并在 Run 保存授权快照 | 支持 Profile 在线修改或多个 Profile 前 | 历史 Run 可还原当时授权，不受后续配置修改影响 |
 | 决定 `synchronous=FULL`、checkpoint 和断电耐久策略 | 正式长期运行前 | kill/power-loss 测试证明约定的最近提交保留范围 |
-| 增加字段长度、JSON shape、数据库配额、保留期和分页 | 连续运行或 Memory Phase 前 | 大输入不会造成无界磁盘/内存增长；查询有稳定上限 |
+| 增加总数据库/各数据类磁盘 quota | 连续运行或真实家庭 Memory 前 | 写入、WAL 和索引增长有硬上限；达到限额时 fail closed |
+| 批准按数据类/敏感度的保留期策略 | 写入真实家庭 Memory 前 | expiry 默认值、审计保留、删除传播和法律/用户预期经 review |
 | Action 主键扩展为设备作用域 | 支持多个 P4 设备前 | 使用 `(device_id, action_id)` 保持协议幂等语义 |
 | 增加 `integrity_check`、损坏隔离和可恢复备份 | 正式运维前 | 数据库损坏时 fail closed，并能恢复到已声明的恢复点 |
+| 定义 WAL/checkpoint、备份一致性与恢复演练 | 正式长期运行前 | 备份包含所需 sidecar/checkpoint 状态；恢复点与数据损失窗口可重复验证 |
+| 定义介质级 secure-delete 能力与限制 | 用户要求不可恢复删除或处理高敏感数据前 | 明确 SQLite hard delete、WAL、备份、SSD wear leveling 的边界并验证方案 |
 
 ## 非目标
 

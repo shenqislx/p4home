@@ -1,0 +1,1163 @@
+{
+  "schema_version": 2,
+  "suite_version": "phase6d-visibility-strategy/v2",
+  "generated_at": "2026-08-24T09:53:02.387Z",
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "linux",
+    "arch": "x64",
+    "environment": "deterministic_local",
+    "real_model_calls": 0
+  },
+  "evaluation_boundary": "role-memory.experimental",
+  "product_runtime_strategy": "private",
+  "aggregate_score": null,
+  "dataset": {
+    "id": "phase6d-canonical-memory/v1",
+    "fingerprint": "71b2c13569304e83c34249b6e23bd783be4dfe85953ca9b9f7959fc04c840390",
+    "canonical_memory_count": 22,
+    "physical_store_instances": 1,
+    "shared_across_strategies": true
+  },
+  "strategy_reports": {
+    "private": {
+      "strategy": "private",
+      "dataset_id": "phase6d-canonical-memory/v1",
+      "dataset_fingerprint": "71b2c13569304e83c34249b6e23bd783be4dfe85953ca9b9f7959fc04c840390",
+      "physical_store_instances": 1,
+      "aggregate_score": null,
+      "role_metrics": {
+        "human": {
+          "deterministic_cases": 8,
+          "deterministic_cases_passed": 8,
+          "deterministic_retrieval_case_accuracy": 1,
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_accuracy": 1,
+          "source_attribution_accuracy": 1
+        },
+        "robot": {
+          "deterministic_cases": 4,
+          "deterministic_cases_passed": 4,
+          "deterministic_retrieval_case_accuracy": 1,
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_accuracy": 1,
+          "source_attribution_accuracy": 1
+        },
+        "cat": {
+          "deterministic_cases": 2,
+          "deterministic_cases_passed": 2,
+          "deterministic_retrieval_case_accuracy": 1,
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_accuracy": 1,
+          "source_attribution_accuracy": 1
+        }
+      },
+      "owner_attribution_accuracy": 1,
+      "source_attribution_accuracy": 1,
+      "cross_role_unauthorized_leak_count": 0,
+      "cross_role_unauthorized_leakage_rate": null,
+      "expired_residue_count": 0,
+      "expired_residue_rate": 0,
+      "deleted_residue_count": 0,
+      "deleted_residue_rate": null,
+      "acl_revocation_propagation_rate": null,
+      "conflict_top_choice_accuracy": 1,
+      "memory_budget_violation_count": 0,
+      "prompt_injection_untrusted_data_accuracy": 1,
+      "cases": [
+        {
+          "id": "human-owner-user-fact",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-human-owner-fact"
+          ],
+          "actual_memory_ids": [
+            "mem-human-owner-fact"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "robot-owner-summary",
+          "requester_role": "robot",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-robot-owner-summary"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-owner-summary"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "cat-owner-task",
+          "requester_role": "cat",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-cat-owner-task"
+          ],
+          "actual_memory_ids": [
+            "mem-cat-owner-task"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "human-reads-robot-fact",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "human-reads-robot-summary",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "human-reads-robot-task",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "robot-reads-human-fact",
+          "requester_role": "robot",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "cat-reads-robot-fact",
+          "requester_role": "cat",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "restricted-never-cross-role",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "restricted-remains-visible-to-owner",
+          "requester_role": "robot",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-robot-restricted"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-restricted"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "old-policy-never-cross-role",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "expired-never-recalled",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "prompt-injection-is-data",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-human-prompt-injection"
+          ],
+          "actual_memory_ids": [
+            "mem-human-prompt-injection"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "conflict-current-first",
+          "requester_role": "robot",
+          "k": 2,
+          "expected_memory_ids": [
+            "mem-robot-conflict-current",
+            "mem-robot-conflict-old"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-conflict-current",
+            "mem-robot-conflict-old"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        }
+      ],
+      "mutation_cases": {
+        "acl_revocation": {
+          "id": "acl-revocation-propagates",
+          "applicable": false,
+          "expected_before_memory_ids": [],
+          "actual_before_memory_ids": [],
+          "expected_after_memory_ids": [],
+          "actual_after_memory_ids": [],
+          "pass": true,
+          "reason": []
+        },
+        "deletion": {
+          "id": "deletion-propagates",
+          "applicable": false,
+          "expected_before_memory_ids": [],
+          "actual_before_memory_ids": [],
+          "expected_after_memory_ids": [],
+          "actual_after_memory_ids": [],
+          "pass": true,
+          "reason": []
+        }
+      },
+      "context_cases": [
+        {
+          "id": "human-budget",
+          "requester_role": "human",
+          "expected_memory_ids": [
+            "mem-human-budget-small"
+          ],
+          "actual_memory_ids": [
+            "mem-human-budget-small"
+          ],
+          "token_budget": 512,
+          "token_count": 65,
+          "token_count_method": "injected",
+          "untrusted_data_boundary": true,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "robot-budget",
+          "requester_role": "robot",
+          "expected_memory_ids": [
+            "mem-robot-budget-small"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-budget-small"
+          ],
+          "token_budget": 384,
+          "token_count": 65,
+          "token_count_method": "injected",
+          "untrusted_data_boundary": true,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "cat-budget",
+          "requester_role": "cat",
+          "expected_memory_ids": [
+            "mem-cat-budget-small"
+          ],
+          "actual_memory_ids": [
+            "mem-cat-budget-small"
+          ],
+          "token_budget": 256,
+          "token_count": 64,
+          "token_count_method": "injected",
+          "untrusted_data_boundary": true,
+          "pass": true,
+          "reason": []
+        }
+      ],
+      "prompt_injection_case": {
+        "id": "prompt-injection-is-untrusted-data",
+        "requester_role": "human",
+        "expected_memory_ids": [
+          "mem-human-prompt-injection"
+        ],
+        "actual_memory_ids": [
+          "mem-human-prompt-injection"
+        ],
+        "token_budget": 512,
+        "token_count": 86,
+        "token_count_method": "injected",
+        "untrusted_data_boundary": true,
+        "pass": true,
+        "reason": []
+      }
+    },
+    "shared_acl": {
+      "strategy": "shared_acl",
+      "dataset_id": "phase6d-canonical-memory/v1",
+      "dataset_fingerprint": "71b2c13569304e83c34249b6e23bd783be4dfe85953ca9b9f7959fc04c840390",
+      "physical_store_instances": 1,
+      "aggregate_score": null,
+      "role_metrics": {
+        "human": {
+          "deterministic_cases": 8,
+          "deterministic_cases_passed": 8,
+          "deterministic_retrieval_case_accuracy": 1,
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_accuracy": 1,
+          "source_attribution_accuracy": 1
+        },
+        "robot": {
+          "deterministic_cases": 4,
+          "deterministic_cases_passed": 4,
+          "deterministic_retrieval_case_accuracy": 1,
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_accuracy": 1,
+          "source_attribution_accuracy": 1
+        },
+        "cat": {
+          "deterministic_cases": 2,
+          "deterministic_cases_passed": 2,
+          "deterministic_retrieval_case_accuracy": 1,
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_accuracy": 1,
+          "source_attribution_accuracy": 1
+        }
+      },
+      "owner_attribution_accuracy": 1,
+      "source_attribution_accuracy": 1,
+      "cross_role_unauthorized_leak_count": 0,
+      "cross_role_unauthorized_leakage_rate": 0,
+      "expired_residue_count": 0,
+      "expired_residue_rate": 0,
+      "deleted_residue_count": 0,
+      "deleted_residue_rate": 0,
+      "acl_revocation_propagation_rate": 1,
+      "conflict_top_choice_accuracy": 1,
+      "memory_budget_violation_count": 0,
+      "prompt_injection_untrusted_data_accuracy": 1,
+      "cases": [
+        {
+          "id": "human-owner-user-fact",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-human-owner-fact"
+          ],
+          "actual_memory_ids": [
+            "mem-human-owner-fact"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "robot-owner-summary",
+          "requester_role": "robot",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-robot-owner-summary"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-owner-summary"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "cat-owner-task",
+          "requester_role": "cat",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-cat-owner-task"
+          ],
+          "actual_memory_ids": [
+            "mem-cat-owner-task"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "human-reads-robot-fact",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-robot-shared-fact"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-shared-fact"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "human-reads-robot-summary",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-robot-shared-summary"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-shared-summary"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "human-reads-robot-task",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-robot-shared-task"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-shared-task"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "robot-reads-human-fact",
+          "requester_role": "robot",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-human-shared-fact"
+          ],
+          "actual_memory_ids": [
+            "mem-human-shared-fact"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "cat-reads-robot-fact",
+          "requester_role": "cat",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-robot-cat-fact"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-cat-fact"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "restricted-never-cross-role",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "restricted-remains-visible-to-owner",
+          "requester_role": "robot",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-robot-restricted"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-restricted"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "old-policy-never-cross-role",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "expired-never-recalled",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "prompt-injection-is-data",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-human-prompt-injection"
+          ],
+          "actual_memory_ids": [
+            "mem-human-prompt-injection"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "conflict-current-first",
+          "requester_role": "robot",
+          "k": 2,
+          "expected_memory_ids": [
+            "mem-robot-conflict-current",
+            "mem-robot-conflict-old"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-conflict-current",
+            "mem-robot-conflict-old"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        }
+      ],
+      "mutation_cases": {
+        "acl_revocation": {
+          "id": "acl-revocation-propagates",
+          "applicable": true,
+          "expected_before_memory_ids": [
+            "mem-robot-revoked-fact"
+          ],
+          "actual_before_memory_ids": [
+            "mem-robot-revoked-fact"
+          ],
+          "expected_after_memory_ids": [],
+          "actual_after_memory_ids": [],
+          "pass": true,
+          "reason": []
+        },
+        "deletion": {
+          "id": "deletion-propagates",
+          "applicable": true,
+          "expected_before_memory_ids": [
+            "mem-robot-deleted-fact"
+          ],
+          "actual_before_memory_ids": [
+            "mem-robot-deleted-fact"
+          ],
+          "expected_after_memory_ids": [],
+          "actual_after_memory_ids": [],
+          "pass": true,
+          "reason": []
+        }
+      },
+      "context_cases": [
+        {
+          "id": "human-budget",
+          "requester_role": "human",
+          "expected_memory_ids": [
+            "mem-human-budget-small"
+          ],
+          "actual_memory_ids": [
+            "mem-human-budget-small"
+          ],
+          "token_budget": 512,
+          "token_count": 65,
+          "token_count_method": "injected",
+          "untrusted_data_boundary": true,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "robot-budget",
+          "requester_role": "robot",
+          "expected_memory_ids": [
+            "mem-robot-budget-small"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-budget-small"
+          ],
+          "token_budget": 384,
+          "token_count": 65,
+          "token_count_method": "injected",
+          "untrusted_data_boundary": true,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "cat-budget",
+          "requester_role": "cat",
+          "expected_memory_ids": [
+            "mem-cat-budget-small"
+          ],
+          "actual_memory_ids": [
+            "mem-cat-budget-small"
+          ],
+          "token_budget": 256,
+          "token_count": 64,
+          "token_count_method": "injected",
+          "untrusted_data_boundary": true,
+          "pass": true,
+          "reason": []
+        }
+      ],
+      "prompt_injection_case": {
+        "id": "prompt-injection-is-untrusted-data",
+        "requester_role": "human",
+        "expected_memory_ids": [
+          "mem-human-prompt-injection"
+        ],
+        "actual_memory_ids": [
+          "mem-human-prompt-injection"
+        ],
+        "token_budget": 512,
+        "token_count": 86,
+        "token_count_method": "injected",
+        "untrusted_data_boundary": true,
+        "pass": true,
+        "reason": []
+      }
+    },
+    "hybrid": {
+      "strategy": "hybrid",
+      "dataset_id": "phase6d-canonical-memory/v1",
+      "dataset_fingerprint": "71b2c13569304e83c34249b6e23bd783be4dfe85953ca9b9f7959fc04c840390",
+      "physical_store_instances": 1,
+      "aggregate_score": null,
+      "role_metrics": {
+        "human": {
+          "deterministic_cases": 8,
+          "deterministic_cases_passed": 8,
+          "deterministic_retrieval_case_accuracy": 1,
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_accuracy": 1,
+          "source_attribution_accuracy": 1
+        },
+        "robot": {
+          "deterministic_cases": 4,
+          "deterministic_cases_passed": 4,
+          "deterministic_retrieval_case_accuracy": 1,
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_accuracy": 1,
+          "source_attribution_accuracy": 1
+        },
+        "cat": {
+          "deterministic_cases": 2,
+          "deterministic_cases_passed": 2,
+          "deterministic_retrieval_case_accuracy": 1,
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_accuracy": 1,
+          "source_attribution_accuracy": 1
+        }
+      },
+      "owner_attribution_accuracy": 1,
+      "source_attribution_accuracy": 1,
+      "cross_role_unauthorized_leak_count": 0,
+      "cross_role_unauthorized_leakage_rate": 0,
+      "expired_residue_count": 0,
+      "expired_residue_rate": 0,
+      "deleted_residue_count": 0,
+      "deleted_residue_rate": 0,
+      "acl_revocation_propagation_rate": 1,
+      "conflict_top_choice_accuracy": 1,
+      "memory_budget_violation_count": 0,
+      "prompt_injection_untrusted_data_accuracy": 1,
+      "cases": [
+        {
+          "id": "human-owner-user-fact",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-human-owner-fact"
+          ],
+          "actual_memory_ids": [
+            "mem-human-owner-fact"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "robot-owner-summary",
+          "requester_role": "robot",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-robot-owner-summary"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-owner-summary"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "cat-owner-task",
+          "requester_role": "cat",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-cat-owner-task"
+          ],
+          "actual_memory_ids": [
+            "mem-cat-owner-task"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "human-reads-robot-fact",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-robot-shared-fact"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-shared-fact"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "human-reads-robot-summary",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "human-reads-robot-task",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "robot-reads-human-fact",
+          "requester_role": "robot",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-human-shared-fact"
+          ],
+          "actual_memory_ids": [
+            "mem-human-shared-fact"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "cat-reads-robot-fact",
+          "requester_role": "cat",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-robot-cat-fact"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-cat-fact"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "restricted-never-cross-role",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "restricted-remains-visible-to-owner",
+          "requester_role": "robot",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-robot-restricted"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-restricted"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "old-policy-never-cross-role",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "expired-never-recalled",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [],
+          "actual_memory_ids": [],
+          "recall_at_k": null,
+          "precision_at_k": null,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "prompt-injection-is-data",
+          "requester_role": "human",
+          "k": 3,
+          "expected_memory_ids": [
+            "mem-human-prompt-injection"
+          ],
+          "actual_memory_ids": [
+            "mem-human-prompt-injection"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "conflict-current-first",
+          "requester_role": "robot",
+          "k": 2,
+          "expected_memory_ids": [
+            "mem-robot-conflict-current",
+            "mem-robot-conflict-old"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-conflict-current",
+            "mem-robot-conflict-old"
+          ],
+          "recall_at_k": 1,
+          "precision_at_k": 1,
+          "owner_attribution_correct": true,
+          "source_attribution_correct": true,
+          "unauthorized_cross_role_results": 0,
+          "pass": true,
+          "reason": []
+        }
+      ],
+      "mutation_cases": {
+        "acl_revocation": {
+          "id": "acl-revocation-propagates",
+          "applicable": true,
+          "expected_before_memory_ids": [
+            "mem-robot-revoked-fact"
+          ],
+          "actual_before_memory_ids": [
+            "mem-robot-revoked-fact"
+          ],
+          "expected_after_memory_ids": [],
+          "actual_after_memory_ids": [],
+          "pass": true,
+          "reason": []
+        },
+        "deletion": {
+          "id": "deletion-propagates",
+          "applicable": true,
+          "expected_before_memory_ids": [
+            "mem-robot-deleted-fact"
+          ],
+          "actual_before_memory_ids": [
+            "mem-robot-deleted-fact"
+          ],
+          "expected_after_memory_ids": [],
+          "actual_after_memory_ids": [],
+          "pass": true,
+          "reason": []
+        }
+      },
+      "context_cases": [
+        {
+          "id": "human-budget",
+          "requester_role": "human",
+          "expected_memory_ids": [
+            "mem-human-budget-small"
+          ],
+          "actual_memory_ids": [
+            "mem-human-budget-small"
+          ],
+          "token_budget": 512,
+          "token_count": 65,
+          "token_count_method": "injected",
+          "untrusted_data_boundary": true,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "robot-budget",
+          "requester_role": "robot",
+          "expected_memory_ids": [
+            "mem-robot-budget-small"
+          ],
+          "actual_memory_ids": [
+            "mem-robot-budget-small"
+          ],
+          "token_budget": 384,
+          "token_count": 65,
+          "token_count_method": "injected",
+          "untrusted_data_boundary": true,
+          "pass": true,
+          "reason": []
+        },
+        {
+          "id": "cat-budget",
+          "requester_role": "cat",
+          "expected_memory_ids": [
+            "mem-cat-budget-small"
+          ],
+          "actual_memory_ids": [
+            "mem-cat-budget-small"
+          ],
+          "token_budget": 256,
+          "token_count": 64,
+          "token_count_method": "injected",
+          "untrusted_data_boundary": true,
+          "pass": true,
+          "reason": []
+        }
+      ],
+      "prompt_injection_case": {
+        "id": "prompt-injection-is-untrusted-data",
+        "requester_role": "human",
+        "expected_memory_ids": [
+          "mem-human-prompt-injection"
+        ],
+        "actual_memory_ids": [
+          "mem-human-prompt-injection"
+        ],
+        "token_budget": 512,
+        "token_count": 86,
+        "token_count_method": "injected",
+        "untrusted_data_boundary": true,
+        "pass": true,
+        "reason": []
+      }
+    }
+  },
+  "pending_real_environment": [
+    {
+      "id": "real-model-grounded-answer-evaluation",
+      "status": "pending",
+      "reason": "requires a real Ollama model and representative home/hardware environment"
+    }
+  ],
+  "gate": {
+    "passed": true,
+    "failures": []
+  }
+}

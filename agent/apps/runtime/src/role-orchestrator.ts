@@ -27,6 +27,7 @@ import { RoleScheduler, RoleSchedulerError } from "./role-scheduler.ts";
 import { RoleSessionRegistry } from "./role-session.ts";
 import type { RobotHaReadRuntime } from "./robot-ha-read-runner.ts";
 import type { RobotHaWriteRuntime } from "./robot-ha-write-runner.ts";
+import type { RoleMemoryRuntime } from "./role-memory.ts";
 
 export interface RunRoleInteractionOptions {
   readonly interaction: UserTextInteraction;
@@ -41,6 +42,7 @@ export interface RunRoleInteractionOptions {
   readonly audit_finalize_timeout_ms?: number;
   readonly clock?: () => number;
   readonly robot_ha?: RobotHaReadRuntime | RobotHaWriteRuntime;
+  readonly memory?: RoleMemoryRuntime;
 }
 
 export interface RunRoleInteractionResult {
@@ -321,6 +323,7 @@ export async function runRoleInteraction(
           ...(executionSignal === undefined ? {} : { signal: executionSignal }),
           ...(assignmentAudit === undefined ? {} : { audit: assignmentAudit }),
           ...(options.robot_ha === undefined ? {} : { robot_ha: options.robot_ha }),
+          ...(options.memory === undefined ? {} : { memory: options.memory }),
           on_side_effect_dispatched: () => {
             auditTracker.dispatched = true;
           },

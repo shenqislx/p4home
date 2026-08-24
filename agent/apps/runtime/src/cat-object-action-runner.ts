@@ -14,6 +14,7 @@ import {
   type ApprovedCatObjectSitEvent,
   type ApprovedCatObjectStep,
 } from "./cat-object-event-policy.ts";
+import { prepareCatAuditSession } from "./cat-audit-session.ts";
 import {
   DeviceWebSocketActionAdapter,
   type DeviceActionOutcome,
@@ -25,9 +26,18 @@ import {
 } from "./low-priority-cat-run-registry.ts";
 import {
   assertRoleToolAuthorization,
-  buildRoleContext,
   getRoleProfile,
 } from "./role-profiles.ts";
+import {
+  buildRoleContextWithMemory,
+  memoryContextTokenHeadroom,
+} from "./role-context-builder.ts";
+import {
+  recallPrivateRoleMemory,
+  type MemoryContextResult,
+  type MemoryRecallMetadata,
+  type RoleMemoryRuntime,
+} from "./role-memory.ts";
 import { RoleScheduler } from "./role-scheduler.ts";
 
 export interface RunCatObjectSitEventOptions {
@@ -49,6 +59,7 @@ export interface RunCatObjectSitEventOptions {
   readonly clock?: () => number;
   readonly audit_store?: AuditStore;
   readonly cat_run_registry?: LowPriorityCatRunRegistry;
+  readonly memory?: RoleMemoryRuntime;
 }
 
 export interface CatObjectStepResult {
@@ -68,6 +79,7 @@ export interface CatObjectActionRunResult {
   readonly event_id: string;
   readonly model_turns: 1;
   readonly steps: readonly CatObjectStepResult[];
+  readonly memory?: MemoryRecallMetadata;
 }
 
 const CONTRACT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -157,6 +169,7 @@ async function decideObjectSequence(
   options: RunCatObjectSitEventOptions,
   approved: ApprovedCatObjectSitEvent,
   capabilities: readonly WorldObjectCapability[],
+  memory: MemoryContextResult | undefined,
 ): Promise<readonly ToolCall[]> {
   const profile = getRoleProfile("cat");
   const definitions = getObjectRuntimeToolDefinitions();
@@ -168,14 +181,14 @@ async function decideObjectSequence(
     return narrowTool(definition, approved.payload.target_id);
   });
   const response = await options.provider.chat({
-    messages: buildRoleContext(profile, {
+    messages: buildRoleContextWithMemory(profile, {
       kind: "normalized_event",
       event_type: approved.event_type,
       payload: {
         target_id: approved.payload.target_id,
         objects: capabilities,
       },
-    }),
+    }, [], memory),
     tools: tools.map((tool) => ({ type: "function" as const, function: tool })),
     options: {
       temperature: profile.temperature,
@@ -321,34 +334,34 @@ async function auditStart(
   approved: ApprovedCatObjectSitEvent,
   capabilities: readonly WorldObjectCapability[],
   startedAtMs: number,
-): Promise<void> {
+): Promise<string> {
   const store = options.audit_store;
   if (store === undefined) {
-    return;
+    return options.session_id;
   }
-  const profile = getRoleProfile("cat");
-  const profileId = `${profile.revision}:cat`;
-  await store.saveAgentProfile({
-    agent_profile_id: profileId,
-    name: "P4 Home cat",
-    locale: "zh-CN",
-    allowed_tools: profile.allowed_tools,
-  });
-  await store.saveSession({
-    session_id: options.session_id,
-    agent_profile_id: profileId,
-    created_at_ms: options.session_created_at_ms,
-    updated_at_ms: startedAtMs,
-  });
+  const identity = await prepareCatAuditSession(
+    store,
+    options.session_id,
+    options.session_created_at_ms,
+    startedAtMs,
+  );
   await store.writeBatch({
     run: {
       run_id: options.run_id,
-      session_id: options.session_id,
+      session_id: identity.session_id,
       status: "running",
       started_at_ms: startedAtMs,
       completed_at_ms: null,
     },
-    events: [{
+    events: [
+      ...(identity.migration === null ? [] : [{
+        event_id: `${options.run_id}:event:0`,
+        run_id: options.run_id,
+        type: "cat.audit.session_migrated",
+        occurred_at_ms: startedAtMs,
+        payload: identity.migration,
+      }]),
+      {
       event_id: `${options.run_id}:event:1`,
       run_id: options.run_id,
       type: "cat.object.run.started",
@@ -363,8 +376,10 @@ async function auditStart(
         role_id: "cat",
         model_turns: 1,
       },
-    }],
+      },
+    ],
   });
+  return identity.session_id;
 }
 
 async function auditModelCalls(
@@ -422,6 +437,7 @@ async function auditFinish(
   completedAtMs: number,
   actionCreatedAt: ReadonlyMap<number, number>,
   modelCallsAudited: boolean,
+  auditSessionId: string,
 ): Promise<void> {
   const store = options.audit_store;
   if (store === undefined) {
@@ -429,7 +445,7 @@ async function auditFinish(
   }
   const run: Run = {
     run_id: options.run_id,
-    session_id: options.session_id,
+    session_id: auditSessionId,
     status,
     started_at_ms: startedAtMs,
     completed_at_ms: completedAtMs,
@@ -514,16 +530,39 @@ export async function runCatObjectSitEvent(
     execute: async () => {
       const startedAtMs = clock();
       let capabilities: readonly WorldObjectCapability[] = [];
+      let memory: MemoryContextResult | undefined;
       let calls: readonly ToolCall[] = [];
       const steps: CatObjectStepResult[] = [];
       const actionCreatedAt = new Map<number, number>();
       let modelCallsAudited = false;
       let cancelledDuringReconciliation = false;
       let status: CatObjectActionRunResult["status"] = "failed";
+      let auditSessionId = options.session_id;
       try {
         capabilities = projectCapabilities(options.adapter, approved);
-        await auditStart(options, approved, capabilities, startedAtMs);
-        calls = await decideObjectSequence(options, approved, capabilities);
+        auditSessionId = await auditStart(options, approved, capabilities, startedAtMs);
+        const profile = getRoleProfile("cat");
+        const roleInput = {
+          kind: "normalized_event" as const,
+          event_type: approved.event_type,
+          payload: {
+            target_id: approved.payload.target_id,
+            objects: capabilities,
+          },
+        };
+        memory = options.memory === undefined
+          ? undefined
+          : await recallPrivateRoleMemory(options.memory, {
+              role_id: "cat",
+              query: approved.payload.target_id,
+              memory_token_budget: profile.memory_token_budget,
+              context_token_budget: memoryContextTokenHeadroom(profile, roleInput, []),
+              ...(options.signal === undefined ? {} : { signal: options.signal }),
+            });
+        if (isAborted(options.signal)) {
+          throw new Error("Cat object run was cancelled while recalling memory");
+        }
+        calls = await decideObjectSequence(options, approved, capabilities, memory);
         const modelCompletedAtMs = Math.max(startedAtMs, clock());
         await auditModelCalls(options, calls, modelCompletedAtMs);
         modelCallsAudited = true;
@@ -635,7 +674,7 @@ export async function runCatObjectSitEvent(
             supported_actions: [...object.supported_actions],
             available: object.available,
           }));
-          await auditStart(options, approved, capabilities, startedAtMs);
+          auditSessionId = await auditStart(options, approved, capabilities, startedAtMs);
         }
       }
       const completedAtMs = Math.max(startedAtMs, clock());
@@ -648,6 +687,7 @@ export async function runCatObjectSitEvent(
         completedAtMs,
         actionCreatedAt,
         modelCallsAudited,
+        auditSessionId,
       );
       return {
         run_id: options.run_id,
@@ -656,6 +696,7 @@ export async function runCatObjectSitEvent(
         event_id: approved.event_id,
         model_turns: 1,
         steps,
+        ...(memory === undefined ? {} : { memory: memory.metadata }),
       };
     },
     });

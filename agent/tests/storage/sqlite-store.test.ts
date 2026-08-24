@@ -117,7 +117,7 @@ test("interaction correlation lookup deduplicates repeated start events", async 
   assert.deepEqual(await store.listRunIdsForInteraction("interaction-1"), ["run-1"]);
 });
 
-test("schema v1 databases migrate the interaction correlation index to v2", async () => {
+test("schema v1 databases migrate the interaction correlation index to latest", async () => {
   const directory = mkdtempSync(join(tmpdir(), "p4home-audit-migration-"));
   const databasePath = join(directory, "audit.sqlite");
   try {
@@ -127,6 +127,15 @@ test("schema v1 databases migrate the interaction correlation index to v2", asyn
     }
     const oldDatabase = new DatabaseSync(databasePath);
     oldDatabase.exec(`
+      DROP TABLE memory_deletion_items;
+      DROP TABLE memory_deletion_requests;
+      DROP TRIGGER memories_fts_insert;
+      DROP TRIGGER memories_fts_delete;
+      DROP TRIGGER memories_fts_update;
+      DROP TABLE memories_fts;
+      DROP TABLE memory_tags;
+      DROP TABLE memory_visible_roles;
+      DROP TABLE memories;
       DROP INDEX events_role_interaction_idx;
       PRAGMA user_version = 1;
     `);
@@ -144,7 +153,7 @@ test("schema v1 databases migrate the interaction correlation index to v2", asyn
     `).get();
     migratedDatabase.close();
 
-    assert.equal(version?.user_version, 2);
+    assert.equal(version?.user_version, 4);
     assert.equal(index?.name, "events_role_interaction_idx");
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -223,6 +232,16 @@ test("tool results terminate exactly one pending call and the store closes expli
 
   store.close();
   await assert.rejects(store.getRunTrace("run-1"), AuditStorageError);
+});
+
+test("close drains requests that started before initialization completed", async () => {
+  const store = new SqliteAuditStore(":memory:", { reconcile_on_open: false });
+  const pendingRead = store.getRunTrace("missing");
+  const closing = store.closeAsync();
+
+  assert.equal(await pendingRead, null);
+  await closing;
+  await assert.rejects(store.getRunTrace("missing"), /audit store is closed/);
 });
 
 test("stored identities and terminal lifecycles cannot be rewritten", async () => {

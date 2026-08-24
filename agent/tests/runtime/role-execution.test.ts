@@ -508,7 +508,7 @@ test("role audit links interaction, route plan, role, session and run", async ()
     route_plan_id: "route:interaction:audit",
     assignment_id: "route:interaction:audit",
     role_id: "human",
-    role_profile_revision: "role-profile/v1",
+    role_profile_revision: "role-profile/v2",
     route_reason: "model_human",
     assignment_mode: "respond",
     source_span: { start: 0, end: value.text.length },

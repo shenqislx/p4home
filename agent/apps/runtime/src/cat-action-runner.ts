@@ -13,6 +13,7 @@ import {
   CatEventPolicy,
   type ApprovedCatRoomTargetEvent,
 } from "./cat-event-policy.ts";
+import { prepareCatAuditSession } from "./cat-audit-session.ts";
 import {
   DeviceWebSocketActionAdapter,
   type DeviceActionOutcome,
@@ -24,9 +25,18 @@ import {
 } from "./low-priority-cat-run-registry.ts";
 import {
   assertRoleToolAuthorization,
-  buildRoleContext,
   getRoleProfile,
 } from "./role-profiles.ts";
+import {
+  buildRoleContextWithMemory,
+  memoryContextTokenHeadroom,
+} from "./role-context-builder.ts";
+import {
+  recallPrivateRoleMemory,
+  type MemoryContextResult,
+  type MemoryRecallMetadata,
+  type RoleMemoryRuntime,
+} from "./role-memory.ts";
 import { RoleScheduler } from "./role-scheduler.ts";
 
 export interface RunCatRoomTargetEventOptions {
@@ -48,6 +58,7 @@ export interface RunCatRoomTargetEventOptions {
   readonly clock?: () => number;
   readonly audit_store?: AuditStore;
   readonly cat_run_registry?: LowPriorityCatRunRegistry;
+  readonly memory?: RoleMemoryRuntime;
 }
 
 export interface CatActionRunResult {
@@ -59,6 +70,7 @@ export interface CatActionRunResult {
   readonly action_id: string;
   readonly model_turns: 1;
   readonly outcome: DeviceActionOutcome;
+  readonly memory?: MemoryRecallMetadata;
 }
 
 const CONTRACT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -76,6 +88,10 @@ function assertId(value: string, label: string): void {
   if (!CONTRACT_ID.test(value)) {
     throw new TypeError(`${label} is not a valid contract id`);
   }
+}
+
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
 
 function runStatus(outcome: DeviceActionOutcome): CatActionRunResult["status"] {
@@ -139,28 +155,20 @@ async function auditStart(
   options: RunCatRoomTargetEventOptions,
   approved: ApprovedCatRoomTargetEvent,
   startedAtMs: number,
-): Promise<void> {
+): Promise<string> {
   const store = options.audit_store;
   if (store === undefined) {
-    return;
+    return options.session_id;
   }
-  const profile = getRoleProfile("cat");
-  const profileId = `${profile.revision}:cat`;
-  await store.saveAgentProfile({
-    agent_profile_id: profileId,
-    name: "P4 Home cat",
-    locale: "zh-CN",
-    allowed_tools: profile.allowed_tools,
-  });
-  await store.saveSession({
-    session_id: options.session_id,
-    agent_profile_id: profileId,
-    created_at_ms: options.session_created_at_ms,
-    updated_at_ms: startedAtMs,
-  });
+  const identity = await prepareCatAuditSession(
+    store,
+    options.session_id,
+    options.session_created_at_ms,
+    startedAtMs,
+  );
   const run: Run = {
     run_id: options.run_id,
-    session_id: options.session_id,
+    session_id: identity.session_id,
     status: "running",
     started_at_ms: startedAtMs,
     completed_at_ms: null,
@@ -182,8 +190,18 @@ async function auditStart(
   };
   await store.writeBatch({
     run,
-    events: [event],
+    events: [
+      ...(identity.migration === null ? [] : [{
+        event_id: `${options.run_id}:event:0`,
+        run_id: options.run_id,
+        type: "cat.audit.session_migrated",
+        occurred_at_ms: startedAtMs,
+        payload: identity.migration,
+      }]),
+      event,
+    ],
   });
+  return identity.session_id;
 }
 
 async function auditToolRequested(
@@ -235,6 +253,7 @@ async function auditFinish(
   completedAtMs: number,
   toolRequested: boolean,
   actionCreatedAtMs: number,
+  auditSessionId: string,
 ): Promise<void> {
   const store = options.audit_store;
   if (store === undefined) {
@@ -249,7 +268,7 @@ async function auditFinish(
   };
   const run: Run = {
     run_id: options.run_id,
-    session_id: options.session_id,
+    session_id: auditSessionId,
     status: result.status,
     started_at_ms: startedAtMs,
     completed_at_ms: completedAtMs,
@@ -287,6 +306,7 @@ async function auditFinish(
 async function decideCatAction(
   options: RunCatRoomTargetEventOptions,
   approved: ApprovedCatRoomTargetEvent,
+  memory: MemoryContextResult | undefined,
 ): Promise<void> {
   const profile = getRoleProfile("cat");
   const tool = getFrozenToolDefinitions().find((definition) => definition.name === approved.tool);
@@ -294,11 +314,11 @@ async function decideCatAction(
     throw new CatModelDecisionError(`frozen tool ${approved.tool} is unavailable`);
   }
   const response = await options.provider.chat({
-    messages: buildRoleContext(profile, {
+    messages: buildRoleContextWithMemory(profile, {
       kind: "normalized_event",
       event_type: approved.event_type,
       payload: approved.payload,
-    }),
+    }, [], memory),
     tools: [{ type: "function", function: tool }],
     options: {
       temperature: profile.temperature,
@@ -359,13 +379,31 @@ export async function runCatRoomTargetEvent(
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     execute: async () => {
       const startedAtMs = clock();
-      await auditStart(options, approved, startedAtMs);
+      const auditSessionId = await auditStart(options, approved, startedAtMs);
+      const profile = getRoleProfile("cat");
+      const roleInput = {
+        kind: "normalized_event" as const,
+        event_type: approved.event_type,
+        payload: approved.payload,
+      };
+      const memory = options.memory === undefined
+        ? undefined
+        : await recallPrivateRoleMemory(options.memory, {
+            role_id: "cat",
+            query: approved.payload.room_target,
+            memory_token_budget: profile.memory_token_budget,
+            context_token_budget: memoryContextTokenHeadroom(profile, roleInput, []),
+            ...(options.signal === undefined ? {} : { signal: options.signal }),
+          });
       let outcome: DeviceActionOutcome;
       let statusOverride: CatActionRunResult["status"] | undefined;
       let toolRequested = false;
       let actionCreatedAtMs = startedAtMs;
       try {
-        await decideCatAction(options, approved);
+        if (isAborted(options.signal)) {
+          throw new Error("Cat run was cancelled while recalling memory");
+        }
+        await decideCatAction(options, approved, memory);
         actionCreatedAtMs = Math.max(startedAtMs, clock());
         await auditToolRequested(options, approved, actionCreatedAtMs);
         toolRequested = true;
@@ -384,7 +422,7 @@ export async function runCatRoomTargetEvent(
             options.reconciliation_timeout_ms ?? 5_000,
             options.signal,
           );
-          if (options.signal?.aborted === true) {
+          if (isAborted(options.signal)) {
             statusOverride = "cancelled";
           }
         }
@@ -398,7 +436,7 @@ export async function runCatRoomTargetEvent(
             : error.code === "TIMEOUT"
               ? "timed_out"
               : "failed";
-        } else if (options.signal?.aborted === true) {
+        } else if (isAborted(options.signal)) {
           statusOverride = "cancelled";
         }
         outcome = {
@@ -426,6 +464,7 @@ export async function runCatRoomTargetEvent(
         action_id: options.action_id,
         model_turns: 1,
         outcome,
+        ...(memory === undefined ? {} : { memory: memory.metadata }),
       };
       await auditFinish(
         options,
@@ -434,6 +473,7 @@ export async function runCatRoomTargetEvent(
         Math.max(startedAtMs, clock()),
         toolRequested,
         actionCreatedAtMs,
+        auditSessionId,
       );
       return result;
     },

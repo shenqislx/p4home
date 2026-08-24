@@ -1,6 +1,6 @@
 # P4 Home 当前里程碑
 
-> Updated: 2026-08-23
+> Updated: 2026-08-24
 > Current Architecture: [P4 Local Agent Architecture](./p4-local-agent-architecture.md)
 > Active Work: [Agent Phase Plans](./plans/README.md)
 
@@ -25,9 +25,18 @@
 | M7.2 Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作闭环 |
 | M7.3 Cat Object World | `completed` | sofa/window/desk 等 Cat 对象级动作，实机门禁与最终 review 已通过 |
 | M7.4 Robot HA & Multi-role | `completed` | 4A–4E 技术/真实环境门禁及用户最终 review 已通过 |
-| M7.5 Role-aware Voice | `in_progress` | 5A–5C 技术门禁通过、P4 可听观察待补；当前进入 5D TTS/播放/barge-in |
-| M7.6 Role-aware Memory | `pending` | 评测共享、私有与混合角色记忆 |
+| M7.5 Role-aware Voice | `pending_real_environment` | 5A–5D 技术主体完成；5E 实机总门禁与 P4 可听观察待补 |
+| M7.6 Role-aware Memory | `local_complete_pending_real_environment` | 6A–6E 本地门禁与用户 private 裁决完成；真实环境证据 pending |
 | M7.7 Cat Autonomy | `pending` | Timer/HA 事件驱动、低优先级、可关闭 Cat 行为 |
+
+M7.6 的稳定本地结论是：Memory contract/SQLite、确定性写入/冲突/删除、private 产品召回、三种
+visibility evaluator 和 `pnpm gate:phase6` 已通过；2026-08-24 用户已批准 matrix v1 保持
+`private`，三类 Memory 均为 owner-role private，`shared_acl/hybrid` 仍为 evaluator-only，未启用
+跨角色产品召回。真实 `qwen3.8:27b-mlx`、代表性家庭数据、HA Robot/P4 Cat/Voice 端到端和长期 SQLite
+WAL/断电/备份/quota/retention/权限/加密/secure-delete、家庭身份模型证据全部为 `pending`。
+Current Gate 仅为这些真实环境项；[visibility matrix](../evidence/agent-phase-6/visibility-matrix.md)
+用户裁决已完成。这不改变 M7.5 `pending_real_environment`；Vector DB 仍不立项，M7.7 需另行明确
+授权且尚未启动。
 
 ## 3. M6 遗留裁决
 
@@ -80,6 +89,14 @@ Cat 零泄漏且不保留原始音频；独立 review 后技术门禁关闭。5D
 Composer 消费、有界 P4 playback、统一语音 assembly 与 barge-in/Cat cancellation，最终全量
 319/319 且第五轮 closure review 为 no findings；当前进入 5E 安全/评测/实机总门禁。P4 可听
 startup tone 与分角色播放人工观察仍明确待补，默认 SR 仍关闭。
+
+2026-08-24，Phase 6A–6D 依次完成 Memory Store、写入/冲突/删除策略、private 产品召回和三策略
+确定性 visibility 对照；6E 新增可重复 `pnpm gate:phase6` 并在 Node `v24.19.0` / pnpm `11.19.0`
+下通过。定向结果为 6B/6C `20/20`、evaluator `15/15`、storage `43/43`；完整 `pnpm test`
+为 `383/389`，5 个既有 Phase 4 timing/socket 失败经隔离复跑最终 `43/43`，既有 WSL Voice
+仍为 `14/15`、`socket hang up`。用户同日批准 visibility matrix v1 保持 private；因此 M7.6
+标记为 `local_complete_pending_real_environment`：本地门禁和用户裁决完成不等于全仓库测试、
+真实模型、硬件或生产验收通过。
 
 ## 5. 状态更新规则
 

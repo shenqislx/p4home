@@ -1,4 +1,7 @@
-export { AuditStorageError } from "./sqlite-store.ts";
+export {
+  AuditStorageError,
+  SynchronousSqliteAuditStore,
+} from "./sqlite-store.ts";
 export type {
   AuditRecoveryReport,
   SqliteAuditStoreOptions,

@@ -9,6 +9,7 @@ import type {
 import {
   ROBOT_HA_OFFLINE_TEXT,
   RoleSessionRegistry,
+  createPrivateRoleMemoryRuntime,
   getRoleProfile,
   runAssignedRole,
   runRobotHaRead,
@@ -16,7 +17,10 @@ import {
   type RoutePlan,
   type UserTextInteraction,
 } from "@p4home/runtime";
-import { SqliteAuditStore } from "@p4home/storage-sqlite";
+import {
+  SqliteAuditStore,
+  type MemoryRecallResult,
+} from "@p4home/storage-sqlite";
 import type {
   RobotHaClientView,
   RobotHaConnectionState,
@@ -145,6 +149,43 @@ function toolResponse(name: string, alias: string): OllamaChatResult {
   };
 }
 
+function robotMemory(marker: string) {
+  return createPrivateRoleMemoryRuntime({
+    store: {
+      async recallMemories(query): Promise<MemoryRecallResult> {
+        return {
+          items: [{
+            schema_version: 1,
+            memory_id: `memory-${marker}`,
+            revision: 1,
+            kind: "user_fact",
+            content: `${query.query} ${marker}`,
+            source: "user_explicit",
+            source_interaction_id: "memory-source",
+            confidence: 1,
+            sensitivity: "normal",
+            owner_role: "robot",
+            visibility_scope: "owner_only",
+            visible_to_roles: [],
+            policy_revision: 2,
+            tags: [],
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            expires_at_ms: null,
+            idempotency_key: `idempotency-${marker}`,
+            subject_key: `subject-${marker}`,
+            supersedes_memory_id: null,
+            recall_relevance: 1,
+          }],
+        };
+      },
+    },
+    approved_policy_revision: 2,
+    token_counter: { countTokens: () => 10 },
+    clock: () => 1_000,
+  });
+}
+
 test("Robot exposes only alias-based home.get_entity and deterministically renders projected cache state", async () => {
   const requests: OllamaChatRequest[] = [];
   const value = interaction("interaction:phase4b:read", "客厅主灯现在是什么状态？");
@@ -160,6 +201,7 @@ test("Robot exposes only alias-based home.get_entity and deterministically rende
       },
     },
     robot_ha: { client: new FakeHaClient() },
+    memory: robotMemory("robot-read-memory-marker"),
   });
 
   assert.equal(requests.length, 1);
@@ -172,11 +214,13 @@ test("Robot exposes only alias-based home.get_entity and deterministically rende
   assert.equal(requestText.includes("当前状态"), false);
   assert.equal(requestText.includes("entity_id"), false);
   assert.equal(requestText.includes("long_lived_access_token"), false);
+  assert.match(requestText, /robot-read-memory-marker/);
   assert.equal(requests[0]?.think, false);
   assert.equal(result.status, "completed");
   assert.equal(result.model_turns, 1);
   assert.equal(result.final_text, "living_room_main_light（light）当前状态：on，属性 {\"brightness\":120}。");
   assert.equal(result.tool_results[0]?.status, "success");
+  assert.equal(result.memory?.status, "ok");
   assert.deepEqual(result.tool_results[0]?.result, STATES[0]);
 });
 
@@ -265,7 +309,7 @@ test("Phase 4B migrates an existing Robot audit session without rewriting its v1
   assert.ok(trace !== null);
   assert.notEqual(trace.run.session_id, "session:phase4b:robot");
   const migratedProfile = await store.getSessionAgentProfile(trace.run.session_id);
-  assert.equal(migratedProfile?.agent_profile_id, "role-profile-v4:robot");
+  assert.equal(migratedProfile?.agent_profile_id, "role-profile-v5:robot");
   assert.deepEqual(migratedProfile?.allowed_tools, [
     "home.get_entity",
     "home.turn_on",
@@ -277,12 +321,12 @@ test("Phase 4B migrates an existing Robot audit session without rewriting its v1
     from_session_id: "session:phase4b:robot",
     from_agent_profile_id: "role-profile-v1:robot",
     to_session_id: trace.run.session_id,
-    to_agent_profile_id: "role-profile-v4:robot",
-    role_profile_revision: "role-profile/v4",
+    to_agent_profile_id: "role-profile-v5:robot",
+    role_profile_revision: "role-profile/v5",
   });
   assert.equal(
     trace.events.find((event) => event.type === "role.run.started")?.payload.role_profile_revision,
-    "role-profile/v4",
+    "role-profile/v5",
   );
 });
 

@@ -3,7 +3,7 @@
 > Status: Current Architecture Baseline
 > Target Project: `shenqislx/p4home`
 > Target Stage: M7 / Local Voice, AI & Agent Runtime
-> Review Date: 2026-08-17
+> Review Date: 2026-08-24
 > Execution Index: [docs/plans/README.md](./plans/README.md)
 
 ## 1. 结论
@@ -507,20 +507,18 @@ home.activate_scene(scene_id)
 
 ### 13.1 Context
 
-每个角色分别按固定顺序构建，并设置独立预算：
+当前产品 Runtime 的 message context 已按角色分别构建并设置独立预算，实际顺序为：
 
 ```text
-System / Safety Policy
-→ Role Profile + revision
-→ Tool Schemas
-→ Assigned Semantic Segment / Trigger Event
-→ Compact World Snapshot
-→ Relevant Memory
-→ Recent Conversation
-→ Latest Tool Observations
+Trusted System / Safety / frozen Role Profile
+→ Untrusted Memory data message（可选、独立预算）
+→ Retained Recent Conversation
+→ Current Assigned Semantic Segment / Normalized Trigger Event
 ```
 
-World snapshot 只包含与当前任务有关的字段，避免每次注入完整 HA 实体树。
+Tool Schemas 通过 provider 的独立 `tools` 字段传入，不伪装成 Memory message；相关 HA/P4
+capability/world projection 位于当前 assignment/event 的有界 payload。Tool observation 只在后续
+有限 tool round 中追加。Memory 不能挤占 trusted system、保留会话或当前输入。
 
 Router 只接收当前用户输入和最小 locale/channel 元数据；Robot 不接收 Human 私聊历史；Human
 不接收 HA token、Tool observation 或 Cat 内部事件；Cat 只接收经过 Event Policy 归一化的事件、
@@ -547,10 +545,17 @@ sensitivity
 
 Memory 写入也应经过策略：模型不能因为一句玩笑就永久记录偏好，不能存储 HA token、Wi-Fi 密码、原始音频或不必要的敏感家庭状态。
 
-当前不预先决定三个角色共用一份长期记忆还是完全分开。存储模型必须先支持 `owner_role`、
-`visibility_scope`、`source_interaction_id` 和策略版本，使 Phase 6 可以比较三种方案：角色私有；
-全部共享但按 ACL 投影；共享用户事实 + 角色私有 conversation/task/pet memory。默认安全行为是
-不跨角色召回，只有评测和用户 review 通过的 memory class 才能被多个角色读取。
+当前 SQLite 数据库为 `PRAGMA user_version=4`，Memory record 使用独立的
+`schema_version=1`；canonical record 已包含 `owner_role`、`visibility_scope`、
+`source_interaction_id`、policy revision、expiry、lineage 与删除字段。Phase 6 已在同一
+canonical dataset 上实现并确定性比较三种 projection：`private`、`shared_acl`、`hybrid`
+（仅共享显式 ACL 批准的 `user_fact`）。
+
+2026-08-24 用户已批准 visibility matrix v1 保持 `private`：`conversation_summary`、
+`user_fact`、`task_outcome` 均保持 owner-role private。产品 Runtime 当前只接受工厂创建且冻结的
+`private` runtime，跨角色产品召回禁用；`shared_acl/hybrid` 只存在于 evaluator-only
+experimental boundary。确定性 fixture 全通过只证明各策略符合冻结矩阵，不表示共享方案更好。
+任何未来放开都必须先创建新版本矩阵并经用户 review，不能沿用 v1 裁决隐式启用。
 
 第一版不需要 Vector DB。先用结构化字段、FTS 和最近/显式标签检索，只有评测证明召回不足时再引入 embedding。
 
@@ -765,7 +770,8 @@ Voice Protocol v1、自动化硬件、真实 wake 与固定命令动作门禁已
 证明真实 P4 PCM 有界抵达 Agent fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 review
 后技术门禁关闭。5C 最终 run `32635742553` 已证明真实 P4 中文输入经固定 MLX STT 后只进入统一
 Human Runtime，transcript 哈希、SQLite 审计、Cat 零泄漏和原始音频不保留均满足门禁。P4 可听
-startup tone 人工观察待补；当前进入 5D 分角色 TTS、播放与 barge-in，尚未打开默认 SR。
+startup tone 人工观察待补；5D 分角色 TTS、播放与 barge-in 技术门禁已通过，5E 真实环境总门禁
+保持 `pending_real_environment`，尚未打开默认 SR。
 
 ### Phase 6 — Memory
 
@@ -775,6 +781,19 @@ startup tone 人工观察待补；当前进入 5D 分角色 TTS、播放与 barg
 角色私有记忆三种方案，并由评测与用户 review 决定最终可见性矩阵。
 
 退出条件：跨 Session 偏好召回可评测，错误记忆可追溯和删除。
+
+2026-08-24，6A–6E 本地实现与确定性门禁完成，状态为
+`local_complete_pending_real_environment`。
+Memory contract/SQLite、确定性写入与冲突/删除、独立 context budget、private 产品召回和三种
+visibility projection 的 evaluator 均有量化证据；`pnpm gate:phase6` 在 Node `v24.19.0` /
+pnpm `11.19.0` 下通过。用户已批准
+[visibility matrix v1](../evidence/agent-phase-6/visibility-matrix.md) 保持 `private`；三类
+Memory 均为 owner-role private，`shared_acl/hybrid` 继续 evaluator-only。三策略 deterministic
+通过只说明各自实现符合冻结矩阵，不说明共享更优。Current Gate 仅为真实 Ollama、代表性家庭
+数据、HA Robot/P4 Cat/Voice 端到端、家庭身份模型和长期 SQLite/WAL/断电/备份/quota/retention/
+权限/加密/secure-delete，均保持 `pending`；Phase 5 仍为 `pending_real_environment`，Phase 7
+等待另行明确授权且未启动。确定性 FTS 已满足当前冻结场景，因此 Vector DB 当前不立项，但真实
+数据证据不足，后续仍可在独立计划中重新评估。
 
 ### Phase 7 — Cat Autonomy
 

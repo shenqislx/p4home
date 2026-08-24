@@ -61,6 +61,10 @@ evidence/agent-phase-4/*
 !evidence/agent-phase-5/
 evidence/agent-phase-5/*
 !evidence/agent-phase-5/*.md
+!evidence/agent-phase-6/
+evidence/agent-phase-6/*
+!evidence/agent-phase-6/*.md
+!evidence/agent-phase-6/phase-6d-memory-eval.json
 evidence/agent-phase-4/artifacts/*
 !evidence/agent-phase-4/artifacts/*.json
 

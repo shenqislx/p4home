@@ -50,8 +50,18 @@ wake 与固定命令动作门禁已通过；5B 最终 run `32627837273` 已证�
 fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 review 后技术门禁关闭。5C 最终 run
 `32635742553` 已证明真实 P4 中文输入经固定 STT 后只进入统一 Human Runtime，审计完整且 Cat 零
 泄漏；2026-08-24 确认开发板 `SPK/J16` 未连接外接扬声器，5A 人工可听验证暂缓至扬声器到货，
-数字播放 marker 不替代该输出证明。5D 分角色 TTS、播放与 barge-in 技术门禁已通过，当前进入 5E
-安全/评测/真实硬件总门禁；默认 SR 仍关闭。
+数字播放 marker 不替代该输出证明。5D 分角色 TTS、播放与 barge-in 技术门禁已通过；5E
+安全/评测/真实硬件总门禁因当前 WSL2 不具备验证条件而保持 `pending_real_environment`，默认 SR
+仍关闭。2026-08-24 用户明确授权 Phase 6 先在 WSL2 完成编码、确定性测试与模拟验证。Phase 6A–6E
+本地门禁现已完成，状态为 `local_complete_pending_real_environment`：Memory contract/SQLite、
+确定性写入与删除、private 产品召回、三种 visibility 策略对照和 `pnpm gate:phase6` 均有本地证据。
+2026-08-24 用户已批准 visibility matrix v1 保持 `private`；三类 Memory 均保持 owner-role private，
+`shared_acl/hybrid` 仅限 experimental evaluator，跨角色产品召回未启用。Current Gate 仅剩真实
+Ollama、代表性家庭数据、HA/P4/Voice 端到端、家庭身份模型和 SQLite 长期
+WAL/断电/备份/quota/retention/权限/加密/secure-delete 证据；这些项目全部保持 `pending`。
+Vector DB 仍不立项。Phase 5 仍为 `pending_real_environment`；Phase 7 仍为 `pending`，需另行明确
+授权且尚未启动。完整清单和复现入口见
+[Phase 6E local gate evidence](./evidence/agent-phase-6/phase-6e-local-gate.md)。
 
 ## 工作规则
 

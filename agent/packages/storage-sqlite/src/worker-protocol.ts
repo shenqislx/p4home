@@ -9,7 +9,17 @@ import type {
   ToolResult,
 } from "@p4home/core";
 
-import type { AuditWriteBatch } from "./types.ts";
+import type {
+  AuditWriteBatch,
+  CanonicalMemoryCreate,
+  MemoryCreate,
+  MemoryDeletionRequest,
+  MemoryList,
+  MemoryOwnerRole,
+  MemoryRecall,
+  MemorySearch,
+  MemoryUpdate,
+} from "./types.ts";
 import type { SqliteAuditStoreOptions } from "./sqlite-store.ts";
 
 export interface WorkerInit {
@@ -17,22 +27,44 @@ export interface WorkerInit {
   readonly options: SqliteAuditStoreOptions;
 }
 
-export type WorkerRequest =
-  | { readonly id: number; readonly operation: "saveAgentProfile"; readonly args: [AgentProfile] }
-  | { readonly id: number; readonly operation: "saveSession"; readonly args: [Session] }
-  | { readonly id: number; readonly operation: "saveRun"; readonly args: [Run] }
-  | { readonly id: number; readonly operation: "saveMessage"; readonly args: [Message] }
-  | { readonly id: number; readonly operation: "saveToolCall"; readonly args: [string, ToolCall, number] }
-  | { readonly id: number; readonly operation: "saveAction"; readonly args: [Action] }
-  | { readonly id: number; readonly operation: "saveToolResult"; readonly args: [string, ToolResult, number] }
-  | { readonly id: number; readonly operation: "appendEvent"; readonly args: [Event] }
-  | { readonly id: number; readonly operation: "writeBatch"; readonly args: [AuditWriteBatch] }
-  | { readonly id: number; readonly operation: "getSessionAgentProfile"; readonly args: [string] }
-  | { readonly id: number; readonly operation: "getRunTrace"; readonly args: [string] }
-  | { readonly id: number; readonly operation: "listSessionMessages"; readonly args: [string] }
-  | { readonly id: number; readonly operation: "listRunIdsForInteraction"; readonly args: [string] }
-  | { readonly id: number; readonly operation: "reconcileInterruptedRuns"; readonly args: [number] }
-  | { readonly id: number; readonly operation: "close"; readonly args: [] };
+export interface WorkerOperationArgs {
+  readonly saveAgentProfile: [AgentProfile];
+  readonly saveSession: [Session];
+  readonly saveRun: [Run];
+  readonly saveMessage: [Message];
+  readonly saveToolCall: [string, ToolCall, number];
+  readonly saveAction: [Action];
+  readonly saveToolResult: [string, ToolResult, number];
+  readonly appendEvent: [Event];
+  readonly writeBatch: [AuditWriteBatch];
+  readonly getSessionAgentProfile: [string];
+  readonly getRunTrace: [string];
+  readonly listSessionMessages: [string];
+  readonly listRunIdsForInteraction: [string];
+  readonly reconcileInterruptedRuns: [number];
+  readonly createMemory: [MemoryCreate];
+  readonly createCanonicalMemory: [CanonicalMemoryCreate];
+  readonly getMemory: [string, MemoryOwnerRole, number];
+  readonly updateMemory: [MemoryUpdate];
+  readonly listMemories: [MemoryList];
+  readonly searchMemories: [MemorySearch];
+  readonly recallMemories: [MemoryRecall];
+  readonly deleteMemory: [string, MemoryOwnerRole];
+  readonly deleteMemoryCascade: [MemoryDeletionRequest];
+  readonly getMemoryDeletionAudit: [string, MemoryOwnerRole];
+  readonly purgeExpiredMemories: [number, number];
+  readonly close: [];
+}
+
+export type WorkerOperation = keyof WorkerOperationArgs;
+
+export type WorkerRequest = {
+  readonly [Operation in WorkerOperation]: {
+    readonly id: number;
+    readonly operation: Operation;
+    readonly args: WorkerOperationArgs[Operation];
+  };
+}[WorkerOperation];
 
 export interface SerializedWorkerError {
   readonly name: string;

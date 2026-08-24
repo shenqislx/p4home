@@ -27,7 +27,12 @@ export const CAT_OBJECT_TOOLS = [
 export const CAT_WORLD_TOOLS = [...CAT_ROOM_TOOLS, ...CAT_OBJECT_TOOLS] as const;
 
 export interface RoleProfile {
-  readonly revision: "role-profile/v1" | "role-profile/v2" | "role-profile/v3" | "role-profile/v4";
+  readonly revision:
+    | "role-profile/v1"
+    | "role-profile/v2"
+    | "role-profile/v3"
+    | "role-profile/v4"
+    | "role-profile/v5";
   readonly role_id: RoleId;
   readonly accepts_user_text: boolean;
   readonly allowed_tools: readonly string[];
@@ -36,6 +41,7 @@ export interface RoleProfile {
   readonly num_predict: number;
   readonly max_model_turns: number;
   readonly history_message_limit: number;
+  readonly memory_token_budget: number;
   readonly queue_priority: "user" | "background";
   readonly system_prompt: string;
 }
@@ -63,7 +69,7 @@ export type RoleInput =
 
 const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
   robot: {
-    revision: "role-profile/v4",
+    revision: "role-profile/v5",
     role_id: "robot",
     accepts_user_text: true,
     allowed_tools: ["home.get_entity", "home.turn_on", "home.turn_off", "home.activate_scene"],
@@ -72,11 +78,12 @@ const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
     num_predict: 128,
     max_model_turns: 1,
     history_message_limit: 12,
+    memory_token_budget: 384,
     queue_priority: "user",
     system_prompt: "你是 P4 Home 的 Robot。只能原样选择 Runtime 给出的 home.* alias Tool；不得构造 entity id、domain、service/data，不得把 accepted 或 unknown 声称为完成。",
   },
   human: {
-    revision: "role-profile/v1",
+    revision: "role-profile/v2",
     role_id: "human",
     accepts_user_text: true,
     allowed_tools: [],
@@ -85,11 +92,12 @@ const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
     num_predict: 256,
     max_model_turns: 1,
     history_message_limit: 12,
+    memory_token_budget: 512,
     queue_priority: "user",
     system_prompt: "你是 P4 Home 的 Human，只负责自然、简洁的中文对话。你没有任何执行工具，不得声称已控制设备。",
   },
   cat: {
-    revision: "role-profile/v2",
+    revision: "role-profile/v3",
     role_id: "cat",
     accepts_user_text: false,
     allowed_tools: CAT_WORLD_TOOLS,
@@ -98,6 +106,7 @@ const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
     num_predict: 128,
     max_model_turns: 2,
     history_message_limit: 6,
+    memory_token_budget: 256,
     queue_priority: "background",
     system_prompt: "你是 P4 Home 的 Cat，只处理经过策略层归一化的世界事件，只能从给定的无坐标对象能力中选择最小 P4 World 工具，不得改写目标。",
   },
@@ -118,6 +127,7 @@ function assertCanonicalRoleProfile(profile: RoleProfile): RoleProfile {
     && profile.num_predict === canonical.num_predict
     && profile.max_model_turns === canonical.max_model_turns
     && profile.history_message_limit === canonical.history_message_limit
+    && profile.memory_token_budget === canonical.memory_token_budget
     && profile.queue_priority === canonical.queue_priority
     && profile.system_prompt === canonical.system_prompt
     && profile.allowed_tools.length === canonical.allowed_tools.length

@@ -1,10 +1,13 @@
 # P4 Home Agent Runtime
 
-Phase 1 至 Phase 3 已关闭、Phase 4C 正在接入低风险 Home Assistant 写 Tool 的 TypeScript workspace。
-当前包含冻结契约、Ollama 原生 Tool Calling、有限文本 Agent Loop、Role Contract/Router、Cat
-Action Adapter、真实 P4 Device WebSocket server，以及只向 Robot 暴露 alias 读侧的 Home Assistant
-contract/transport。确定性测试不要求 Ollama 或 Home Assistant 服务，真实模型、P4 硬件或 HA
-回归必须显式启用。
+Phase 1 至 Phase 4 已关闭，Phase 5 保持 `pending_real_environment`；Phase 6A–6E 的本地实现与
+确定性门禁已完成，状态为 `local_complete_pending_real_environment`。当前 workspace 包含冻结契约、Ollama
+原生 Tool Calling、有限文本 Agent Loop、Role Contract/Router、Cat P4 World、Robot HA、Role-aware
+Voice，以及可追溯/可过期/可删除的 role-scoped Memory。2026-08-24 用户已批准 visibility matrix
+v1 保持 `private`；三类 Memory 均保持 owner-role private，跨角色产品召回禁用，
+`shared_acl/hybrid` 仅用于 experimental evaluator。确定性测试不要求 Ollama、Home Assistant 或
+P4，真实模型、硬件、HA、Voice 与长期 SQLite 验证均保持 `pending`。Vector DB 仍不立项；
+Phase 7 需另行明确授权且尚未启动。
 
 ## 环境
 
@@ -19,6 +22,7 @@ pnpm typecheck
 pnpm validate:contracts
 pnpm validate:object-runtime
 pnpm validate:ha-runtime
+pnpm gate:phase6
 pnpm test
 ```
 
@@ -30,7 +34,7 @@ Node 主版本时产生假通过。
 - `apps/runtime`：有限文本 Agent Loop、Role Contract/Profile/Router、独立 Role Session、
   Router → Scheduler → Session → Runner/Audit 组合入口、Human 本地输出策略、有界调度、SQLite 审计
   接入与 JSON Lines 结构化日志；
-- `apps/eval-cli`：中文黄金场景评测与单次文本调试入口；
+- `apps/eval-cli`：中文黄金场景、Phase 4 和 Phase 6 Memory visibility 评测与单次文本调试入口；
 - `apps/device-harness`：Phase 2D 自托管实机门禁入口，使用一次性 TLS/设备凭据执行 100 次动作、
   主动重连与 snapshot 检查；
 - `packages/contracts`：AJV 加载并验证仓库根目录冻结的通用、对象运行时与 HA v1 契约；
@@ -40,14 +44,34 @@ Node 主版本时产生假通过。
   stream、`AbortSignal` 取消和相对 timeout；
 - `packages/transport-ha`：凭证文件边界、HA WebSocket 鉴权/订阅、逐实体 REST 初始快照、
   allowlist 状态投影与无网络 Fake Transport；4B 由 Runtime 只读消费投影缓存；
-- `packages/storage-sqlite`：基于 Node 24 内置 `node:sqlite` 的审计存储、schema migration 与关联查询。
+- `packages/storage-sqlite`：基于 Node 24 内置 `node:sqlite` 的审计/Memory 存储、schema migration、
+  FTS、bounded recall、expiry、revision、lineage 与删除。
 
-Phase 1 至 Phase 3 已按各自证据门禁关闭。Phase 4A 已完成 HA contract、凭证与 transport 边界；
-Phase 4B 只向 Robot revision v3 开放 `home.get_entity(alias)`，不调用 HA service，不把真实 entity id、
-4B coding 与独立 bugs review 已完成。4C 只开放 alias 级 `turn_on/turn_off/activate_scene`，固定
-domain/service/target 映射，并以 HA result + 后续投影状态回刷判完成；accepted、rejected、unknown
-不会混写，unknown 禁止自动重放。4C coding 与独立 review 已完成，等待真实 HA/P4 门禁。
+Phase 1 至 Phase 4 已按各自证据门禁关闭。Robot 只开放 alias 级
+`home.get_entity/turn_on/turn_off/activate_scene`，由固定 policy 映射并以 HA result + 后续状态回刷
+判定，accepted/rejected/unknown 不混写且 unknown 禁止自动重放。Phase 5A–5D 技术主体完成，5E
+仍为 `pending_real_environment`；该状态不因 Phase 6 本地门禁通过而改变。
 任何阶段都不得把 token 暴露给模型、协议 JSON、日志或 artifact。
+
+## Phase 6 本地门禁
+
+```bash
+pnpm gate:phase6
+```
+
+该入口只执行一次 runtime preflight，随后 fail-fast 执行 typecheck、6B/6C、Memory evaluator、
+完整 storage tests 和确定性 Phase 6 eval。eval 先写入同目录临时文件；独立 verifier 再按冻结的
+schema/suite、canonical dataset fingerprint、三策略逐 case 结果、private 产品边界、零真实模型
+调用、无正文/secret canary 和 mode `0600` 复验，通过后才原子替换
+`../evidence/agent-phase-6/phase-6d-memory-eval.json`。固定 artifact 路径若意外成为 SQLite
+数据库会拒绝覆盖。该门禁不运行 Ollama、HA、P4 或语音服务，也不替代完整 `pnpm test`。最新本地
+gate 通过；最近一次完整测试为 `383/389`，不是 pass；并发运行中的既有 Phase 4 timing/socket 与
+WSL Voice 失败均如实保留。复现、隔离结果和所有 `pending` 项见
+[Phase 6E local gate evidence](../evidence/agent-phase-6/phase-6e-local-gate.md)。
+
+产品 Context 的实际固定顺序为：trusted system/safety（含 Role Profile/Tool 边界）→ 独立
+untrusted Memory data message → retained recent conversation → 当前 assignment/normalized event。
+Memory 有独立角色预算且不能挤占 system、保留会话或当前输入；Router 不构建 Memory context。
 
 Role Router 不向模型提供 Tool，也不依赖 Ollama `format`：默认 27B 已实测会在部分分类样例中违反
 `format`。Router prompt 只允许三个精确 JSON，响应仍由 Runtime 使用 JSON Schema/AJV 本地复验；
@@ -105,14 +129,16 @@ completion API，`structuredOutput` 在这种 metadata-only probe 中保持保�
 
 ## SQLite 审计与结构化日志
 
-`SqliteAuditStore` 使用 schema version 2、WAL、STRICT table、外键和 JSON 有效性约束，保存
+`SqliteAuditStore` 当前数据库 `PRAGMA user_version=4`，使用 WAL、STRICT table、外键和 JSON
+有效性约束，保存
 AgentProfile、Session、Run、Message、ToolCall、Action 与 Event。Run、Session、Action 的身份字段
 不可重写，终态 Run/Action 不可回退；一个 ToolCall 只能从 `pending` 写入一次终态结果。查询
 `getRunTrace(runId)` 可获得同一读快照下的完整关联记录。Run 不能在 ToolCall 或 Action 未终止时
 结束；前序工具失败导致后续调用未执行时，审计会以合成失败结果终止这些调用，再和 Run 终态原子
 提交。同一审计阶段的 Run、Message、ToolCall、ToolResult 和 Event 使用 batch transaction 写入。
-schema v2 为 Interaction → Run 关联增加可索引查询并按 `run_id` 去重，旧 schema v1 数据库在打开时
-原子迁移。
+历史数据库 schema v2 曾为 Interaction → Run 关联增加可索引查询并按 `run_id` 去重；当前打开
+v0/v1/v2/v3 数据库时会在单个 migration transaction 内升级到 v4。Memory record 自身的
+`schema_version=1` 与数据库 `user_version=4` 是不同版本轴。
 所有 `DatabaseSync` 操作在专用 Worker 中串行执行，SQLite 锁等待不会阻塞主线程的取消、健康检查
 和心跳 timer。
 

@@ -1,5 +1,15 @@
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import {
+  chmodSync,
+  closeSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 
@@ -26,11 +36,24 @@ import {
   evaluateRoleRuntime,
   ROLE_EVAL_TOTAL_CASES_PER_REPEAT,
 } from "./role-evaluator.ts";
+import {
+  assessMemoryVisibilityEvalGate,
+  evaluateMemoryVisibilityStrategies,
+} from "./memory-evaluator.ts";
 
 interface ParsedArguments {
   readonly command: string;
   readonly options: ReadonlyMap<string, readonly string[]>;
 }
+
+export interface EvalCliDependencies {
+  readonly evaluateMemoryVisibilityStrategies:
+    typeof evaluateMemoryVisibilityStrategies;
+}
+
+const DEFAULT_CLI_DEPENDENCIES: EvalCliDependencies = {
+  evaluateMemoryVisibilityStrategies,
+};
 
 function parseArguments(argv: readonly string[]): ParsedArguments {
   const [command = "help", ...rawRest] = argv;
@@ -107,9 +130,124 @@ Phase 2 role eval (separate Router/Human/Robot/Cat reports, no aggregate score):
 Phase 4 eval (separate Router span/Robot policy/Human/Composer reports):
   pnpm eval:phase4 -- --model ${DEFAULT_OLLAMA_MODEL} [--output FILE]
 
+Phase 6D deterministic visibility eval (no Ollama/model parameters):
+  pnpm eval:phase6 -- [--database :memory:] [--output FILE]
+
 Debug one text run:
   pnpm debug:agent -- --model ${DEFAULT_OLLAMA_MODEL} --text "去书房" [--database :memory:]
 `);
+}
+
+function writePrivateArtifact(path: string, content: string): void {
+  const outputPath = resolve(path);
+  mkdirSync(dirname(outputPath), { recursive: true });
+  let existing: ReturnType<typeof lstatSync> | undefined;
+  try {
+    existing = lstatSync(outputPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+  if (existing !== undefined && !existing.isSymbolicLink()) {
+    if (!existing.isFile()) {
+      throw new Error("artifact output exists and is not a regular file");
+    }
+    const existingDescriptor = openSync(outputPath, "r");
+    try {
+      const header = Buffer.alloc(16);
+      const bytesRead = readSync(
+        existingDescriptor,
+        header,
+        0,
+        header.length,
+        0,
+      );
+      if (
+        bytesRead === header.length
+        && header.toString("utf8") === "SQLite format 3\u0000"
+      ) {
+        throw new Error(
+          "refusing to overwrite an existing SQLite database with an artifact",
+        );
+      }
+    } finally {
+      closeSync(existingDescriptor);
+    }
+  }
+  const temporaryPath = resolve(
+    dirname(outputPath),
+    `.${basename(outputPath)}.${randomUUID()}.tmp`,
+  );
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(temporaryPath, "wx", 0o600);
+    writeFileSync(descriptor, content, { encoding: "utf8" });
+    chmodSync(temporaryPath, 0o600);
+    closeSync(descriptor);
+    descriptor = undefined;
+    renameSync(temporaryPath, outputPath);
+    chmodSync(outputPath, 0o600);
+  } catch (error) {
+    if (descriptor !== undefined) {
+      closeSync(descriptor);
+    }
+    rmSync(temporaryPath, { force: true });
+    throw error;
+  }
+}
+
+export function memoryEvalGateExitCode(
+  gate: { readonly passed: boolean },
+): 0 | 2 {
+  return gate.passed ? 0 : 2;
+}
+
+async function phase6EvalCommand(
+  argumentsValue: ParsedArguments,
+  dependencies: EvalCliDependencies,
+): Promise<void> {
+  assertKnownOptions(argumentsValue, new Set(["--database", "--output"]));
+  const database = value(argumentsValue, "--database", ":memory:") ?? ":memory:";
+  const output = value(argumentsValue, "--output");
+  if (database.trim().length === 0) {
+    throw new Error("--database must not be empty");
+  }
+  const databasePath = database === ":memory:" ? database : resolve(database);
+  const outputPath = output === undefined ? undefined : resolve(output);
+  if (
+    databasePath !== ":memory:"
+    && outputPath !== undefined
+    && [
+      databasePath,
+      `${databasePath}-wal`,
+      `${databasePath}-shm`,
+    ].includes(outputPath)
+  ) {
+    throw new Error("--output must not alias the evaluator database or its sidecars");
+  }
+  if (databasePath !== ":memory:") {
+    mkdirSync(dirname(databasePath), { recursive: true });
+  }
+  const report = await dependencies.evaluateMemoryVisibilityStrategies({
+    database_path: databasePath,
+  });
+  if (databasePath !== ":memory:") {
+    chmodSync(databasePath, 0o600);
+  }
+  const gate = assessMemoryVisibilityEvalGate(report);
+  const artifact = { ...report, gate };
+  const encoded = `${JSON.stringify(artifact, null, 2)}\n`;
+  if (outputPath !== undefined) {
+    writePrivateArtifact(outputPath, encoded);
+    process.stderr.write(`phase6 eval report: ${outputPath}\n`);
+  }
+  process.stdout.write(encoded);
+  const gateExitCode = memoryEvalGateExitCode(gate);
+  if (gateExitCode !== 0) {
+    process.stderr.write(`phase6 eval gate failed: ${gate.failures.join(", ")}\n`);
+    process.exitCode = gateExitCode;
+  }
 }
 
 async function phase4EvalCommand(argumentsValue: ParsedArguments): Promise<void> {
@@ -376,7 +514,10 @@ async function debugCommand(argumentsValue: ParsedArguments): Promise<void> {
   }
 }
 
-export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
+export async function main(
+  argv: readonly string[] = process.argv.slice(2),
+  dependencies: EvalCliDependencies = DEFAULT_CLI_DEPENDENCIES,
+): Promise<void> {
   const argumentsValue = parseArguments(argv);
   if (argumentsValue.command === "eval") {
     await evalCommand(argumentsValue);
@@ -392,6 +533,10 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   }
   if (argumentsValue.command === "phase4") {
     await phase4EvalCommand(argumentsValue);
+    return;
+  }
+  if (argumentsValue.command === "phase6") {
+    await phase6EvalCommand(argumentsValue, dependencies);
     return;
   }
   if (argumentsValue.command === "help") {

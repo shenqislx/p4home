@@ -5,6 +5,7 @@ import type { RobotHaCapability, RobotHaWriteAction } from "@p4home/contracts";
 import type { OllamaChatRequest, OllamaChatResult } from "@p4home/provider-ollama";
 import {
   RoleSessionRegistry,
+  createPrivateRoleMemoryRuntime,
   getRoleProfile,
   runAssignedRole,
   runRobotHaWrite,
@@ -12,7 +13,10 @@ import {
   type RoutePlan,
   type UserTextInteraction,
 } from "@p4home/runtime";
-import { SqliteAuditStore } from "@p4home/storage-sqlite";
+import {
+  SqliteAuditStore,
+  type MemoryRecallResult,
+} from "@p4home/storage-sqlite";
 import type {
   RobotHaConnectionState,
   RobotHaMetrics,
@@ -306,6 +310,43 @@ function toolResponse(name: string, alias: string): OllamaChatResult {
   };
 }
 
+function robotMemory(marker: string) {
+  return createPrivateRoleMemoryRuntime({
+    store: {
+      async recallMemories(query): Promise<MemoryRecallResult> {
+        return {
+          items: [{
+            schema_version: 1,
+            memory_id: `memory-${marker}`,
+            revision: 1,
+            kind: "user_fact",
+            content: `${query.query} ${marker}`,
+            source: "user_explicit",
+            source_interaction_id: "memory-source",
+            confidence: 1,
+            sensitivity: "normal",
+            owner_role: "robot",
+            visibility_scope: "owner_only",
+            visible_to_roles: [],
+            policy_revision: 2,
+            tags: [],
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            expires_at_ms: null,
+            idempotency_key: `idempotency-${marker}`,
+            subject_key: `subject-${marker}`,
+            supersedes_memory_id: null,
+            recall_relevance: 1,
+          }],
+        };
+      },
+    },
+    approved_policy_revision: 2,
+    token_counter: { countTokens: () => 10 },
+    clock: () => 1_000,
+  });
+}
+
 async function run(
   id: string,
   client: FakeWriteClient,
@@ -383,6 +424,7 @@ test("Robot exposes only capability-derived low-risk tools and completes only af
     },
     robot_ha: { client, observation_timeout_ms: 100 },
     audit: { store, clock: () => 1_100 },
+    memory: robotMemory("robot-write-memory-marker"),
   });
 
   assert.equal(result.status, "completed");
@@ -401,8 +443,11 @@ test("Robot exposes only capability-derived low-risk tools and completes only af
   assert.equal(requestText.includes("entity_id"), false);
   assert.equal(requestText.includes("call_service"), false);
   assert.equal(requestText.includes("service_data"), false);
+  assert.match(requestText, /robot-write-memory-marker/);
+  assert.equal(result.memory?.status, "ok");
   const trace = await store.getRunTrace("run:phase4c:completed");
   assert.ok(trace !== null);
+  assert.equal(JSON.stringify(trace).includes("robot-write-memory-marker"), false);
   assert.deepEqual(trace.events.map((event) => event.type), [
     "role.run.started",
     "role.model.requested",

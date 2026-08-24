@@ -1,8 +1,9 @@
 # Agent Phase 5 — Role-aware Voice Pipeline Plan
 
-> Status: `in_progress`
+> Status: `pending_real_environment`
 > Started: 2026-08-23
-> Current Gate: 5D TTS/播放/barge-in 技术门禁通过；当前进入 5E 安全/评测/实机总门禁
+> Current Gate: 5D TTS/播放/barge-in 技术门禁通过；5E 真实硬件/HA/语音总门禁因当前
+> WSL2 开发环境不具备验证条件而保持 `pending`
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用
 

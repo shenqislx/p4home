@@ -26,6 +26,10 @@ function serializedError(error: unknown): SerializedWorkerError {
   return { name: "Error", message: String(error) };
 }
 
+function assertNever(value: never): never {
+  throw new Error(`unsupported SQLite worker request: ${JSON.stringify(value)}`);
+}
+
 const send = (response: WorkerResponse): void => port.postMessage(response);
 const init = workerData as WorkerInit;
 
@@ -86,10 +90,45 @@ if (store !== undefined) {
         case "reconcileInterruptedRuns":
           value = auditStore.reconcileInterruptedRuns(...request.args);
           break;
+        case "createMemory":
+          value = await auditStore.createMemory(...request.args);
+          break;
+        case "createCanonicalMemory":
+          value = await auditStore.createCanonicalMemory(...request.args);
+          break;
+        case "getMemory":
+          value = await auditStore.getMemory(...request.args);
+          break;
+        case "updateMemory":
+          value = await auditStore.updateMemory(...request.args);
+          break;
+        case "listMemories":
+          value = await auditStore.listMemories(...request.args);
+          break;
+        case "searchMemories":
+          value = await auditStore.searchMemories(...request.args);
+          break;
+        case "recallMemories":
+          value = await auditStore.recallMemories(...request.args);
+          break;
+        case "deleteMemory":
+          value = await auditStore.deleteMemory(...request.args);
+          break;
+        case "deleteMemoryCascade":
+          value = await auditStore.deleteMemoryCascade(...request.args);
+          break;
+        case "getMemoryDeletionAudit":
+          value = await auditStore.getMemoryDeletionAudit(...request.args);
+          break;
+        case "purgeExpiredMemories":
+          value = await auditStore.purgeExpiredMemories(...request.args);
+          break;
         case "close":
           auditStore.close();
           value = undefined;
           break;
+        default:
+          value = assertNever(request);
       }
       send({ type: "result", id: request.id, value });
       if (request.operation === "close") {

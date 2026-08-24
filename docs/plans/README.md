@@ -1,7 +1,7 @@
 # P4 Home 当前工作计划
 
 > Current Focus: [P4 Home 本地 LLM Agent 化架构](../p4-local-agent-architecture.md)
-> Updated: 2026-08-23
+> Updated: 2026-08-24
 > Working Branch: `feature/agent-harness`
 
 ## 工作规则
@@ -24,8 +24,8 @@
 | 2 | Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作 | [Phase 2 归档](../archive/plans/agent/2026-08-15-agent-phase-2-p4-room-world-plan.md) |
 | 3 | Cat Object World | `completed` | sofa 等对象锚点与 Cat 交互动作 | [Phase 3 归档](../archive/plans/agent/2026-08-15-agent-phase-3-object-world-plan.md) |
 | 4 | Robot HA & Multi-role | `completed` | Robot 受限 HA 工具、Human/Robot 语义分割 | [Phase 4 归档](../archive/plans/agent/2026-08-15-agent-phase-4-ha-tool-plan.md) |
-| 5 | Role-aware Voice | `in_progress` | ESP-SR → STT → Router/Roles → TTS | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
-| 6 | Role-aware Memory | `pending` | 比较共享、私有和混合记忆可见性 | [Phase 6](./2026-08-15-agent-phase-6-memory-plan.md) |
+| 5 | Role-aware Voice | `pending_real_environment` | 5A–5D 技术主体完成；5E 实机总门禁待具备硬件条件后补 | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
+| 6 | Role-aware Memory | `local_complete_pending_real_environment` | 6A–6E 本地门禁与用户 private 裁决完成；真实环境证据待补 | [Phase 6](./2026-08-15-agent-phase-6-memory-plan.md) |
 | 7 | Cat Autonomy | `pending` | Timer/HA 事件驱动、低频、可审计 Cat 行为 | [Phase 7](./2026-08-15-agent-phase-7-autonomy-plan.md) |
 
 ## 下一步
@@ -61,8 +61,20 @@ wake 与固定命令动作 marker。5B 已由 run `32627837273` 证明真实 P4 
 丢帧 0、HA/固定命令与稳态 UI 主链不回归，并在最终独立 review 后关闭技术门禁。5C 最终 run
 `32635742553` 已证明现场中文经真实 P4/VAD/固定 MLX STT 后只进入统一 Human Runtime，transcript
 哈希、SQLite 审计、Cat 零泄漏与原始音频不保留均满足门禁。Mac 系统扬声器只替代口播输入，P4
-startup tone 的独立可听人工观察仍明确待补，不能由 `tone_played` marker 冒充。当前进入 5D
-分角色 TTS、P4 播放与 barge-in；默认 SR 仍关闭。
+startup tone 的独立可听人工观察仍明确待补，不能由 `tone_played` marker 冒充。5D 分角色 TTS、
+P4 播放与 barge-in 技术门禁已完成；5E 真实硬件/HA/语音总门禁因当前 WSL2 不具备验证条件而保持
+`pending_real_environment`。2026-08-24 用户明确授权 Phase 6 在 WSL2 先完成编码和模拟验证，所有
+真实环境项目继续 pending，不解释为 Phase 5 已完成。
+
+Phase 6A–6E 本地实现和模拟门禁已完成：Memory contract/SQLite、确定性写入/冲突/级联删除、
+private 产品 recall、三种 visibility evaluator 和可重复 `pnpm gate:phase6` 均已通过。2026-08-24
+用户已批准 [visibility matrix v1](../../evidence/agent-phase-6/visibility-matrix.md) 保持
+`private`；三类 Memory 均保持 owner-role private，`shared_acl/hybrid` 仅存在于实验 evaluator，
+不启用跨角色产品召回。当前状态为 `local_complete_pending_real_environment`；Current Gate 仅为
+清单中保持 `status=pending` 的真实模型、代表性家庭数据、HA/P4/Voice 端到端、家庭身份模型和 SQLite
+WAL/断电/备份/quota/retention/权限/加密/secure-delete 证据。
+确定性 FTS 已满足冻结场景，当前不立项 Vector DB；真实家庭/模型证据不足，不能外推为长期结论。
+Phase 5 仍为 `pending_real_environment`。Phase 7 保持 `pending`，需另行明确授权且不得启动。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 已在 Phase 2 完成并通过实机证据验证。
