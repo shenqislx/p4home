@@ -98,15 +98,34 @@ Result on macOS/APFS with Node `v24.19.0`:
   synthetic record restored;
 - artifact contains verdicts/counts only and is mode `0600`.
 
+Deletion-remnant boundary (local pre-commit follow-up):
+
+- logical cascade deletion removes the Memory from SQL/FTS/ACL and from a new
+  online backup, while the deletion audit remains body-free;
+- the same temporary APFS probe proves that the deletion canary remains readable
+  from a pre-delete backup and prior WAL frames;
+- the gate now records the actual `PRAGMA secure_delete` value (`0` on Node
+  `v24.19.0`); this is evidence of the current limit, not a secure-erasure pass;
+- [SQLite deletion and remnant boundary](../../docs/sqlite-deletion-remnants.md)
+  records why APFS snapshots, backup copies and SSD wear leveling remain outside
+  application-level SQLite deletion guarantees.
+
 Regression:
 
-- `pnpm typecheck`: PASS;
-- storage plus Phase 6I tests: `49/49` PASS;
-- `pnpm gate:phase6`: PASS;
-- full Agent suite outside the filesystem/network sandbox: `399/399` PASS;
+- commit-bound baseline `pnpm typecheck`: PASS;
+- commit-bound baseline storage plus Phase 6I tests: `49/49` PASS;
+- commit-bound baseline `pnpm gate:phase6`: PASS;
+- commit-bound baseline full Agent suite outside the filesystem/network sandbox:
+  `399/399` PASS;
 - the sandboxed attempt passed `376/399`; all 23 failures were localhost server
   `listen EPERM` restrictions. Re-running the identical command with local bind
   permission passed all WebSocket/HA/Voice and SQLite tests.
+- deletion-remnant local follow-up: typecheck PASS, storage plus Phase 6I `50/50`
+  PASS and `pnpm gate:phase6` PASS;
+- follow-up full suite: `399/400`; the only failure was the pre-existing Phase 4C
+  unavailable-socket timing classification (`transport_error` instead of
+  `unsafe_initial_state`) under full parallel load. The exact localhost test passed
+  `3/3` when isolated and does not execute the SQLite deletion path.
 
 Artifact:
 [phase-6i-sqlite-filesystem.json](./phase-6i-sqlite-filesystem.json)

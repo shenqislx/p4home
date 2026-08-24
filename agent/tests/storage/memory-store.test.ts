@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -1010,6 +1010,82 @@ test("cascade deletion clears FTS, tags, ACL and stores no memory body in audit"
     );
     database.close();
   } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("logical deletion does not erase stale backups or prior WAL frames", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "p4home-memory-delete-remnants-"));
+  const databasePath = join(directory, "audit.sqlite");
+  const preDeleteBackupPath = join(directory, "pre-delete.sqlite");
+  const postDeleteBackupPath = join(directory, "post-delete.sqlite");
+  const bodyCanary = "phase6i-remnant-canary-7f3d8a1c";
+  const store = new SqliteAuditStore(databasePath, { reconcile_on_open: false });
+  try {
+    await store.createMemory(memory("remnant-probe", {
+      content: bodyCanary,
+      idempotency_key: "remnant-probe-idempotency",
+      subject_key: "remnant.probe",
+    }));
+    await store.backup(preDeleteBackupPath);
+    await store.deleteMemoryCascade({
+      request_id: "remnant-delete-request",
+      memory_id: "remnant-probe",
+      requester_role: "robot",
+      reason: "privacy_request",
+      requested_at_ms: 200,
+    });
+    assert.equal(await store.getMemory("remnant-probe", "robot", 200), null);
+    assert.deepEqual((await store.searchMemories({
+      requester_role: "robot",
+      query: "phase6i remnant canary",
+      now_ms: 200,
+    })).items, []);
+    await store.backup(postDeleteBackupPath);
+
+    const walPath = `${databasePath}-wal`;
+    assert.equal(existsSync(walPath), true);
+    assert.equal(
+      readFileSync(walPath).includes(Buffer.from(bodyCanary, "utf8")),
+      true,
+    );
+
+    const preDeleteBackup = new DatabaseSync(preDeleteBackupPath, { readOnly: true });
+    try {
+      assert.equal(
+        preDeleteBackup.prepare(
+          "SELECT COUNT(*) AS count FROM memories WHERE memory_id = ?",
+        ).get("remnant-probe")?.count,
+        1,
+      );
+      assert.equal(
+        readFileSync(preDeleteBackupPath).includes(Buffer.from(bodyCanary, "utf8")),
+        true,
+      );
+    } finally {
+      preDeleteBackup.close();
+    }
+
+    const postDeleteBackup = new DatabaseSync(postDeleteBackupPath, { readOnly: true });
+    try {
+      assert.equal(
+        postDeleteBackup.prepare(
+          "SELECT COUNT(*) AS count FROM memories WHERE memory_id = ?",
+        ).get("remnant-probe")?.count,
+        0,
+      );
+      assert.equal(
+        JSON.stringify(postDeleteBackup.prepare(`
+          SELECT * FROM memory_deletion_requests
+          JOIN memory_deletion_items USING (request_id)
+        `).all()).includes(bodyCanary),
+        false,
+      );
+    } finally {
+      postDeleteBackup.close();
+    }
+  } finally {
+    await store.closeAsync();
     rmSync(directory, { recursive: true, force: true });
   }
 });

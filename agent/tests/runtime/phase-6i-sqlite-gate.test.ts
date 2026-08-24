@@ -14,6 +14,7 @@ const PASSING: Phase6iAssessmentInput = {
   shm_mode: "600",
   journal_mode: "wal",
   synchronous: 1,
+  secure_delete: 0,
   reopen_read: true,
   permissive_database_rejected: true,
   permissive_sidecar_rejected: true,

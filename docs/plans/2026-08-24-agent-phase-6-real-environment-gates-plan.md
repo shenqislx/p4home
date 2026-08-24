@@ -88,8 +88,9 @@ self-hosted hardware run. It has not started and no P4 was flashed in 6F/6G/6I.
   result and is not closed by the controlled kill or backup probes.
 - [ ] Database/WAL/index quota and per-class retention fail closed at their limits.
 - [ ] Encryption/key rotation design and identity binding are approved.
-- [ ] Secure-delete documentation and tests distinguish SQLite row deletion,
-  WAL/backup remnants and SSD wear-leveling limits.
+- [x] [Secure-delete boundary documentation](../sqlite-deletion-remnants.md) and
+  regression tests distinguish SQLite row deletion, WAL/backup remnants and SSD
+  wear-leveling limits. Media-level secure-delete remains unvalidated.
 
 Artifact:
 [phase-6i-sqlite-filesystem.json](../../evidence/agent-phase-6/phase-6i-sqlite-filesystem.json)

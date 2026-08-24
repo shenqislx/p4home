@@ -39,6 +39,7 @@ export interface Phase6iAssessmentInput {
   readonly shm_mode: string;
   readonly journal_mode: string;
   readonly synchronous: number;
+  readonly secure_delete: number;
   readonly reopen_read: boolean;
   readonly permissive_database_rejected: boolean;
   readonly permissive_sidecar_rejected: boolean;
@@ -380,6 +381,7 @@ export async function runPhase6iSqliteGate(): Promise<Phase6iSqliteGateResult> {
       shm_mode: shmMode,
       journal_mode: pragmas.journal_mode,
       synchronous: pragmas.synchronous,
+      secure_delete: pragmas.secure_delete,
       reopen_read: reopenRead,
       permissive_database_rejected: permissiveDatabaseRejected,
       permissive_sidecar_rejected: permissiveSidecarRejected,

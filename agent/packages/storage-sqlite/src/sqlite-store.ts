@@ -123,6 +123,7 @@ export interface AuditRecoveryReport {
 export interface SqliteOperationalPragmas {
   readonly journal_mode: string;
   readonly synchronous: number;
+  readonly secure_delete: number;
 }
 
 export interface SqliteBackupResult {
@@ -1681,9 +1682,11 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
     this.#assertOpen();
     const journal = this.#database.prepare("PRAGMA journal_mode").get();
     const synchronous = this.#database.prepare("PRAGMA synchronous").get();
+    const secureDelete = this.#database.prepare("PRAGMA secure_delete").get();
     return {
       journal_mode: stringValue(journal?.journal_mode, "PRAGMA journal_mode"),
       synchronous: numberValue(synchronous?.synchronous, "PRAGMA synchronous"),
+      secure_delete: numberValue(secureDelete?.secure_delete, "PRAGMA secure_delete"),
     };
   }
 

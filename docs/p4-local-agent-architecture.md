@@ -800,6 +800,10 @@ grounded/prompt-injection 门禁已通过；6G 真实 HA 只读门禁证明 Memo
 等待另行明确授权且未启动。确定性 FTS 已满足当前冻结场景，因此 Vector DB 当前不立项，但真实
 数据证据不足，后续仍可在独立计划中重新评估。
 
+SQLite 删除保证仅覆盖产品查询和数据库逻辑对象；删除前备份、旧 WAL 帧、APFS snapshot 与
+SSD 物理页不在该保证内。具体边界见
+[SQLite 删除与残留边界](./sqlite-deletion-remnants.md)，介质级 secure-delete 仍保持 `pending`。
+
 ### Phase 7 — Cat Autonomy
 
 执行计划：[Phase 7 — Autonomy](./plans/2026-08-15-agent-phase-7-autonomy-plan.md)
