@@ -1,5 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -8,6 +18,7 @@ import test from "node:test";
 import {
   AuditStorageError,
   SqliteAuditStore,
+  SynchronousSqliteAuditStore,
 } from "@p4home/storage-sqlite";
 
 async function seed(store: SqliteAuditStore): Promise<void> {
@@ -155,6 +166,209 @@ test("schema v1 databases migrate the interaction correlation index to latest", 
 
     assert.equal(version?.user_version, 4);
     assert.equal(index?.name, "events_role_interaction_idx");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("file-backed SQLite creates and reopens only private database files", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "p4home-private-sqlite-"));
+  const databasePath = join(directory, "audit.sqlite");
+  const mode = (path: string): number => lstatSync(path).mode & 0o777;
+  try {
+    {
+      using store = new SynchronousSqliteAuditStore(databasePath, {
+        reconcile_on_open: false,
+      });
+      await store.createMemory({
+        schema_version: 1,
+        memory_id: "private-file-probe",
+        kind: "user_fact",
+        content: "synthetic private file probe",
+        source: "user_explicit",
+        source_interaction_id: "private-file-probe-interaction",
+        confidence: 1,
+        sensitivity: "personal",
+        owner_role: "robot",
+        visibility_scope: "owner_only",
+        visible_to_roles: [],
+        policy_revision: 1,
+        tags: ["probe"],
+        created_at_ms: 1,
+        expires_at_ms: null,
+      });
+      assert.equal(mode(directory), 0o700);
+      assert.equal(mode(databasePath), 0o600);
+      assert.equal(existsSync(`${databasePath}-wal`), true);
+      assert.equal(existsSync(`${databasePath}-shm`), true);
+      assert.equal(mode(`${databasePath}-wal`), 0o600);
+      assert.equal(mode(`${databasePath}-shm`), 0o600);
+    }
+    {
+      using reopened = new SynchronousSqliteAuditStore(databasePath, {
+        reconcile_on_open: false,
+      });
+      assert.equal(mode(databasePath), 0o600);
+      assert.equal(
+        (await reopened.getMemory("private-file-probe", "robot", 1))?.memory_id,
+        "private-file-probe",
+      );
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("file-backed SQLite rejects permissive directories, files, sidecars, and symlinks", () => {
+  const directory = mkdtempSync(join(tmpdir(), "p4home-private-sqlite-reject-"));
+  const databasePath = join(directory, "audit.sqlite");
+  try {
+    chmodSync(directory, 0o755);
+    assert.throws(
+      () => new SynchronousSqliteAuditStore(databasePath),
+      /parent directory must use mode 0700, found 755/,
+    );
+    chmodSync(directory, 0o700);
+
+    {
+      using store = new SynchronousSqliteAuditStore(databasePath, {
+        reconcile_on_open: false,
+      });
+    }
+    chmodSync(databasePath, 0o644);
+    assert.throws(
+      () => new SynchronousSqliteAuditStore(databasePath),
+      /database must use mode 0600, found 644/,
+    );
+    rmSync(databasePath, { force: true });
+
+    writeFileSync(`${databasePath}-wal`, "not a real WAL", { mode: 0o644 });
+    assert.throws(
+      () => new SynchronousSqliteAuditStore(databasePath),
+      /WAL file must use mode 0600, found 644/,
+    );
+    rmSync(`${databasePath}-wal`, { force: true });
+
+    const targetPath = join(directory, "target.sqlite");
+    writeFileSync(targetPath, "not a database", { mode: 0o600 });
+    symlinkSync(targetPath, databasePath);
+    assert.throws(
+      () => new SynchronousSqliteAuditStore(databasePath),
+      /database must be a regular non-symlink file/,
+    );
+  } finally {
+    chmodSync(directory, 0o700);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("worker online backup is private, ordered, durable, and readable while the source stays open", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "p4home-online-backup-"));
+  const databasePath = join(directory, "audit.sqlite");
+  const backupPath = join(directory, "audit-backup.sqlite");
+  const store = new SqliteAuditStore(databasePath, { reconcile_on_open: false });
+  try {
+    await store.createMemory({
+      schema_version: 1,
+      memory_id: "online-backup-before",
+      kind: "user_fact",
+      content: "present in the online backup",
+      source: "user_explicit",
+      source_interaction_id: "online-backup-before-interaction",
+      confidence: 1,
+      sensitivity: "personal",
+      owner_role: "robot",
+      visibility_scope: "owner_only",
+      visible_to_roles: [],
+      policy_revision: 1,
+      tags: ["backup"],
+      created_at_ms: 1,
+      expires_at_ms: null,
+    });
+
+    const backupPromise = store.backup(backupPath);
+    const postSnapshotWrite = store.createMemory({
+      schema_version: 1,
+      memory_id: "online-backup-after",
+      kind: "user_fact",
+      content: "written after the online backup request",
+      source: "user_explicit",
+      source_interaction_id: "online-backup-after-interaction",
+      confidence: 1,
+      sensitivity: "personal",
+      owner_role: "robot",
+      visibility_scope: "owner_only",
+      visible_to_roles: [],
+      policy_revision: 1,
+      tags: ["backup"],
+      created_at_ms: 2,
+      expires_at_ms: null,
+    });
+    const close = store.closeAsync();
+
+    const result = await backupPromise;
+    await postSnapshotWrite;
+    await close;
+    assert.equal(result.destination, backupPath);
+    assert.equal(result.mode, "600");
+    assert.equal(result.integrity_check, "ok");
+    assert.ok(result.pages_transferred > 0);
+    assert.equal(lstatSync(backupPath).mode & 0o777, 0o600);
+
+    const backupDatabase = new DatabaseSync(backupPath, { readOnly: true });
+    try {
+      assert.equal(
+        backupDatabase.prepare("PRAGMA integrity_check").get()?.integrity_check,
+        "ok",
+      );
+      assert.equal(
+        backupDatabase.prepare("SELECT COUNT(*) AS count FROM memories WHERE memory_id = ?")
+          .get("online-backup-before")?.count,
+        1,
+      );
+      assert.equal(
+        backupDatabase.prepare("SELECT COUNT(*) AS count FROM memories WHERE memory_id = ?")
+          .get("online-backup-after")?.count,
+        0,
+      );
+    } finally {
+      backupDatabase.close();
+    }
+
+    using reopened = new SynchronousSqliteAuditStore(databasePath, {
+      reconcile_on_open: false,
+    });
+    assert.equal(
+      (await reopened.getMemory("online-backup-after", "robot", 2))?.memory_id,
+      "online-backup-after",
+    );
+  } finally {
+    await store.closeAsync();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("online backup rejects insecure parents and never overwrites a destination", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "p4home-online-backup-reject-"));
+  const databasePath = join(directory, "audit.sqlite");
+  const existingPath = join(directory, "existing.sqlite");
+  const insecureDirectory = join(directory, "insecure");
+  try {
+    using store = new SynchronousSqliteAuditStore(databasePath, {
+      reconcile_on_open: false,
+    });
+    writeFileSync(existingPath, "do not overwrite", { mode: 0o600 });
+    await assert.rejects(
+      store.backup(existingPath),
+      /backup destination must not already exist/,
+    );
+    assert.equal(readFileSync(existingPath, "utf8"), "do not overwrite");
+
+    mkdirSync(insecureDirectory, { mode: 0o755 });
+    await assert.rejects(
+      store.backup(join(insecureDirectory, "backup.sqlite")),
+      /parent directory must use mode 0700, found 755/,
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -441,9 +655,10 @@ test("SQLite lock waits in the worker without blocking main-loop timers", async 
     timeout_ms: 2_000,
     reconcile_on_open: false,
   });
-  const locker = new DatabaseSync(databasePath);
+  let locker: DatabaseSync | undefined;
   try {
     await seed(store);
+    locker = new DatabaseSync(databasePath);
     locker.exec("BEGIN IMMEDIATE");
     let writeSettled = false;
     const write = store.appendEvent({
@@ -466,11 +681,11 @@ test("SQLite lock waits in the worker without blocking main-loop timers", async 
     assert.equal((await store.getRunTrace("run-1"))?.events[0]?.event_id, "event-after-lock");
   } finally {
     try {
-      locker.exec("ROLLBACK");
+      locker?.exec("ROLLBACK");
     } catch {
       // The successful path already released the lock.
     }
-    locker.close();
+    locker?.close();
     await store.closeAsync();
     rmSync(directory, { recursive: true, force: true });
   }

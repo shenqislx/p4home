@@ -44,7 +44,7 @@ try {
 
 if (store !== undefined) {
   const auditStore = store;
-  port.on("message", async (request: WorkerRequest) => {
+  const handleRequest = async (request: WorkerRequest): Promise<void> => {
     try {
       let value: unknown;
       switch (request.operation) {
@@ -123,6 +123,9 @@ if (store !== undefined) {
         case "purgeExpiredMemories":
           value = await auditStore.purgeExpiredMemories(...request.args);
           break;
+        case "backup":
+          value = await auditStore.backup(...request.args);
+          break;
         case "close":
           auditStore.close();
           value = undefined;
@@ -137,5 +140,12 @@ if (store !== undefined) {
     } catch (error) {
       send({ type: "error", id: request.id, error: serializedError(error) });
     }
+  };
+  let requestQueue = Promise.resolve();
+  port.on("message", (request: WorkerRequest) => {
+    requestQueue = requestQueue.then(
+      () => handleRequest(request),
+      () => handleRequest(request),
+    );
   });
 }

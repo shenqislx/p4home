@@ -4,6 +4,8 @@ export {
 } from "./sqlite-store.ts";
 export type {
   AuditRecoveryReport,
+  SqliteBackupResult,
+  SqliteOperationalPragmas,
   SqliteAuditStoreOptions,
 } from "./sqlite-store.ts";
 export * from "./types.ts";

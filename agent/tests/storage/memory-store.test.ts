@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -127,6 +127,7 @@ function createV3MemoryDatabase(databasePath: string, blocker = false): void {
     database.exec("CREATE TABLE memory_deletion_requests (blocker TEXT) STRICT");
   }
   database.close();
+  chmodSync(databasePath, 0o600);
 }
 
 test("memory persists across synchronous create and worker reopen", async () => {
@@ -520,6 +521,7 @@ test("failed schema v0 creation leaves no partial latest schema", () => {
     const blocker = new DatabaseSync(databasePath);
     blocker.exec("CREATE TABLE sessions (blocker TEXT) STRICT");
     blocker.close();
+    chmodSync(databasePath, 0o600);
 
     assert.throws(
       () => new SynchronousSqliteAuditStore(databasePath, {

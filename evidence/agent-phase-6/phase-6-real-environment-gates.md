@@ -68,13 +68,60 @@ Artifact:
 The result is labeled `evidence_scope=commit_bound`: it was produced from a clean
 worktree and binds commit `7e9aa4d4b334b89c899007b13dddc745a6546dd8`.
 
+## 6I real SQLite filesystem subset — LOCAL PRE-COMMIT PASS
+
+Command:
+
+```bash
+P4HOME_PHASE6I_RESULT_FILE=../evidence/agent-phase-6/phase-6i-sqlite-filesystem.json \
+  pnpm gate:phase6-sqlite-live
+```
+
+Strong marker:
+
+```text
+VERIFY:phase6i:sqlite_filesystem:PASS mode=600 wal=600 shm=600 kill=SIGKILL integrity=ok online_backup=ok
+```
+
+Result on macOS/APFS with Node `v24.19.0`:
+
+- directory/DB/WAL/SHM modes: `0700`/`0600`/`0600`/`0600`;
+- permissive DB and sidecar reopen: rejected; symlink rejection is covered by regression tests;
+- actual Store pragmas: `journal_mode=wal`, `synchronous=1` (`NORMAL`);
+- clean reopen and `integrity_check=ok`;
+- synthetic truncation corruption: rejected;
+- controlled child-process `SIGKILL`: recovered `116` committed synthetic records,
+  post-kill `integrity_check=ok`, checkpoint busy count `0`, and bounded reopen read passed;
+- online backup while the Store remains open: atomically published mode `0600`,
+  `integrity_check=ok`, expected pre-snapshot record restored, post-snapshot record absent;
+- explicit-checkpoint cold backup: mode `0600`, `integrity_check=ok`, one expected
+  synthetic record restored;
+- artifact contains verdicts/counts only and is mode `0600`.
+
+Regression:
+
+- `pnpm typecheck`: PASS;
+- storage plus Phase 6I tests: `49/49` PASS;
+- `pnpm gate:phase6`: PASS;
+- full Agent suite outside the filesystem/network sandbox: `399/399` PASS;
+- the sandboxed attempt passed `376/399`; all 23 failures were localhost server
+  `listen EPERM` restrictions. Re-running the identical command with local bind
+  permission passed all WebSocket/HA/Voice and SQLite tests.
+
+Artifact:
+[phase-6i-sqlite-filesystem.json](./phase-6i-sqlite-filesystem.json)
+
+The result is `local_precommit`. It does not claim real power-loss, quota, retention,
+encryption/key rotation or media-level secure delete.
+
 ## Still pending
 
 - consented, redacted, labeled representative household Memory dataset;
 - P4 Cat + Memory artifact-first hardware profile and run;
 - Voice + Memory artifact-first hardware profile and run;
-- SQLite production durability, backup, quota, retention, permissions,
-  encryption and secure-delete evidence;
+- clean-commit rerun of the bounded 6I filesystem gate;
+- SQLite real power-loss, quota, retention, encryption/key rotation
+  and media-level secure-delete evidence;
 - household multi-user/subject identity model.
 
 Phase 6 remains `local_complete_pending_real_environment`; Phase 7 remains

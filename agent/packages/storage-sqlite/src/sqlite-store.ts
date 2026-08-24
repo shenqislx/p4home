@@ -1,5 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
+import {
+  chmodSync,
+  closeSync,
+  constants as fsConstants,
+  fsyncSync,
+  linkSync,
+  lstatSync,
+  openSync,
+  unlinkSync,
+} from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+import { backup, DatabaseSync } from "node:sqlite";
 
 import type {
   Action,
@@ -58,6 +69,8 @@ const MAX_MEMORY_SUBJECT_KEY_LENGTH = 256;
 const MAX_DELETION_REQUEST_ID_LENGTH = 128;
 const MAX_DELETION_DESCENDANTS = 1_000;
 const MAX_LINEAGE_DEPTH = 256;
+const PRIVATE_DIRECTORY_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
 
 const MEMORY_KINDS = new Set<MemoryKind>([
   "conversation_summary",
@@ -107,10 +120,184 @@ export interface AuditRecoveryReport {
   readonly recovered_actions: number;
 }
 
+export interface SqliteOperationalPragmas {
+  readonly journal_mode: string;
+  readonly synchronous: number;
+}
+
+export interface SqliteBackupResult {
+  readonly destination: string;
+  readonly pages_transferred: number;
+  readonly integrity_check: "ok";
+  readonly mode: "600";
+}
+
 export class AuditStorageError extends Error {
   public constructor(message: string, options: ErrorOptions = {}) {
     super(message, options);
     this.name = "AuditStorageError";
+  }
+}
+
+function filesystemErrorCode(error: unknown): string | undefined {
+  return error instanceof Error
+    && "code" in error
+    && typeof error.code === "string"
+    ? error.code
+    : undefined;
+}
+
+function octalMode(mode: number): string {
+  return (mode & 0o777).toString(8).padStart(3, "0");
+}
+
+function assertCurrentUserOwner(uid: number, label: string): void {
+  const currentUid = process.getuid?.();
+  if (currentUid !== undefined && uid !== currentUid) {
+    throw new AuditStorageError(`${label} must be owned by the current user`);
+  }
+}
+
+function assertPrivateDirectory(path: string): void {
+  let status;
+  try {
+    status = lstatSync(path);
+  } catch (error) {
+    throw new AuditStorageError(`SQLite parent directory is unavailable: ${path}`, {
+      cause: error,
+    });
+  }
+  if (!status.isDirectory() || status.isSymbolicLink()) {
+    throw new AuditStorageError(`SQLite parent path must be a real directory: ${path}`);
+  }
+  assertCurrentUserOwner(status.uid, "SQLite parent directory");
+  if ((status.mode & 0o777) !== PRIVATE_DIRECTORY_MODE) {
+    throw new AuditStorageError(
+      `SQLite parent directory must use mode 0700, found ${octalMode(status.mode)}`,
+    );
+  }
+}
+
+function assertPrivateFile(path: string, label: string): void {
+  let status;
+  try {
+    status = lstatSync(path);
+  } catch (error) {
+    throw new AuditStorageError(`${label} is unavailable: ${path}`, { cause: error });
+  }
+  if (!status.isFile() || status.isSymbolicLink()) {
+    throw new AuditStorageError(`${label} must be a regular non-symlink file`);
+  }
+  assertCurrentUserOwner(status.uid, label);
+  if ((status.mode & 0o777) !== PRIVATE_FILE_MODE) {
+    throw new AuditStorageError(
+      `${label} must use mode 0600, found ${octalMode(status.mode)}`,
+    );
+  }
+}
+
+function assertPrivateFileIfPresent(path: string, label: string): void {
+  try {
+    lstatSync(path);
+  } catch (error) {
+    if (filesystemErrorCode(error) === "ENOENT") {
+      return;
+    }
+    throw new AuditStorageError(`${label} cannot be inspected: ${path}`, { cause: error });
+  }
+  assertPrivateFile(path, label);
+}
+
+function preparePrivateDatabasePath(path: string): string {
+  if (path === ":memory:") {
+    return path;
+  }
+  if (typeof path !== "string" || path.trim().length === 0 || path.includes("\0")) {
+    throw new AuditStorageError("SQLite path must be :memory: or a non-empty file path");
+  }
+  const databasePath = resolve(path);
+  assertPrivateDirectory(dirname(databasePath));
+  assertPrivateFileIfPresent(`${databasePath}-wal`, "SQLite WAL file");
+  assertPrivateFileIfPresent(`${databasePath}-shm`, "SQLite SHM file");
+
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(
+      databasePath,
+      fsConstants.O_CREAT
+        | fsConstants.O_EXCL
+        | fsConstants.O_RDWR
+        | (fsConstants.O_NOFOLLOW ?? 0),
+      PRIVATE_FILE_MODE,
+    );
+  } catch (error) {
+    if (filesystemErrorCode(error) !== "EEXIST") {
+      throw new AuditStorageError(`SQLite database cannot be reserved: ${databasePath}`, {
+        cause: error,
+      });
+    }
+    assertPrivateFile(databasePath, "SQLite database");
+  } finally {
+    if (descriptor !== undefined) {
+      closeSync(descriptor);
+    }
+  }
+  assertPrivateFile(databasePath, "SQLite database");
+  return databasePath;
+}
+
+function assertPrivateDatabaseFiles(databasePath: string): void {
+  if (databasePath === ":memory:") {
+    return;
+  }
+  assertPrivateFile(databasePath, "SQLite database");
+  assertPrivateFileIfPresent(`${databasePath}-wal`, "SQLite WAL file");
+  assertPrivateFileIfPresent(`${databasePath}-shm`, "SQLite SHM file");
+}
+
+function assertPathAbsent(path: string, label: string): void {
+  try {
+    lstatSync(path);
+  } catch (error) {
+    if (filesystemErrorCode(error) === "ENOENT") {
+      return;
+    }
+    throw new AuditStorageError(`${label} cannot be inspected: ${path}`, { cause: error });
+  }
+  throw new AuditStorageError(`${label} must not already exist`);
+}
+
+function fsyncPath(path: string): void {
+  const descriptor = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function isDatabaseLocked(error: unknown): boolean {
+  return error instanceof Error
+    && error.message.toLowerCase().includes("database is locked");
+}
+
+function setOperationalPragmas(
+  database: DatabaseSync,
+  timeoutMs: number,
+): void {
+  const deadline = Date.now() + timeoutMs;
+  const waiter = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  while (true) {
+    try {
+      database.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;");
+      return;
+    } catch (error) {
+      const remainingMs = deadline - Date.now();
+      if (!isDatabaseLocked(error) || remainingMs <= 0) {
+        throw error;
+      }
+      Atomics.wait(waiter, 0, 0, Math.min(10, remainingMs));
+    }
   }
 }
 
@@ -578,7 +765,8 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
     if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 120_000) {
       throw new RangeError("timeout_ms must be an integer between 0 and 120000");
     }
-    this.#database = new DatabaseSync(path, {
+    const databasePath = preparePrivateDatabasePath(path);
+    this.#database = new DatabaseSync(databasePath, {
       timeout: timeoutMs,
       enableForeignKeyConstraints: true,
       enableDoubleQuotedStringLiterals: false,
@@ -586,8 +774,9 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
       defensive: true,
     });
     try {
-      this.#database.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;");
+      setOperationalPragmas(this.#database, timeoutMs);
       this.#migrate();
+      assertPrivateDatabaseFiles(databasePath);
       if (options.reconcile_on_open !== false) {
         this.reconcileInterruptedRuns(Date.now());
       }
@@ -1407,6 +1596,95 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
       this.#database.close();
       this.#closed = true;
     }
+  }
+
+  public async backup(destinationPath: string): Promise<SqliteBackupResult> {
+    this.#assertOpen();
+    if (
+      typeof destinationPath !== "string"
+      || destinationPath.trim().length === 0
+      || destinationPath.includes("\0")
+      || destinationPath === ":memory:"
+    ) {
+      throw new AuditStorageError("SQLite backup destination must be a non-empty file path");
+    }
+    const destination = resolve(destinationPath);
+    const directory = dirname(destination);
+    assertPrivateDirectory(directory);
+    assertPathAbsent(destination, "SQLite backup destination");
+    const temporary = join(
+      directory,
+      `.${basename(destination)}.${randomUUID()}.tmp`,
+    );
+    let descriptor: number | undefined;
+    try {
+      descriptor = openSync(
+        temporary,
+        fsConstants.O_CREAT
+          | fsConstants.O_EXCL
+          | fsConstants.O_RDWR
+          | (fsConstants.O_NOFOLLOW ?? 0),
+        PRIVATE_FILE_MODE,
+      );
+      closeSync(descriptor);
+      descriptor = undefined;
+      const pagesTransferred = await backup(this.#database, temporary, { rate: 100 });
+      chmodSync(temporary, PRIVATE_FILE_MODE);
+      assertPrivateFile(temporary, "SQLite backup temporary file");
+      const backupDatabase = new DatabaseSync(temporary, { readOnly: true });
+      let integrityCheck: string;
+      try {
+        integrityCheck = stringValue(
+          backupDatabase.prepare("PRAGMA integrity_check").get()?.integrity_check,
+          "SQLite backup integrity_check",
+        );
+      } finally {
+        backupDatabase.close();
+      }
+      if (integrityCheck !== "ok") {
+        throw new AuditStorageError("SQLite backup failed integrity_check");
+      }
+      fsyncPath(temporary);
+      try {
+        linkSync(temporary, destination);
+      } catch (error) {
+        if (filesystemErrorCode(error) === "EEXIST") {
+          throw new AuditStorageError("SQLite backup destination must not already exist", {
+            cause: error,
+          });
+        }
+        throw error;
+      }
+      assertPrivateFile(destination, "SQLite backup destination");
+      fsyncPath(directory);
+      return {
+        destination,
+        pages_transferred: pagesTransferred,
+        integrity_check: "ok",
+        mode: "600",
+      };
+    } finally {
+      if (descriptor !== undefined) {
+        closeSync(descriptor);
+      }
+      try {
+        unlinkSync(temporary);
+      } catch (error) {
+        if (filesystemErrorCode(error) !== "ENOENT") {
+          throw error;
+        }
+      }
+    }
+  }
+
+  public inspectOperationalPragmas(): SqliteOperationalPragmas {
+    this.#assertOpen();
+    const journal = this.#database.prepare("PRAGMA journal_mode").get();
+    const synchronous = this.#database.prepare("PRAGMA synchronous").get();
+    return {
+      journal_mode: stringValue(journal?.journal_mode, "PRAGMA journal_mode"),
+      synchronous: numberValue(synchronous?.synchronous, "PRAGMA synchronous"),
+    };
   }
 
   public [Symbol.dispose](): void {

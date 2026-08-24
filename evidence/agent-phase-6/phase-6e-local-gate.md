@@ -175,14 +175,15 @@ tracked in [phase-6-real-environment-gates.md](./phase-6-real-environment-gates.
    - reproduction entry: extend the Phase 2/3 hardware harness in a new reviewed
      plan; assert that Memory cannot override P4 snapshot/action terminal state.
 5. **Long-running SQLite/WAL/crash/power-loss/backup/quota/retention/permissions/encryption/secure-delete**
-   - status: `pending`
+   - status: `partial_local_precommit_pass`
    - required environment: production-like persistent filesystem, controlled
      process kill and power-loss rig, backup target, deployment user/permissions,
      and an approved key-management/retention design.
-   - reproduction entry: requires a new SQLite production-hardening plan covering
-     total DB quota, retention, directory and sidecar permissions, encryption,
-     backup/restore, WAL/checkpoint durability, corruption recovery, and
-     media-level deletion.
+   - reproduction entry: `pnpm gate:phase6-sqlite-live` now covers real-filesystem
+     permissions, permissive-path rejection, integrity/corruption, controlled
+     process kill, atomic online backup and checkpointed cold backup. Clean-commit rerun,
+     real power-loss, total DB quota, retention, encryption and media-level deletion
+     remain pending.
 6. **Multi-user and subject identity model**
    - status: `pending`
    - required environment: approved household identity/authorization model,

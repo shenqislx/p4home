@@ -14,6 +14,7 @@ import type {
 import {
   AuditStorageError,
   type AuditRecoveryReport,
+  type SqliteBackupResult,
   type SqliteAuditStoreOptions,
 } from "./sqlite-store.ts";
 import type {
@@ -213,6 +214,10 @@ implements AuditStore, MemoryStore, Disposable, AsyncDisposable {
     limit = 1_000,
   ): Promise<number> {
     return await this.#request("purgeExpiredMemories", [nowMs, limit]) as number;
+  }
+
+  public async backup(destinationPath: string): Promise<SqliteBackupResult> {
+    return await this.#request("backup", [destinationPath]) as SqliteBackupResult;
   }
 
   public close(): void {

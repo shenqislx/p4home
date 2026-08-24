@@ -234,7 +234,7 @@ async function phase6EvalCommand(
     throw new Error("--output must not alias the evaluator database or its sidecars");
   }
   if (databasePath !== ":memory:") {
-    mkdirSync(dirname(databasePath), { recursive: true });
+    mkdirSync(dirname(databasePath), { recursive: true, mode: 0o700 });
   }
   const report = await dependencies.evaluateMemoryVisibilityStrategies({
     database_path: databasePath,

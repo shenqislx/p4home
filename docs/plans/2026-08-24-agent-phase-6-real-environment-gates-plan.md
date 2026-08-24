@@ -3,8 +3,10 @@
 > Status: `in_progress`
 > Started: 2026-08-24
 > Parent: [Phase 6 — Memory](./2026-08-15-agent-phase-6-memory-plan.md)
-> Current Gate: 6F real-model and commit-bound 6G real HA read passed; P4/Voice,
-> representative household data, production SQLite and household identity remain pending
+> Current Gate: 6F real-model and commit-bound 6G real HA read passed; the bounded
+> 6I filesystem/process-kill/online-and-cold-backup gate passed locally and needs a clean-commit
+> rerun; P4/Voice, representative household data, remaining SQLite gates and household
+> identity remain pending
 
 ## 1. Boundaries
 
@@ -69,24 +71,34 @@ Artifact:
   credential leakage or a workflow-only verdict.
 
 This gate requires a reviewed workflow change, commit/push authorization and a
-self-hosted hardware run. It has not started and no P4 was flashed in 6F/6G.
+self-hosted hardware run. It has not started and no P4 was flashed in 6F/6G/6I.
 
 ## 5. 6I — SQLite production filesystem and durability
 
-- [ ] Directory and DB/WAL/SHM permissions are `0700`/`0600` on create and reopen.
-- [ ] `integrity_check`, WAL checkpoint, consistent backup/restore and corruption
-  fail-closed behavior have repeatable evidence.
-- [ ] Approved `synchronous`/checkpoint policy survives controlled process kill;
-  real power-loss remains a separate rig result.
+- [x] Directory and DB/WAL/SHM permissions are `0700`/`0600` on create and reopen;
+  permissive files, sidecars and symlinks fail closed.
+- [x] `integrity_check`, WAL checkpoint, atomic online backup, checkpointed cold-file
+  backup/restore and synthetic corruption fail-closed behavior have repeatable APFS evidence.
+- [x] `journal_mode=WAL` and `synchronous=NORMAL` survive a controlled `SIGKILL`;
+  recovery retains committed records and passes `integrity_check`.
+- [x] The online backup API publishes a new `0600` file atomically, rejects an existing
+  destination/insecure parent, passes `integrity_check`, and has an explicit snapshot boundary.
+- [ ] Rerun the bounded gate from a clean commit. Real power-loss remains a separate
+  result and is not closed by the controlled kill or backup probes.
 - [ ] Database/WAL/index quota and per-class retention fail closed at their limits.
 - [ ] Encryption/key rotation design and identity binding are approved.
 - [ ] Secure-delete documentation and tests distinguish SQLite row deletion,
   WAL/backup remnants and SSD wear-leveling limits.
 
-No production SQLite item is closed by the 6F/6G temporary `:memory:` stores.
+Artifact:
+[phase-6i-sqlite-filesystem.json](../../evidence/agent-phase-6/phase-6i-sqlite-filesystem.json)
+
+The current result is labeled `local_precommit`. No production SQLite item is
+closed by the 6F/6G temporary `:memory:` stores, and the bounded 6I gate does not
+close the unchecked items above.
 
 ## 6. Exit rule
 
 Phase 6 remains `local_complete_pending_real_environment` until every required
 real gate is either passed with its declared evidence or explicitly deferred by
-user review. Passing 6F/6G does not authorize Phase 7.
+user review. Passing 6F/6G or the bounded 6I subset does not authorize Phase 7.
