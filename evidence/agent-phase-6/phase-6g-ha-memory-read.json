@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "profile": "phase6g_ha_memory_read",
+  "passed": true,
+  "generated_at": "2026-08-24T14:44:10.591Z",
+  "git_sha": "41037d440eba06dd06875eb34ca83471814ceefc",
+  "worktree_clean": false,
+  "worktree_status_sha256": "bccac069ca8885b5b8b957d2b1e56ef021d19ca214b65393915d327a8d622427",
+  "evidence_scope": "local_precommit",
+  "model": "qwen3.6:35b-mlx",
+  "real_model_calls": 1,
+  "robot_non_admin": true,
+  "robot_non_owner": true,
+  "policy_entities": 1,
+  "memory_recall_status": "ok",
+  "selected_memory_ids": [
+    "memory:phase6g:robot:stale-ha-state"
+  ],
+  "stale_memory_signal_in_final_text": false,
+  "ha_projected_state_in_final_text": true,
+  "tool_result_status": "success",
+  "service_calls_dispatched": 0,
+  "invalid_outbound_frames": 0,
+  "model_request_contains_token": false,
+  "model_request_contains_entity_id": false,
+  "runtime_result_contains_token": false,
+  "runtime_result_contains_entity_id": false,
+  "reason": "ok"
+}

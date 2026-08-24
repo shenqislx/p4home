@@ -2,12 +2,18 @@
 
 > Status: `local_complete_pending_real_environment`
 > Started: 2026-08-24
-> Current Gate: visibility matrix v1 private 已获用户批准；真实环境证据保持 pending；
+> Current Gate: 6F 真实模型已通过；6G HA 需 clean-commit 复跑；其余真实环境证据 pending；
 > Phase 7 等待另行明确授权
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2 stable; Router/Robot/Human/Cat 专项 eval 骨架 established
-> Execution Environment: WSL2，仅代码开发、确定性测试和模拟验证；真实 P4、HA、Ollama、STT/TTS
-> 及家庭环境门禁保持 `pending`
+> Execution Environment: 6A–6E 为 WSL2 本地/模拟验证；6F/6G 已在 macOS 真实 Ollama/HA 执行；
+> P4/Voice、家庭数据、SQLite 生产耐久及身份门禁保持 `pending`
+
+2026-08-24 已启动独立的
+[Phase 6 真实环境门禁计划](./2026-08-24-agent-phase-6-real-environment-gates-plan.md)。
+6F 真实 35B + 脱敏合成 Memory 门禁已通过；6G 真实 HA 只读真值门禁已本地通过，
+但因工作树未提交仍需 clean commit 绑定复跑。P4/Voice、真实家庭数据、SQLite
+生产耐久与家庭身份门禁继续 `pending`。
 
 ## 1. 目标
 
@@ -268,7 +274,7 @@ visibility matrix v1 保持 private。
   [phase-6e-local-gate.md](../../evidence/agent-phase-6/phase-6e-local-gate.md)；
   用户已批准的版本化矩阵见
   [visibility-matrix.md](../../evidence/agent-phase-6/visibility-matrix.md)；
-- 所有真实环境项目均以 `status=pending` 逐项记录：真实 `qwen3.8:27b-mlx` grounded answer/
+- 所有真实环境项目均以 `status=pending` 逐项记录：真实 `qwen3.6:35b-mlx` grounded answer/
   prompt injection、代表性家庭 recall/precision/conflict、真实 HA Robot + Memory（HA 仍是真值）、
   真实 P4 Cat + Memory（World 仍是真值）、长期 SQLite/WAL/crash/power-loss/backup/quota/retention/
   权限/加密/secure-delete、多用户/subject 身份、依赖 Phase 5E 的 Voice + Memory。

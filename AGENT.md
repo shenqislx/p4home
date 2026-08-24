@@ -17,7 +17,7 @@
 
 产品角色固定为：Role Router 只分发语义且无 Tool；Robot 只执行受限 HA 命令；Human 只负责对话
 且无执行权限；Cat 是事件驱动电子宠物，只使用最小 P4 World 能力且不直接接收用户原文。四者可
-共用同一个已加载的 `qwen3.8:27b-mlx` 和 Provider，但上下文、工具、参数、预算与审计隔离。
+共用同一个已加载的 `qwen3.6:35b-mlx` 和 Provider，但上下文、工具、参数、预算与审计隔离。
 所有 Qwen 请求都必须显式设置 Ollama `think: false`，不允许角色自行开启思考模式。
 
 ## 接手顺序

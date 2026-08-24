@@ -6,7 +6,8 @@ Phase 1 至 Phase 4 已关闭，Phase 5 保持 `pending_real_environment`；Phas
 Voice，以及可追溯/可过期/可删除的 role-scoped Memory。2026-08-24 用户已批准 visibility matrix
 v1 保持 `private`；三类 Memory 均保持 owner-role private，跨角色产品召回禁用，
 `shared_acl/hybrid` 仅用于 experimental evaluator。确定性测试不要求 Ollama、Home Assistant 或
-P4，真实模型、硬件、HA、Voice 与长期 SQLite 验证均保持 `pending`。Vector DB 仍不立项；
+P4。6F 真实 35B 门禁已通过；6G 真实 HA 只读门禁已本地通过，但仍需 clean commit
+复跑。P4/Voice、真实家庭数据、长期 SQLite 与身份验证保持 `pending`。Vector DB 仍不立项；
 Phase 7 需另行明确授权且尚未启动。
 
 ## 环境
@@ -69,11 +70,23 @@ gate 通过；最近一次完整测试为 `383/389`，不是 pass；并发运行
 WSL Voice 失败均如实保留。复现、隔离结果和所有 `pending` 项见
 [Phase 6E local gate evidence](../evidence/agent-phase-6/phase-6e-local-gate.md)。
 
+真实模型与只读 HA + Memory 门禁：
+
+```bash
+pnpm eval:phase6-live -- --model qwen3.6:35b-mlx --timeout-ms 300000 \
+  --output ../evidence/agent-phase-6/phase-6f-live-model-memory.json
+pnpm gate:phase6-ha-live
+```
+
+HA 入口要求仓库外的 URL/token/policy/result-file 环境变量，只暴露
+`home.get_entity(alias)` 且硬性要求 `service_calls=0`。复现边界和当前证据见
+[Phase 6 real-environment gates](../evidence/agent-phase-6/phase-6-real-environment-gates.md)。
+
 产品 Context 的实际固定顺序为：trusted system/safety（含 Role Profile/Tool 边界）→ 独立
 untrusted Memory data message → retained recent conversation → 当前 assignment/normalized event。
 Memory 有独立角色预算且不能挤占 system、保留会话或当前输入；Router 不构建 Memory context。
 
-Role Router 不向模型提供 Tool，也不依赖 Ollama `format`：默认 27B 已实测会在部分分类样例中违反
+Role Router 不向模型提供 Tool，也不依赖 Ollama `format`：历史 27B 已实测会在部分分类样例中违反
 `format`。Router prompt 只允许三个精确 JSON，响应仍由 Runtime 使用 JSON Schema/AJV 本地复验；
 非法 key、Markdown、ToolCall、thinking 与 provider error 全部闭合到 Human clarification。
 
@@ -90,10 +103,10 @@ misroute、Human policy failure 或禁用调用时，CLI 仍输出完整报告�
 
 ## 评测与调试 CLI
 
-默认模型由产品决策选定为 `qwen3.8:27b-mlx`，structured output 或低内存功能 smoke 使用
-`qwen3:8b`。27B 在冻结 Robot 风格执行集上无工具拒绝为 100%，但多动作首轮经常只返回第一个
-调用、structured output 失败、延迟和内存均高于 35B；这些退化保留为显式证据，不用综合分数
-掩盖。Phase 2 起由同一已加载模型服务 Role Router、Robot、Human、Cat，但四者上下文、工具、
+默认模型已于 2026-08-24 按用户决策切回 `qwen3.6:35b-mlx`，以适配当前硬件的内存带宽约束；
+structured output 或低内存功能 smoke 继续使用 `qwen3:8b`。历史 Phase 1/2 的 27B 评测命令与产物
+保留原模型名，不改写既有证据；其中记录的多动作、structured output、延迟和内存退化仍作为
+历史对照。Phase 2 起由同一已加载模型服务 Role Router、Robot、Human、Cat，但四者上下文、工具、
 temperature、预算与评测独立；任何模型都不能自动承接真实设备动作。两条入口都固定使用
 Runtime 的 system prompt、`temperature=0`、`seed=42`、
 `num_ctx=8192`、`num_predict=256` 和 `think=false`。后续四个角色可分别调节 temperature，

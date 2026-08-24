@@ -7,6 +7,6 @@ import {
 } from "@p4home/runtime";
 
 test("the product-selected default Ollama model is stable", () => {
-  assert.equal(DEFAULT_OLLAMA_MODEL, "qwen3.8:27b-mlx");
+  assert.equal(DEFAULT_OLLAMA_MODEL, "qwen3.6:35b-mlx");
   assert.equal(QWEN_THINKING_ENABLED, false);
 });

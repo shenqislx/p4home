@@ -71,15 +71,21 @@ private 产品 recall、三种 visibility evaluator 和可重复 `pnpm gate:phas
 用户已批准 [visibility matrix v1](../../evidence/agent-phase-6/visibility-matrix.md) 保持
 `private`；三类 Memory 均保持 owner-role private，`shared_acl/hybrid` 仅存在于实验 evaluator，
 不启用跨角色产品召回。当前状态为 `local_complete_pending_real_environment`；Current Gate 仅为
-清单中保持 `status=pending` 的真实模型、代表性家庭数据、HA/P4/Voice 端到端、家庭身份模型和 SQLite
+代表性家庭数据、HA clean-commit 复跑、P4/Voice 端到端、家庭身份模型和 SQLite
 WAL/断电/备份/quota/retention/权限/加密/secure-delete 证据。
-确定性 FTS 已满足冻结场景，当前不立项 Vector DB；真实家庭/模型证据不足，不能外推为长期结论。
+
+2026-08-24 后续真实环境进度：6F 已在 macOS arm64 / Ollama `0.32.15` 上用
+`qwen3.6:35b-mlx` 完成两次真实 Memory 调用，grounded recall、prompt-injection
+边界与 private 跨角色隔离均通过。6G 真实 HA 只读门禁证明 Memory 不覆盖 HA
+当前真值且 `service_calls=0`，但仍需 clean commit 绑定复跑。见
+[Phase 6 真实环境门禁](./2026-08-24-agent-phase-6-real-environment-gates-plan.md)。
+确定性 FTS 已满足冻结场景，当前不立项 Vector DB；真实家庭数据证据不足，不能外推为长期结论。
 Phase 5 仍为 `pending_real_environment`。Phase 7 保持 `pending`，需另行明确授权且不得启动。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 已在 Phase 2 完成并通过实机证据验证。
 
-产品角色边界已纳入 Phase 2–7：默认模型统一使用 `qwen3.8:27b-mlx`，但 Role Router、Robot、
+产品角色边界已纳入 Phase 2–7：默认模型统一使用 `qwen3.6:35b-mlx`，但 Role Router、Robot、
 Human、Cat 的上下文、工具、temperature、预算与 eval 独立。当前 32 场景 ToolCall 结果只作为
 命令执行型专项证据，不作为整个 Agent 总分。所有 Qwen 请求统一显式传入
 `think: false`，不将思考模式开关暴露给各 RoleProfile。

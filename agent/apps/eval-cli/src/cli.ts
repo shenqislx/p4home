@@ -40,6 +40,10 @@ import {
   assessMemoryVisibilityEvalGate,
   evaluateMemoryVisibilityStrategies,
 } from "./memory-evaluator.ts";
+import {
+  assessPhase6LiveMemoryGate,
+  evaluatePhase6LiveMemory,
+} from "./memory-live-evaluator.ts";
 
 interface ParsedArguments {
   readonly command: string;
@@ -132,6 +136,9 @@ Phase 4 eval (separate Router span/Robot policy/Human/Composer reports):
 
 Phase 6D deterministic visibility eval (no Ollama/model parameters):
   pnpm eval:phase6 -- [--database :memory:] [--output FILE]
+
+Phase 6F real-model Memory gate (redacted fixture, no HA/P4 side effects):
+  pnpm eval:phase6-live -- --model ${DEFAULT_OLLAMA_MODEL} [--output FILE] [--timeout-ms 300000]
 
 Debug one text run:
   pnpm debug:agent -- --model ${DEFAULT_OLLAMA_MODEL} --text "去书房" [--database :memory:]
@@ -288,6 +295,48 @@ async function phase4EvalCommand(argumentsValue: ParsedArguments): Promise<void>
   const gate = assessPhase4EvalGate(report);
   if (!gate.passed) {
     process.stderr.write(`phase4 eval gate failed: ${gate.failures.join(", ")}\n`);
+    process.exitCode = 2;
+  }
+}
+
+async function phase6LiveEvalCommand(argumentsValue: ParsedArguments): Promise<void> {
+  assertKnownOptions(argumentsValue, new Set(["--model", "--output", "--timeout-ms"]));
+  const model = value(
+    argumentsValue,
+    "--model",
+    process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL,
+  );
+  if (model === undefined || model.trim().length === 0) {
+    throw new Error("--model is required");
+  }
+  const timeoutMs = integer(argumentsValue, "--timeout-ms", 300_000, 100, 600_000);
+  const provider = new OllamaHttpProvider({ model, requestTimeoutMs: timeoutMs });
+  const capabilities = await provider.probe();
+  if (!capabilities.modelAvailable) {
+    throw new Error(`model ${model} is unavailable`);
+  }
+  const report = await evaluatePhase6LiveMemory({
+    model,
+    provider,
+    timeout_ms: timeoutMs,
+  });
+  const gate = assessPhase6LiveMemoryGate(report);
+  const artifact = {
+    generated_at: new Date().toISOString(),
+    runtime: { node: process.version, platform: process.platform, arch: process.arch },
+    ...report,
+    gate,
+  };
+  const encoded = `${JSON.stringify(artifact, null, 2)}\n`;
+  const output = value(argumentsValue, "--output");
+  if (output !== undefined) {
+    const outputPath = resolve(output);
+    writePrivateArtifact(outputPath, encoded);
+    process.stderr.write(`phase6 live eval report: ${outputPath}\n`);
+  }
+  process.stdout.write(encoded);
+  if (!gate.passed) {
+    process.stderr.write(`phase6 live eval gate failed: ${gate.failures.join(", ")}\n`);
     process.exitCode = 2;
   }
 }
@@ -537,6 +586,10 @@ export async function main(
   }
   if (argumentsValue.command === "phase6") {
     await phase6EvalCommand(argumentsValue, dependencies);
+    return;
+  }
+  if (argumentsValue.command === "phase6-live") {
+    await phase6LiveEvalCommand(argumentsValue);
     return;
   }
   if (argumentsValue.command === "help") {

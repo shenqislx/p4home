@@ -16,7 +16,7 @@
 
 Agent 产品层使用统一 Role Router 和三个隔离角色：Robot 只执行受限 HA 命令，Human 只负责对话，
 Cat 作为事件驱动电子宠物使用最小 P4 World 能力。它们默认共用一个已加载的
-`qwen3.8:27b-mlx`，但不共享上下文、工具权限或推理参数；所有 Qwen 请求固定使用
+`qwen3.6:35b-mlx`，但不共享上下文、工具权限或推理参数；所有 Qwen 请求固定使用
 `think: false`。
 
 ## 当前工作重点
@@ -56,12 +56,13 @@ fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 r
 本地门禁现已完成，状态为 `local_complete_pending_real_environment`：Memory contract/SQLite、
 确定性写入与删除、private 产品召回、三种 visibility 策略对照和 `pnpm gate:phase6` 均有本地证据。
 2026-08-24 用户已批准 visibility matrix v1 保持 `private`；三类 Memory 均保持 owner-role private，
-`shared_acl/hybrid` 仅限 experimental evaluator，跨角色产品召回未启用。Current Gate 仅剩真实
-Ollama、代表性家庭数据、HA/P4/Voice 端到端、家庭身份模型和 SQLite 长期
+`shared_acl/hybrid` 仅限 experimental evaluator，跨角色产品召回未启用。6F 真实 35B
+门禁已通过，6G 真实 HA 只读门禁已本地通过但待 clean commit 复跑。Current Gate 仅剩
+代表性家庭数据、HA 提交绑定、P4/Voice 端到端、家庭身份模型和 SQLite 长期
 WAL/断电/备份/quota/retention/权限/加密/secure-delete 证据；这些项目全部保持 `pending`。
 Vector DB 仍不立项。Phase 5 仍为 `pending_real_environment`；Phase 7 仍为 `pending`，需另行明确
 授权且尚未启动。完整清单和复现入口见
-[Phase 6E local gate evidence](./evidence/agent-phase-6/phase-6e-local-gate.md)。
+[Phase 6 real-environment gate evidence](./evidence/agent-phase-6/phase-6-real-environment-gates.md)。
 
 ## 工作规则
 

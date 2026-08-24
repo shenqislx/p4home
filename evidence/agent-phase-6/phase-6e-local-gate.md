@@ -146,15 +146,15 @@ pass, and unrelated Voice code was not modified.
 
 ## Deferred real-environment checklist
 
-Only real-environment items are listed below. Every item has `status=pending`.
+Only real-environment items are listed below. Progress after the local gate is
+tracked in [phase-6-real-environment-gates.md](./phase-6-real-environment-gates.md).
 
-1. **Real `qwen3.8:27b-mlx` grounded-answer and prompt-injection evaluation**
-   - status: `pending`
-   - required environment: real Ollama with the frozen model revision and a
+1. **Real `qwen3.6:35b-mlx` grounded-answer and prompt-injection evaluation**
+   - status: `completed_redacted_fixture`
+   - required environment: real Ollama with the current product-default model revision and a
      representative local-home evaluation fixture.
-   - reproduction entry: extend `pnpm eval:phase6` through a separately reviewed
-     live-model mode; the current command intentionally accepts no model option.
-     A new live-eval plan is required before execution.
+   - reproduction entry: `pnpm eval:phase6-live -- --model qwen3.6:35b-mlx
+     --timeout-ms 300000 --output ../evidence/agent-phase-6/phase-6f-live-model-memory.json`.
 2. **Representative household recall/precision/conflict selection**
    - status: `pending`
    - required environment: consented, redacted representative household Memory
@@ -162,12 +162,12 @@ Only real-environment items are listed below. Every item has `status=pending`.
    - reproduction entry: a new dataset-governance and live-evaluation plan is
      required; deterministic fixture metrics are not a substitute.
 3. **Real HA Robot + Memory end to end, with HA remaining truth**
-   - status: `pending`
+   - status: `local_precommit_pass_pending_commit_bound_rerun`
    - required environment: real HA, dedicated low-privilege Robot identity,
      representative entities, real Ollama, and Agent Runtime.
-   - reproduction entry: add a Phase 6 real-HA profile to the existing Phase 4
-     harness in a new reviewed plan; assert that Memory cannot override HA result
-     or subscribed state.
+   - reproduction entry: use `pnpm gate:phase6-ha-live` with the repository-external
+     Phase 6G URL/token/policy/result-file environment variables; rerun from a
+     clean commit before closing the gate.
 4. **Real P4 Cat + Memory end to end, with World remaining truth**
    - status: `pending`
    - required environment: real ESP32-P4, Device WebSocket, Cat World/Object

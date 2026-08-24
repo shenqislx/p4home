@@ -81,8 +81,9 @@
 - Mac mini，Apple M4 Pro，14 核，64 GB 统一内存；
 - 仓库根目录与 Agent workspace 均以 `.nvmrc` 固定 Node.js `v24.19.0`；Node 22 仅保留为本机回退环境，不参与本 workspace；
 - Python `3.14.3`；
-- Ollama `0.32.14` 已安装；本地已有 `qwen3.8:27b-mlx`、`qwen3.6:35b-mlx`、`qwen3:8b` 等模型，
-  产品默认模型已选定为 `qwen3.8:27b-mlx`；
+- Ollama `0.32.15` 已安装；本地已有 `qwen3.8:27b-mlx`、`qwen3.6:35b-mlx`、`qwen3:8b` 等模型，
+  考虑当前硬件的内存带宽约束，产品默认模型已于 2026-08-24 切回
+  `qwen3.6:35b-mlx`；
 
 该机器足以作为开发期 Agent/LLM 节点。Ollama 官方当前列出的 `qwen3:30b` 默认量化体积约 19 GB，64 GB 统一内存具备装载空间，但“能装载”不等于“满足交互延迟”。模型必须通过本项目的工具调用准确率和端到端延迟基准选择。
 
@@ -263,7 +264,7 @@ Human 对话与 Robot 命令。语义分段必须保留原文 span、顺序和�
 
 ### 5.2 共用模型时的隔离与调度
 
-- 默认模型统一为 `qwen3.8:27b-mlx`，Provider 复用已加载实例，不为每个角色重复装载权重；
+- 默认模型统一为 `qwen3.6:35b-mlx`，Provider 复用已加载实例，不为每个角色重复装载权重；
 - 所有 Qwen 请求在 API 层显式设置 `think: false`；不依赖模型默认值，不允许任一角色覆盖开启；
 - Router、Robot、Human、Cat 每次调用分别构造 messages、tools、temperature、预算和 AbortSignal；
 - Provider 调度器初期串行或使用有界公平队列，用户 Robot/Human Run 优先于 Cat Run；
@@ -330,7 +331,7 @@ Runtime 启动时应做 capability probe，不能只靠配置文件声明模型�
 
 ## 8. 模型、角色推理与评测策略
 
-当前产品默认模型由用户选定为 `qwen3.8:27b-mlx`。Router、Robot、Human、Cat 共用同一个已加载
+当前产品默认模型由用户选定为 `qwen3.6:35b-mlx`。Router、Robot、Human、Cat 共用同一个已加载
 模型与 Ollama Provider，角色差异由 RoleProfile、上下文、Tool allowlist、temperature 和预算形成，
 不得用“加载了同一个模型”推导出它们可以共享上下文或权限。所有 Qwen 请求统一
 显式传入 `think: false`，thinking/reasoning 不是 RoleProfile 可调参数。`qwen3:8b` 只保留为功能 smoke；
@@ -789,8 +790,10 @@ visibility projection 的 evaluator 均有量化证据；`pnpm gate:phase6` 在 
 pnpm `11.19.0` 下通过。用户已批准
 [visibility matrix v1](../evidence/agent-phase-6/visibility-matrix.md) 保持 `private`；三类
 Memory 均为 owner-role private，`shared_acl/hybrid` 继续 evaluator-only。三策略 deterministic
-通过只说明各自实现符合冻结矩阵，不说明共享更优。Current Gate 仅为真实 Ollama、代表性家庭
-数据、HA Robot/P4 Cat/Voice 端到端、家庭身份模型和长期 SQLite/WAL/断电/备份/quota/retention/
+通过只说明各自实现符合冻结矩阵，不说明共享更优。2026-08-24，6F 真实 35B
+grounded/prompt-injection 门禁已通过；6G 真实 HA 只读门禁证明 Memory 不覆盖 HA
+真值且无 service call，但需 clean commit 复跑。Current Gate 仅为代表性家庭数据、HA
+提交绑定、P4 Cat/Voice 端到端、家庭身份模型和长期 SQLite/WAL/断电/备份/quota/retention/
 权限/加密/secure-delete，均保持 `pending`；Phase 5 仍为 `pending_real_environment`，Phase 7
 等待另行明确授权且未启动。确定性 FTS 已满足当前冻结场景，因此 Vector DB 当前不立项，但真实
 数据证据不足，后续仍可在独立计划中重新评估。
