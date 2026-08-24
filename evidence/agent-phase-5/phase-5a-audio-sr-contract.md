@@ -162,7 +162,7 @@ speech frame、合格 frame 与 MultiNet detect call。`DIAG:` 与 `VERIFY:` 前
 动作递增 `command_action_count` 后，app_main 才会输出 `VERIFY:phase5a:fixed_command:PASS`。该候选
 在提交、推送和新硬件 artifact 前不改变 Phase 5A 判定。
 
-### 最终自动化候选：PASS；P4 可听播放人工观察：PASS
+### 最终自动化候选：PASS；P4 可听播放人工观察：暂缓（缺少外接扬声器）
 
 - commit：`d2841de76ad49eb51fdcd6fee32e00d742bc43d6`；run：`32615794192`；workflow
   conclusion：`success`；profile：`phase5a_voice`；串口：`/dev/cu.usbserial-210`；capture：180 秒；
@@ -183,5 +183,8 @@ speech frame、合格 frame 与 MultiNet detect call。`DIAG:` 与 `VERIFY:` 前
 - 上述证据足以判定 5A 自动化、真实 wake 与固定命令动作门禁 **PASS**，并冻结 Voice Protocol v1；
   默认配置仍未打开 SR/音频自检，也没有向 Agent 节点传输或持久化真实音频。`speaker` 与
   `tone_played` marker 只证明 codec 数字播放路径调用成功，不能证明 P4 扬声器实际可听；Mac 系统
-  扬声器是麦克风声学输入替代，不是 P4 输出观察。2026-08-24，用户在设备现场完成人工听觉确认，
-  明确确认 P4 startup tone 实际可听；因此该独立人工项判定为 **PASS**，且不由自动 marker 冒充。
+  扬声器是麦克风声学输入替代，不是 P4 输出观察。2026-08-24 首次人工反馈为已完成；随后使用本地
+  Phase 5A profile 重新刷写并直接重测时，用户明确反馈未听到 startup tone。同期串口仍报告
+  `speaker_ready=yes`、`tone_played=yes` 与 `VERIFY:audio:tone_played:PASS`，只证明 codec 数字写入
+  路径返回成功。进一步核对后确认开发板 `SPK/J16` 未连接外接扬声器，因此该结果既不能判定物理
+  输出 PASS，也不能据此判定固件播放 FAIL。人工可听项保持打开，待外接扬声器到货后再次现场确认。

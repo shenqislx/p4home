@@ -51,6 +51,34 @@ class Phase5AVoiceContractTest(unittest.TestCase):
         self.assertIn("audio_service_lease_fault", lease)
         self.assertIn("state->faulted", lease)
 
+    def test_startup_tone_is_long_enough_for_manual_observation(self):
+        source = (
+            ROOT / "firmware/components/audio_service/audio_service.c"
+        ).read_text(encoding="utf-8")
+        self.assertIn("#define AUDIO_SERVICE_TONE_BUFFER_SAMPLES 8000U", source)
+        self.assertIn("#define AUDIO_SERVICE_STARTUP_TONE_SAMPLES 8000U", source)
+        self.assertIn("#define AUDIO_SERVICE_STARTUP_TONE_AMPLITUDE 9000", source)
+        self.assertIn("#define AUDIO_SERVICE_STARTUP_TONE_VOLUME_PERCENT 55U", source)
+        self.assertIn("#define AUDIO_SERVICE_STARTUP_TONE_SETTLE_MS 600U", source)
+        self.assertIn(
+            "_Static_assert(AUDIO_SERVICE_STARTUP_TONE_SAMPLES <= "
+            "AUDIO_SERVICE_TONE_BUFFER_SAMPLES,",
+            source,
+        )
+        self.assertIn(
+            "sample_count > 0U && sample_count <= AUDIO_SERVICE_TONE_BUFFER_SAMPLES",
+            source,
+        )
+        startup = source.split("esp_err_t audio_service_run_startup_selftest(void)", 1)[1]
+        startup = startup.split("esp_err_t audio_service_begin_microphone_stream", 1)[0]
+        for expected in (
+            "AUDIO_SERVICE_STARTUP_TONE_SAMPLES",
+            "AUDIO_SERVICE_STARTUP_TONE_AMPLITUDE",
+            "AUDIO_SERVICE_STARTUP_TONE_VOLUME_PERCENT",
+            "pdMS_TO_TICKS(AUDIO_SERVICE_STARTUP_TONE_SETTLE_MS)",
+        ):
+            self.assertIn(expected, startup)
+
     def test_workflow_exposes_isolated_phase5a_profile(self):
         workflow = (
             ROOT / ".github/workflows/firmware-self-hosted-flash-serial.yml"

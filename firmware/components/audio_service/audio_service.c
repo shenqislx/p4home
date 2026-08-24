@@ -19,6 +19,15 @@ static const char *TAG = "audio_service";
 #define CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST 0
 #endif
 
+#define AUDIO_SERVICE_TONE_BUFFER_SAMPLES 8000U
+#define AUDIO_SERVICE_STARTUP_TONE_SAMPLES 8000U
+#define AUDIO_SERVICE_STARTUP_TONE_AMPLITUDE 9000
+#define AUDIO_SERVICE_STARTUP_TONE_VOLUME_PERCENT 55U
+#define AUDIO_SERVICE_STARTUP_TONE_SETTLE_MS 600U
+
+_Static_assert(AUDIO_SERVICE_STARTUP_TONE_SAMPLES <= AUDIO_SERVICE_TONE_BUFFER_SAMPLES,
+               "startup tone must fit the static tone buffer");
+
 typedef struct {
     bool initialized;
     bool speaker_ready;
@@ -36,7 +45,7 @@ typedef struct {
 static audio_diag_state_t s_state;
 static esp_codec_dev_handle_t s_speaker_codec;
 static esp_codec_dev_handle_t s_microphone_codec;
-static int16_t s_tone_buffer[8000];
+static int16_t s_tone_buffer[AUDIO_SERVICE_TONE_BUFFER_SAMPLES];
 static int16_t s_capture_buffer[1024];
 static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static StaticSemaphore_t s_input_mutex_storage;
@@ -116,6 +125,8 @@ static esp_err_t audio_service_write_speaker_tone(size_t sample_count,
                                                   TickType_t settle_delay_ticks,
                                                   bool *codec_state_uncertain)
 {
+    ESP_RETURN_ON_FALSE(sample_count > 0U && sample_count <= AUDIO_SERVICE_TONE_BUFFER_SAMPLES,
+                        ESP_ERR_INVALID_ARG, TAG, "speaker tone sample count is invalid");
     *codec_state_uncertain = false;
     int ret = esp_codec_dev_set_out_vol(s_speaker_codec, volume_percent);
     if (ret != ESP_CODEC_DEV_OK) {
@@ -384,14 +395,19 @@ esp_err_t audio_service_run_startup_selftest(void)
             esp_err_t ret = ESP_ERR_NO_MEM;
             if (audio_service_lock_output()) {
                 ret = audio_service_write_speaker_tone(
-                    1024, 7000, 35, pdMS_TO_TICKS(40), &codec_state_uncertain);
+                    AUDIO_SERVICE_STARTUP_TONE_SAMPLES,
+                    AUDIO_SERVICE_STARTUP_TONE_AMPLITUDE,
+                    AUDIO_SERVICE_STARTUP_TONE_VOLUME_PERCENT,
+                    pdMS_TO_TICKS(AUDIO_SERVICE_STARTUP_TONE_SETTLE_MS),
+                    &codec_state_uncertain);
                 audio_service_unlock_output();
             }
             if (ret != ESP_OK) {
                 ESP_LOGW(TAG, "startup speaker selftest failed: %s", esp_err_to_name(ret));
                 overall = ret;
             } else {
-                ESP_LOGI(TAG, "startup speaker selftest wrote %u bytes", 1024U * (unsigned)sizeof(int16_t));
+                ESP_LOGI(TAG, "startup speaker selftest wrote %u bytes",
+                         AUDIO_SERVICE_STARTUP_TONE_SAMPLES * (unsigned)sizeof(int16_t));
             }
             const bool released = codec_state_uncertain
                                       ? audio_service_quarantine_action(&lease)

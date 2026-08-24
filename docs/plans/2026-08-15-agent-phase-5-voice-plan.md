@@ -52,11 +52,12 @@ P4 固定离线命令、触摸、HA 与 UI 主链。
   重复释放和 owner 抢占；
 - [x] 建立 P4 host contract/fake 测试，覆盖 PCM 几何、frame 顺序、丢帧、过期 epoch、所有权竞争和
   固定命令优先级；本纵切不连接真实 STT/TTS；
-- [x] 通过专用 P4 profile 验证真实非零 PCM、AFE 持续 feed/fetch、真实 wake、固定离线命令、speaker
+- [ ] 通过专用 P4 profile 验证真实非零 PCM、AFE 持续 feed/fetch、真实 wake、固定离线命令、speaker
   播放、资源/栈/看门狗和 UI 8 FPS；人工听觉或口令观察与自动 marker 分开报告。
   - [x] manifest、P4/flash、codec write、麦克风、AFE、wake、固定命令动作、资源/栈/看门狗与 UI；
-  - [x] P4 startup tone 的独立可听人工观察（2026-08-24 用户现场确认实际可听；Mac 扬声器仅替代
-    口播输入，不作为本项输出证明）。
+  - [ ] P4 startup tone 的独立可听人工观察（2026-08-24 直接本地重测时用户未听到，随后确认
+    `SPK/J16` 未连接外接扬声器；当前缺少物理输出设备，待扬声器到货后重新确认。数字写入 marker
+    不能替代输出证明，Mac 扬声器仅替代口播输入）。
 
 退出门禁：Voice Protocol v1 与 PCM/所有权边界冻结；真实 P4 可稳定 wake、采集、AFE、固定命令和
 播放，默认配置不受影响；尚未向 Agent 节点传输音频。
