@@ -267,6 +267,33 @@ class Phase5eProfileTests(unittest.TestCase):
                 )
             self.assertNotEqual(subprocess.run(command, check=False).returncode, 0)
 
+    def test_artifact_audit_ignores_fts_shadow_storage_blobs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            secret = root / "secret"
+            secret.write_text("top-secret-token-value", encoding="ascii")
+            artifact = root / "monitor.log"
+            artifact.write_text("VERIFY:phase5e:voice_ui_e2e:FAIL\n", encoding="utf-8")
+            database = root / "audit.db"
+            with sqlite3.connect(database) as connection:
+                try:
+                    connection.execute(
+                        "CREATE VIRTUAL TABLE searchable USING fts5(content)"
+                    )
+                except sqlite3.OperationalError as error:
+                    self.skipTest(f"SQLite FTS5 is unavailable: {error}")
+                connection.execute(
+                    "INSERT INTO searchable(content) VALUES ('safe metadata')"
+                )
+            status = root / "status"
+            command = [
+                "python3", str(AUDIT), "--artifact", str(artifact),
+                "--secret-file", str(secret), "--audit-db", str(database),
+                "--status-file", str(status),
+            ]
+            self.assertEqual(subprocess.run(command, check=False).returncode, 0)
+            self.assertEqual(status.read_text(encoding="ascii"), "pass\n")
+
     def test_artifact_audit_accepts_speakerless_ui_metadata(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

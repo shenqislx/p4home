@@ -110,9 +110,10 @@ def audit_sqlite(path: pathlib.Path, reasons: set[str]) -> None:
         return
     try:
         with connection:
-            tables = [row[0] for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-            )]
+            tables = [row[1] for row in connection.execute("PRAGMA table_list")
+                      if row[0] == "main"
+                      and row[2] == "table"
+                      and not str(row[1]).startswith("sqlite_")]
             for table in tables:
                 if not isinstance(table, str) or not table.replace("_", "").isalnum():
                     reasons.add("sqlite_shape")
