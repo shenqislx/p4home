@@ -1,9 +1,11 @@
+import importlib.util
 import json
 import pathlib
 import sqlite3
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/firmware-self-hosted-flash-serial.yml"
@@ -16,6 +18,15 @@ DEPENDENCY_LOCK = ROOT / "firmware/dependencies.lock"
 
 
 class Phase5eProfileTests(unittest.TestCase):
+    @staticmethod
+    def load_driver(path: pathlib.Path, name: str):
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise AssertionError(f"could not load {path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
     def test_esp_hosted_sdio_oom_hardening_is_pinned(self):
         component = NETWORK_COMPONENT.read_text(encoding="utf-8")
         defaults = SDKCONFIG_DEFAULTS.read_text(encoding="utf-8")
@@ -97,6 +108,38 @@ class Phase5eProfileTests(unittest.TestCase):
         self.assertIn("VERIFY:phase5e:ui_applied:PASS", voice_transport)
         finally_block = harness[harness.rindex("  } finally {"):]
         self.assertLess(finally_block.index("await runtime?.close()"), finally_block.index("restoreRobotState"))
+
+    def test_voice_drivers_retry_wake_without_replaying_prompt(self):
+        for index, path in enumerate((DRIVER, UI_DRIVER)):
+            with self.subTest(driver=path.name):
+                driver = self.load_driver(path, f"phase5e_driver_{index}")
+                with (
+                    mock.patch.object(driver, "count_marker", return_value=0),
+                    mock.patch.object(driver, "say") as say_mock,
+                    mock.patch.object(
+                        driver,
+                        "wait_until",
+                        side_effect=[
+                            RuntimeError("wake_capture_timeout"),
+                            RuntimeError("wake_capture_timeout"),
+                            None,
+                        ],
+                    ),
+                    mock.patch.object(driver.time, "sleep"),
+                ):
+                    driver.open_capture(pathlib.Path("monitor.log"))
+                self.assertEqual(
+                    say_mock.call_args_list,
+                    [mock.call("Hi ESP", "Samantha")] * 3,
+                )
+
+                with (
+                    mock.patch.object(driver, "open_capture") as open_capture_mock,
+                    mock.patch.object(driver, "say") as prompt_mock,
+                ):
+                    driver.speak_interaction(pathlib.Path("monitor.log"), "prompt")
+                open_capture_mock.assert_called_once()
+                prompt_mock.assert_called_once_with("prompt", "Tingting")
 
     def test_workflow_keeps_business_verdict_out_of_transport_assertion(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")

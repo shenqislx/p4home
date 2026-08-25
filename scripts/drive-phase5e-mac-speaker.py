@@ -10,6 +10,8 @@ import subprocess
 import time
 
 CAPTURE_MARKER = "voice_transport: capture opened epoch="
+WAKE_ATTEMPTS = 3
+WAKE_RETRY_DELAY_SECONDS = 1
 PLAYBACK_MARKER = "voice_playback: playback opened epoch="
 
 
@@ -64,8 +66,23 @@ def say(text: str, voice: str) -> None:
 
 def open_capture(monitor: pathlib.Path) -> None:
     before = count_marker(monitor, CAPTURE_MARKER)
-    say("Hi ESP", "Samantha")
-    wait_until(lambda: count_marker(monitor, CAPTURE_MARKER) > before, 8, "wake_capture_timeout")
+    for attempt in range(WAKE_ATTEMPTS):
+        if count_marker(monitor, CAPTURE_MARKER) > before:
+            return
+        say("Hi ESP", "Samantha")
+        try:
+            wait_until(
+                lambda: count_marker(monitor, CAPTURE_MARKER) > before,
+                8,
+                "wake_capture_timeout",
+            )
+            return
+        except RuntimeError:
+            if count_marker(monitor, CAPTURE_MARKER) > before:
+                return
+            if attempt + 1 == WAKE_ATTEMPTS:
+                raise
+            time.sleep(WAKE_RETRY_DELAY_SECONDS)
 
 
 def speak_interaction(monitor: pathlib.Path, prompt: str) -> None:
