@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -14,9 +15,28 @@ HOME_SOURCE = ROOT / "firmware/components/ui_pages/ui_page_home.c"
 COORDINATOR = ROOT / "agent/apps/runtime/src/voice-interaction-coordinator.ts"
 SERVER = ROOT / "agent/apps/runtime/src/voice-websocket-server.ts"
 PRODUCT = ROOT / "agent/apps/runtime/src/product-voice-main.ts"
+FONT_GENERATOR = ROOT / "scripts/generate-ui-cjk-font.py"
 
 
 class Phase5EConversationUiContractTest(unittest.TestCase):
+    def test_dialog_capacity_and_common_chinese_font_coverage(self) -> None:
+        actor = ACTOR_SOURCE.read_text(encoding="utf-8")
+        home = HOME_SOURCE.read_text(encoding="utf-8")
+        generator_source = FONT_GENERATOR.read_text(encoding="utf-8")
+        self.assertIn("UI_ACTOR_DIALOG_PAGE_MAX 160U", actor)
+        self.assertIn("UI_HOME_HUD_DIALOG_ART_H 30", home)
+        self.assertIn('"--bpp",\n        "2",', generator_source)
+
+        spec = importlib.util.spec_from_file_location("ui_cjk_font_generator", FONT_GENERATOR)
+        if spec is None or spec.loader is None:
+            self.fail("could not load CJK font generator")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        symbols = generator.collect_symbols()
+        self.assertGreaterEqual(len(symbols), 3755)
+        self.assertTrue(set("智能助手可以理解复杂中文表达").issubset(symbols))
+        self.assertTrue(set("，。！？；：、（）【】《》“”‘’—…·").issubset(symbols))
+
     def test_agent_and_firmware_share_strict_bounded_v1_contract(self) -> None:
         contract = CONTRACT.read_text(encoding="utf-8")
         header = SERVICE_HEADER.read_text(encoding="utf-8")

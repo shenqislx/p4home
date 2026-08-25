@@ -61,12 +61,32 @@ STATIC_UI_TEXT = (
     "灯火通明氛围值拉满在制冷好凉快去看看全屋熄灯去睡了信号断了先打个盹！，…"
 )
 
+COMMON_CJK_PUNCTUATION = "，。！？；：、（）【】《》“”‘’—…·"
+
+
+def collect_gb2312_level1() -> set[str]:
+    """Return the 3,755 GB2312 level-1 Chinese characters.
+
+    Level 1 covers the common modern Chinese characters while keeping the
+    generated bitmap small enough for the 3 MiB firmware partition.
+    """
+    symbols: set[str] = set()
+    for lead in range(0xB0, 0xD8):
+        trail_end = 0xFA if lead == 0xD7 else 0xFF
+        for trail in range(0xA1, trail_end):
+            symbols.add(bytes((lead, trail)).decode("gb2312"))
+    if len(symbols) != 3755:
+        raise RuntimeError(f"unexpected GB2312 level-1 size: {len(symbols)}")
+    return symbols
+
 
 def collect_symbols() -> str:
     with ENTITIES_PATH.open(encoding="utf-8") as handle:
         document = json.load(handle)
 
-    symbols = {char for char in STATIC_UI_TEXT if ord(char) > 0x7F}
+    symbols = collect_gb2312_level1()
+    symbols.update(COMMON_CJK_PUNCTUATION)
+    symbols.update(char for char in STATIC_UI_TEXT if ord(char) > 0x7F)
     for entity in document.get("entities", []):
         for key in ("label", "group"):
             symbols.update(char for char in entity.get(key, "") if ord(char) > 0x7F)
@@ -96,7 +116,7 @@ def main() -> None:
         "--size",
         "16",
         "--bpp",
-        "4",
+        "2",
         "--format",
         "lvgl",
         "--font",
