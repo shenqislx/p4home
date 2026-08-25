@@ -45,15 +45,15 @@ def wait_until(predicate, timeout: float, reason: str) -> None:
 
 
 def wait_attempt(
-    progress_file: pathlib.Path, target: int, previous_attempts: int, timeout: float = 150
+    progress_file: pathlib.Path, target: int, timeout: float = 150
 ) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        completed, attempts = progress_state(progress_file)
+        completed, _attempts = progress_state(progress_file)
         if completed >= target:
             return True
-        if attempts > previous_attempts:
-            return False
+        # capture_attempts advances after STT, before model execution and the
+        # required delivery ACKs. It is not a terminal interaction signal.
         time.sleep(0.05)
     return False
 
@@ -94,9 +94,8 @@ def speak_until_progress(
     monitor: pathlib.Path, progress_file: pathlib.Path, prompt: str, target: int
 ) -> None:
     for _attempt in range(3):
-        previous_attempts = progress_state(progress_file)[1]
         speak_interaction(monitor, prompt)
-        if wait_attempt(progress_file, target, previous_attempts):
+        if wait_attempt(progress_file, target):
             return
     raise RuntimeError("voice_attempts_exhausted")
 
@@ -104,11 +103,10 @@ def speak_until_progress(
 def speak_once_no_replay(
     monitor: pathlib.Path, progress_file: pathlib.Path, prompt: str, target: int
 ) -> None:
-    previous_attempts = progress_state(progress_file)[1]
     speak_interaction(monitor, prompt)
     # A write prompt is never replayed. The first attempt may already have
     # crossed the HA side-effect boundary even when its terminal result is slow.
-    if not wait_attempt(progress_file, target, previous_attempts, timeout=390):
+    if not wait_attempt(progress_file, target, timeout=390):
         raise RuntimeError("write_attempt_not_completed_no_replay")
 
 
@@ -129,14 +127,11 @@ def main() -> int:
         speak_once_no_replay(args.monitor_log, args.progress_file, prompts["write"], 2)
 
         for _attempt in range(3):
-            previous_attempts = progress_state(args.progress_file)[1]
             playback_before = count_marker(args.monitor_log, PLAYBACK_MARKER)
             speak_interaction(args.monitor_log, prompts["barge"])
             deadline = time.monotonic() + 150
             while time.monotonic() < deadline:
                 if count_marker(args.monitor_log, PLAYBACK_MARKER) > playback_before:
-                    break
-                if progress_state(args.progress_file)[1] > previous_attempts:
                     break
                 time.sleep(0.05)
             if count_marker(args.monitor_log, PLAYBACK_MARKER) > playback_before:
@@ -146,9 +141,8 @@ def main() -> int:
         # A new wake while P4 playback is active must cancel that playback epoch.
         open_capture(args.monitor_log)
         wait_until(lambda: progress_state(args.progress_file)[0] >= 3, 30, "barge_cancel_timeout")
-        previous_attempts = progress_state(args.progress_file)[1]
         say(prompts["followup"], "Tingting")
-        if not wait_attempt(args.progress_file, 4, previous_attempts):
+        if not wait_attempt(args.progress_file, 4):
             # The first follow-up capture was already open for barge-in. Retry
             # with a fresh wake only when its bounded STT attempt did not pass.
             speak_until_progress(args.monitor_log, args.progress_file, prompts["followup"], 4)

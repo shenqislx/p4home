@@ -44,15 +44,15 @@ def wait_until(predicate, timeout: float, reason: str) -> None:
 
 
 def wait_attempt(
-    progress_file: pathlib.Path, target: int, previous_attempts: int, timeout: float = 180
+    progress_file: pathlib.Path, target: int, timeout: float = 180
 ) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        completed, attempts = progress_state(progress_file)
+        completed, _attempts = progress_state(progress_file)
         if completed >= target:
             return True
-        if attempts > previous_attempts:
-            return False
+        # capture_attempts advances after STT, before model execution and the
+        # required UI ACK. It is not a terminal signal for this interaction.
         time.sleep(0.05)
     return False
 
@@ -93,9 +93,8 @@ def speak_until_progress(
     monitor: pathlib.Path, progress_file: pathlib.Path, prompt: str, target: int
 ) -> None:
     for _attempt in range(3):
-        previous_attempts = progress_state(progress_file)[1]
         speak_interaction(monitor, prompt)
-        if wait_attempt(progress_file, target, previous_attempts):
+        if wait_attempt(progress_file, target):
             return
     raise RuntimeError("voice_attempts_exhausted")
 
@@ -117,11 +116,10 @@ def main() -> int:
         time.sleep(25)
         speak_until_progress(args.monitor_log, args.progress_file, prompts["read"], 1)
 
-        previous_attempts = progress_state(args.progress_file)[1]
         speak_interaction(args.monitor_log, prompts["write"])
         # A write is never replayed: its HA side effect may have crossed the
         # boundary even when the terminal observation or UI ACK is delayed.
-        if not wait_attempt(args.progress_file, 2, previous_attempts, timeout=420):
+        if not wait_attempt(args.progress_file, 2, timeout=420):
             raise RuntimeError("write_attempt_not_completed_no_replay")
 
         speak_until_progress(args.monitor_log, args.progress_file, prompts["barge"], 3)
