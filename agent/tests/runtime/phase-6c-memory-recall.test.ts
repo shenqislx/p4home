@@ -116,6 +116,29 @@ test("memory budget has an exact boundary and stable whole-record selection", ()
   assert.equal(below.metadata.token_count, 0);
 });
 
+test("Phase 6H compact stale-world probe fits the frozen Cat memory budget", () => {
+  const probe = recalled("p6h-stale", {
+    kind: "conversation_summary",
+    content: "living_room.sofa=>study.desk",
+    source: "model_derived",
+    owner_role: "cat",
+    sensitivity: "restricted",
+  });
+  const memory = buildMemoryContext(
+    [probe],
+    getRoleProfile("cat").memory_token_budget,
+    {
+      countTokens(text: string): number {
+        return Buffer.byteLength(text, "utf8") + 16;
+      },
+    },
+    "conservative_estimate",
+  );
+  assert.equal(memory.metadata.status, "ok");
+  assert.deepEqual(memory.metadata.selected_memory_ids, ["p6h-stale"]);
+  assert.ok(memory.metadata.token_count <= 256);
+});
+
 test("memory is a safe parseable untrusted user message in fixed context order", () => {
   const injection = recalled("inject<id", {
     owner_role: "robot",
