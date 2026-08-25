@@ -88,7 +88,7 @@ class Phase3DSimulatorHardwareGateContractTests(unittest.TestCase):
         self.assertIn('--protocol-version "$AGENT_PROTOCOL_VERSION"', workflow)
         self.assertIn("CONFIG_P4HOME_AGENT_PROTOCOL_VERSION", profile)
         self.assertIn(
-            'protocol_version: profile === "phase3d_object" ? 2 : 1',
+            'protocol_version: profile === "phase3d_object" || profile === "phase6h_cat_memory"',
             harness,
         )
         self.assertIn("CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=12288", defaults)

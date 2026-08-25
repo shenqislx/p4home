@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "sdkconfig.h"
+#include "conversation_service.h"
 #include "ha_client.h"
 #include "panel_data_store.h"
 #include "ui_async.h"
@@ -98,7 +99,9 @@ static ui_home_particle_t s_particles[UI_HOME_PARTICLE_COUNT];
 
 static portMUX_TYPE s_refresh_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_refresh_queued;
+static bool s_conversation_show_queued;
 static bool s_ready;
+static conversation_snapshot_t s_conversation_snapshot;
 static ui_home_sky_phase_t s_sky_phase = UI_HOME_SKY_NIGHT;
 static ui_home_weather_t s_weather = UI_HOME_WEATHER_CLEAR;
 static bool s_night = true;
@@ -682,6 +685,8 @@ static void ui_page_home_refresh_locked(void)
         ui_home_rooms_apply(i);
     }
     ui_page_home_apply_world(&summary);
+    conversation_service_get_snapshot(&s_conversation_snapshot);
+    ui_home_actor_apply_conversation(&s_conversation_snapshot);
     ui_page_home_apply_hud(&summary);
 }
 
@@ -730,6 +735,36 @@ static void ui_page_home_world_observer(const world_service_snapshot_t *snapshot
     (void)user_data;
     if (snapshot != NULL) {
         ui_page_home_queue_refresh();
+    }
+}
+
+static void ui_page_home_conversation_async(void *user_data)
+{
+    (void)user_data;
+    portENTER_CRITICAL(&s_refresh_lock);
+    s_conversation_show_queued = false;
+    portEXIT_CRITICAL(&s_refresh_lock);
+    if (ui_pages_current_page() == UI_PAGES_PAGE_HOME) {
+        ui_page_home_refresh_locked();
+    } else {
+        ui_pages_show_page_locked(UI_PAGES_PAGE_HOME);
+    }
+}
+
+static void ui_page_home_conversation_observer(void *user_data)
+{
+    (void)user_data;
+    bool should_queue = false;
+    portENTER_CRITICAL(&s_refresh_lock);
+    if (!s_conversation_show_queued) {
+        s_conversation_show_queued = true;
+        should_queue = true;
+    }
+    portEXIT_CRITICAL(&s_refresh_lock);
+    if (should_queue && ui_async_call(ui_page_home_conversation_async, NULL) != LV_RESULT_OK) {
+        portENTER_CRITICAL(&s_refresh_lock);
+        s_conversation_show_queued = false;
+        portEXIT_CRITICAL(&s_refresh_lock);
     }
 }
 
@@ -872,6 +907,8 @@ esp_err_t ui_page_home_init(void)
     lv_obj_t *screen = lv_screen_active();
     ESP_RETURN_ON_FALSE(screen != NULL, ESP_ERR_INVALID_STATE, TAG, "no active screen");
     ESP_RETURN_ON_ERROR(world_service_init(NULL), TAG, "world service init failed");
+    ESP_RETURN_ON_ERROR(conversation_service_init(), TAG,
+                        "conversation service init failed");
 
     s_root = ui_page_home_panel(screen, UI_HOME_ROOT_X, UI_HOME_ROOT_Y,
                                 UI_HOME_ROOT_W, UI_HOME_ROOT_H, UI_PAL_SCREEN);
@@ -934,6 +971,9 @@ esp_err_t ui_page_home_init(void)
                         TAG, "failed to attach home observer");
     ESP_RETURN_ON_ERROR(world_service_add_observer(ui_page_home_world_observer, NULL),
                         TAG, "failed to attach world observer");
+    ESP_RETURN_ON_ERROR(conversation_service_add_observer(
+                            ui_page_home_conversation_observer, NULL),
+                        TAG, "failed to attach conversation observer");
 
     s_ready = true;
     ui_page_home_refresh_locked();

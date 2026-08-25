@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "conversation_service.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -75,6 +76,13 @@ typedef struct {
 } voice_transport_frame_t;
 
 typedef struct {
+    char session_id[CONVERSATION_UI_SESSION_ID_HEX_BYTES + 1U];
+    uint32_t stream_id;
+    uint32_t epoch;
+    uint32_t revision;
+} voice_ui_ack_t;
+
+typedef struct {
     bool initialized;
     bool enabled;
     volatile bool running;
@@ -122,6 +130,8 @@ typedef struct {
     size_t rx_expected;
     size_t rx_received;
     bool rx_binary;
+    bool ui_ack_pending;
+    voice_ui_ack_t pending_ui_ack;
     voice_transport_snapshot_t metrics;
 } voice_transport_state_t;
 
@@ -375,6 +385,38 @@ static esp_err_t voice_send_binary(const uint8_t *bytes, size_t length)
     return sent == (int)length ? ESP_OK : ESP_FAIL;
 }
 
+static esp_err_t voice_send_ui_applied(const voice_ui_ack_t *ack)
+{
+    if (ack == NULL) return ESP_ERR_INVALID_ARG;
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) return ESP_ERR_NO_MEM;
+    cJSON_AddNumberToObject(root, "ui_protocol_version", CONVERSATION_UI_PROTOCOL_VERSION);
+    cJSON_AddStringToObject(root, "type", "ui.applied");
+    cJSON_AddStringToObject(root, "session_id", ack->session_id);
+    cJSON_AddNumberToObject(root, "stream_id", ack->stream_id);
+    cJSON_AddNumberToObject(root, "epoch", ack->epoch);
+    cJSON_AddNumberToObject(root, "revision", ack->revision);
+    return voice_send_json(root);
+}
+
+static void voice_conversation_rendered(const conversation_update_t *update, void *context)
+{
+    (void)context;
+    if (update == NULL) return;
+    taskENTER_CRITICAL(&s_voice.lock);
+    if (!s_voice.socket_connected || s_voice.ui_ack_pending) {
+        s_voice.metrics.protocol_errors++;
+    } else {
+        memcpy(s_voice.pending_ui_ack.session_id, update->session_id,
+               sizeof(s_voice.pending_ui_ack.session_id));
+        s_voice.pending_ui_ack.stream_id = update->stream_id;
+        s_voice.pending_ui_ack.epoch = update->epoch;
+        s_voice.pending_ui_ack.revision = update->revision;
+        s_voice.ui_ack_pending = true;
+    }
+    taskEXIT_CRITICAL(&s_voice.lock);
+}
+
 static esp_err_t voice_playback_send_json(cJSON *root, void *context)
 {
     (void)context;
@@ -440,6 +482,93 @@ static bool voice_control_identity_valid(const cJSON *root)
            epoch == s_voice.epoch;
 }
 
+static bool voice_ui_stage(const char *value, conversation_stage_t *stage)
+{
+    static const char *const values[] = {
+        "listening", "transcribing", "thinking", "completed", "failed", "cancelled",
+    };
+    if (value == NULL || stage == NULL) return false;
+    for (size_t index = 0U; index < sizeof(values) / sizeof(values[0]); ++index) {
+        if (strcmp(value, values[index]) == 0) {
+            *stage = (conversation_stage_t)index;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool voice_ui_role(const char *value, conversation_response_role_t *role)
+{
+    static const char *const values[] = {"none", "human", "robot", "mixed", "system"};
+    if (value == NULL || role == NULL) return false;
+    for (size_t index = 0U; index < sizeof(values) / sizeof(values[0]); ++index) {
+        if (strcmp(value, values[index]) == 0) {
+            *role = (conversation_response_role_t)index;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool voice_ui_execution(const char *value, conversation_execution_status_t *status)
+{
+    static const char *const values[] = {
+        "pending", "completed", "failed", "unknown", "not_applicable",
+    };
+    if (value == NULL || status == NULL) return false;
+    for (size_t index = 0U; index < sizeof(values) / sizeof(values[0]); ++index) {
+        if (strcmp(value, values[index]) == 0) {
+            *status = (conversation_execution_status_t)index;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool voice_handle_ui_update(const cJSON *root)
+{
+    if (!cJSON_IsObject(root) || cJSON_GetArraySize(root) != 11) return false;
+    uint32_t version, stream, epoch, revision;
+    const cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
+    const cJSON *session = cJSON_GetObjectItemCaseSensitive(root, "session_id");
+    const cJSON *stage = cJSON_GetObjectItemCaseSensitive(root, "stage");
+    const cJSON *user = cJSON_GetObjectItemCaseSensitive(root, "user_text");
+    const cJSON *response = cJSON_GetObjectItemCaseSensitive(root, "response_text");
+    const cJSON *role = cJSON_GetObjectItemCaseSensitive(root, "response_role");
+    const cJSON *execution = cJSON_GetObjectItemCaseSensitive(root, "execution_status");
+    if (!voice_json_uint32(cJSON_GetObjectItemCaseSensitive(root, "ui_protocol_version"),
+                           &version) ||
+        version != CONVERSATION_UI_PROTOCOL_VERSION || !cJSON_IsString(type) ||
+        strcmp(type->valuestring, "ui.update") != 0 || !cJSON_IsString(session) ||
+        strcmp(session->valuestring, s_voice.session_id_hex) != 0 ||
+        !voice_json_uint32(cJSON_GetObjectItemCaseSensitive(root, "stream_id"), &stream) ||
+        stream != s_voice.stream_id ||
+        !voice_json_uint32(cJSON_GetObjectItemCaseSensitive(root, "epoch"), &epoch) ||
+        epoch != s_voice.epoch ||
+        !voice_json_uint32(cJSON_GetObjectItemCaseSensitive(root, "revision"), &revision) ||
+        revision == 0U || !cJSON_IsString(stage) || !cJSON_IsString(user) ||
+        !cJSON_IsString(response) || !cJSON_IsString(role) || !cJSON_IsString(execution) ||
+        strlen(user->valuestring) > CONVERSATION_UI_USER_TEXT_MAX_BYTES ||
+        strlen(response->valuestring) > CONVERSATION_UI_RESPONSE_TEXT_MAX_BYTES) {
+        return false;
+    }
+
+    conversation_update_t update = {
+        .stream_id = stream,
+        .epoch = epoch,
+        .revision = revision,
+    };
+    snprintf(update.session_id, sizeof(update.session_id), "%s", session->valuestring);
+    snprintf(update.user_text, sizeof(update.user_text), "%s", user->valuestring);
+    snprintf(update.response_text, sizeof(update.response_text), "%s", response->valuestring);
+    if (!voice_ui_stage(stage->valuestring, &update.stage) ||
+        !voice_ui_role(role->valuestring, &update.response_role) ||
+        !voice_ui_execution(execution->valuestring, &update.execution_status)) {
+        return false;
+    }
+    return conversation_service_apply(&update) == ESP_OK;
+}
+
 static void voice_handle_control(const char *text, size_t length)
 {
     cJSON *root = cJSON_ParseWithLength(text, length);
@@ -448,6 +577,14 @@ static void voice_handle_control(const char *text, size_t length)
         cJSON_Delete(root);
         voice_metric_protocol_error();
         voice_request_reconnect();
+        return;
+    }
+    if (strcmp(type->valuestring, "ui.update") == 0) {
+        if (!voice_handle_ui_update(root)) {
+            voice_metric_protocol_error();
+            voice_request_reconnect();
+        }
+        cJSON_Delete(root);
         return;
     }
     const cJSON *direction = cJSON_GetObjectItemCaseSensitive(root, "direction");
@@ -652,6 +789,7 @@ static void voice_ws_event(void *handler_args, esp_event_base_t base,
     case WEBSOCKET_EVENT_CLOSED:
         taskENTER_CRITICAL(&s_voice.lock);
         s_voice.socket_connected = false;
+        s_voice.ui_ack_pending = false;
         s_voice.metrics.connected = false;
         taskEXIT_CRITICAL(&s_voice.lock);
         voice_request_abort();
@@ -886,6 +1024,25 @@ static void voice_worker(void *argument)
         if (abort_requested) {
             voice_abort_session("voice channel aborted");
         }
+        voice_ui_ack_t ui_ack = {0};
+        taskENTER_CRITICAL(&s_voice.lock);
+        const bool send_ui_ack = s_voice.socket_connected && s_voice.ui_ack_pending;
+        if (send_ui_ack) {
+            memcpy(&ui_ack, &s_voice.pending_ui_ack, sizeof(ui_ack));
+            s_voice.ui_ack_pending = false;
+        }
+        taskEXIT_CRITICAL(&s_voice.lock);
+        if (send_ui_ack) {
+            if (voice_send_ui_applied(&ui_ack) == ESP_OK) {
+                ESP_LOGW(TAG,
+                         "VERIFY:phase5e:ui_applied:PASS epoch=%" PRIu32
+                         " revision=%" PRIu32,
+                         ui_ack.epoch, ui_ack.revision);
+            } else {
+                voice_metric_protocol_error();
+                voice_request_reconnect();
+            }
+        }
         const int64_t now_us = esp_timer_get_time();
         taskENTER_CRITICAL(&s_voice.lock);
         const bool reserve_epoch = s_voice.session_state == VOICE_SESSION_IDLE &&
@@ -1074,6 +1231,14 @@ esp_err_t voice_transport_init(const voice_transport_config_t *config)
         s_voice.frame_queue = NULL;
         return result;
     }
+    result = conversation_service_set_rendered_observer(voice_conversation_rendered, NULL);
+    if (result != ESP_OK) {
+        vSemaphoreDelete(s_voice.send_mutex);
+        s_voice.send_mutex = NULL;
+        vQueueDelete(s_voice.frame_queue);
+        s_voice.frame_queue = NULL;
+        return result;
+    }
     const sr_service_capture_listener_t listener = {
         .context = NULL,
         .wake_detected = voice_wake_detected,
@@ -1084,6 +1249,7 @@ esp_err_t voice_transport_init(const voice_transport_config_t *config)
     };
     result = sr_service_register_capture_listener(&listener);
     if (result != ESP_OK) {
+        (void)conversation_service_set_rendered_observer(NULL, NULL);
         vSemaphoreDelete(s_voice.send_mutex);
         s_voice.send_mutex = NULL;
         vQueueDelete(s_voice.frame_queue);

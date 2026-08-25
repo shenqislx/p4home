@@ -57,8 +57,6 @@ class Phase5CSttProfileTest(unittest.TestCase):
             "voice_transport: capture opened epoch=",
             '"phase5c_stt_model_revision": phase5c_model_revision',
             '"phase5c_stt_model_manifest_sha256": phase5c_model_manifest_sha256',
-            'grep -qx "0" "$AGENT_HARNESS_STATUS_FILE"',
-            "grep -q '^VERIFY:phase5c:voice_stt_unified:PASS '",
         ):
             self.assertIn(marker, workflow)
         for marker in (
@@ -70,8 +68,14 @@ class Phase5CSttProfileTest(unittest.TestCase):
             'cat_history_messages: sessions.get("cat").history().length',
             "PHASE5C_MAX_VOICE_ATTEMPTS",
             "PHASE5C_EXPECTED_TRANSCRIPT_SHA256",
+            "VERIFY:phase5c:voice_stt_unified:PASS",
         ):
             self.assertIn(marker, harness)
+        transport_assertion = workflow.split(
+            "      - name: Assert transport artifact is complete", 1
+        )[1].split("      - name: Write job summary", 1)[0]
+        self.assertNotIn('grep -qx "0" "$AGENT_HARNESS_STATUS_FILE"', transport_assertion)
+        self.assertNotIn("VERIFY:phase5c:voice_stt_unified:PASS", transport_assertion)
         self.assertNotIn('say -v Samantha "Hi ESP"\n                sleep 2', workflow)
         voice_transport = (ROOT / "firmware/components/voice_transport/voice_transport.c").read_text(
             encoding="utf-8"

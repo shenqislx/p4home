@@ -229,6 +229,74 @@ test("unified voice result renders and plays Human then Robot without retaining 
   assert.equal(coordinator.active_count, 0);
 });
 
+test("speakerless product mode completes only after role execution and Conversation UI delivery", async () => {
+  const updates: unknown[] = [];
+  const coordinator = new VoiceInteractionCoordinator({
+    device_ids: [DEVICE_ID],
+    dispatch_role: async () => roleResult(),
+    ui_output: "required",
+    audio_output: "disabled",
+    present_ui: async (deviceId, update) => {
+      updates.push(structuredClone(update));
+      return {
+        schema_version: 1,
+        device_id: deviceId,
+        session_id: update.session_id,
+        stream_id: update.stream_id,
+        epoch: update.epoch,
+        revision: update.revision,
+        status: "completed",
+      };
+    },
+    cancel_low_priority_cat: () => undefined,
+  });
+  coordinator.onCaptureOpen(summary(22));
+  const result = await coordinator.run(
+    interaction(22), new AbortController().signal, context(22),
+  );
+
+  assert.equal(result.outcome, "completed");
+  assert.equal(result.role_execution, "completed");
+  assert.equal(result.ui_delivery, "completed");
+  assert.equal(result.audio_delivery, "deferred");
+  assert.equal(result.tts_pcm_bytes, 0);
+  assert.equal(result.playback_segments.length, 0);
+  assert.deepEqual(updates, [{
+    ui_protocol_version: 1,
+    type: "ui.update",
+    session_id: context(22).session_id,
+    stream_id: 22,
+    epoch: 22,
+    revision: 1,
+    stage: "completed",
+    user_text: interaction(22).text,
+    response_text: mixedResponse().text,
+    response_role: "mixed",
+    execution_status: "completed",
+  }]);
+});
+
+test("Conversation UI delivery failure does not rewrite a completed Robot result", async () => {
+  const response = mixedResponse();
+  const coordinator = new VoiceInteractionCoordinator({
+    device_ids: [DEVICE_ID],
+    dispatch_role: async () => roleResult(response),
+    ui_output: "required",
+    audio_output: "disabled",
+    present_ui: async () => { throw new Error("display offline"); },
+    cancel_low_priority_cat: () => undefined,
+  });
+  coordinator.onCaptureOpen(summary(23));
+  const result = await coordinator.run(
+    interaction(23), new AbortController().signal, context(23),
+  );
+  assert.equal(result.outcome, "ui_failed");
+  assert.equal(result.role_execution, "completed");
+  assert.equal(result.ui_delivery, "failed");
+  assert.equal(result.audio_delivery, "deferred");
+  assert.equal(result.role_response?.parts[1]?.tool_results[0]?.status, "success");
+});
+
 test("new capture atomically cancels old voice work and low-priority Cat before late TTS can play", async () => {
   let resolveTts: ((value: Awaited<ReturnType<RoleAwareTtsPipeline["render"]>>) => void) | null = null;
   const provider = new FakeTtsProvider();
@@ -257,9 +325,43 @@ test("new capture atomically cancels old voice work and low-priority Cat before 
   const result = await pending;
 
   assert.equal(result.outcome, "cancelled");
+  assert.equal(result.role_execution, "completed");
+  assert.equal(result.audio_delivery, "cancelled");
   assert.equal(playbackCalls, 0);
   assert.deepEqual(catCancels, [1, 2]);
   assert.ok(rendered.segments.every((segment) => segment.pcm.every((sample) => sample === 0)));
+});
+
+test("cancellation during Conversation UI delivery preserves completed Role truth", async () => {
+  let uiStarted = false;
+  const coordinator = new VoiceInteractionCoordinator({
+    device_ids: [DEVICE_ID],
+    dispatch_role: async () => roleResult(),
+    ui_output: "required",
+    audio_output: "disabled",
+    present_ui: async (_deviceId, _update, signal) => {
+      uiStarted = true;
+      if (!signal.aborted) {
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), {
+          once: true,
+        }));
+      }
+      throw signal.reason;
+    },
+    cancel_low_priority_cat: () => undefined,
+  });
+  coordinator.onCaptureOpen(summary(24));
+  const pending = coordinator.run(
+    interaction(24), new AbortController().signal, context(24),
+  );
+  while (!uiStarted) await new Promise((resolve) => setImmediate(resolve));
+  coordinator.onCaptureOpen(summary(25));
+  const result = await pending;
+
+  assert.equal(result.outcome, "cancelled");
+  assert.equal(result.role_execution, "completed");
+  assert.equal(result.ui_delivery, "cancelled");
+  assert.equal(result.audio_delivery, "deferred");
 });
 
 test("Robot unknown truth survives playback failure and cannot be rewritten by model prose", async () => {
@@ -311,6 +413,7 @@ test("barge-in waits for dispatched Robot unknown truth but never renders the ol
   const result = await pending;
 
   assert.equal(result.outcome, "cancelled");
+  assert.equal(result.role_execution, "completed");
   assert.equal(ttsCalls, 0);
   assert.equal(result.role_response?.parts[0]?.tool_results[0]?.error?.code, "HA_OUTCOME_UNKNOWN");
 });

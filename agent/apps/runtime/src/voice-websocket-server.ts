@@ -12,7 +12,10 @@ import type { TLSSocket } from "node:tls";
 import WebSocket, { WebSocketServer } from "ws";
 
 import {
+  ConversationUiProtocolError,
   decodeVoiceFrame,
+  validateConversationUiApplied,
+  validateConversationUiUpdate,
   validateVoiceControlMessage,
   VoiceProtocolError,
   VoiceSessionFlowTracker,
@@ -20,6 +23,8 @@ import {
   VOICE_FRAME_PAYLOAD_BYTES,
   VOICE_HEADER_BYTES,
   type DecodedVoiceFrame,
+  type ConversationUiApplied,
+  type ConversationUiUpdate,
   type VoiceControlMessage,
 } from "@p4home/contracts";
 import {
@@ -44,6 +49,9 @@ const VOICE_MAX_SESSION_OPENS_PER_MINUTE = 60;
 const VOICE_MAX_BUFFERED_RESPONSE_BYTES = 64 * 1024;
 const VOICE_DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
 const VOICE_MAX_HANDSHAKE_TIMEOUT_MS = 10_000;
+const CONVERSATION_UI_DEFAULT_ACK_TIMEOUT_MS = 2_000;
+const CONVERSATION_UI_MAX_ACK_TIMEOUT_MS = 10_000;
+const CONVERSATION_UI_MAX_PENDING_ACKS = 1_024;
 
 type VoiceWireErrorCode = "INVALID_MESSAGE" | "INVALID_FRAME" | "LIMIT_EXCEEDED" | "STALE_EPOCH" | "UNAVAILABLE";
 
@@ -77,6 +85,31 @@ export interface VoiceDispatchContext {
   readonly session_id: string;
   readonly stream_id: number;
   readonly epoch: number;
+}
+
+export interface ConversationUiDeliverySummary extends VoiceDispatchContext {
+  readonly schema_version: 1;
+  readonly revision: number;
+  readonly status: "completed";
+}
+
+export type ConversationUiDeliveryErrorCode =
+  | "BACKPRESSURE"
+  | "CANCELLED"
+  | "DISCONNECTED"
+  | "INVALID_UPDATE"
+  | "LIMIT_EXCEEDED"
+  | "TIMEOUT";
+
+export class ConversationUiDeliveryError extends Error {
+  public constructor(
+    public readonly code: ConversationUiDeliveryErrorCode,
+    message: string,
+    options: { readonly cause?: unknown } = {},
+  ) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "ConversationUiDeliveryError";
+  }
 }
 
 export class AggregateVoiceCaptureSink implements VoiceCaptureSink {
@@ -170,7 +203,7 @@ function rawDataBuffer(data: WebSocket.RawData): Buffer {
   return Buffer.from(data);
 }
 
-function parseControl(data: WebSocket.RawData): VoiceControlMessage {
+function parseJsonFrame(data: WebSocket.RawData): unknown {
   const bytes = rawDataBuffer(data);
   if (bytes.byteLength > VOICE_MAX_CONTROL_BYTES) {
     throw new VoiceProtocolError("LIMIT_EXCEEDED", "voice control frame exceeds 4 KiB");
@@ -181,7 +214,22 @@ function parseControl(data: WebSocket.RawData): VoiceControlMessage {
   } catch {
     throw new VoiceProtocolError("INVALID_CONTROL", "voice control frame is not valid JSON");
   }
-  return validateVoiceControlMessage(value);
+  return value;
+}
+
+interface PendingConversationUiAck {
+  readonly device_id: string;
+  readonly update: ConversationUiUpdate;
+  readonly timer: ReturnType<typeof setTimeout>;
+  readonly resolve: (summary: ConversationUiDeliverySummary) => void;
+  readonly reject: (error: ConversationUiDeliveryError) => void;
+}
+
+function conversationUiKey(
+  deviceId: string,
+  identity: Pick<ConversationUiUpdate, "session_id" | "stream_id" | "epoch" | "revision">,
+): string {
+  return `${deviceId}\u0000${identity.session_id}\u0000${identity.stream_id}\u0000${identity.epoch}\u0000${identity.revision}`;
 }
 
 function controlBase(message: VoiceControlMessage): Record<string, unknown> {
@@ -420,6 +468,7 @@ export class VoiceWebSocketServer {
   readonly #sink: VoiceCaptureSink;
   readonly #connections = new Map<string, WebSocket>();
   readonly #playbacks = new Map<string, VoicePlaybackSender>();
+  readonly #pendingConversationUiAcks = new Map<string, PendingConversationUiAck>();
   readonly #pendingSockets = new Map<Socket, ReturnType<typeof setTimeout>>();
   readonly #highestEpoch = new Map<string, number>();
   readonly #sessionOpenRates = new Map<string, { started_ms: number; count: number }>();
@@ -496,6 +545,104 @@ export class VoiceWebSocketServer {
   public get address(): VoiceWebSocketServerAddress | null { return this.#address; }
   public get connection_count(): number { return this.#connections.size; }
   public get playback_count(): number { return this.#playbacks.size; }
+  public get pending_conversation_ui_count(): number { return this.#pendingConversationUiAcks.size; }
+
+  public async presentConversationUi(
+    deviceId: string,
+    input: ConversationUiUpdate,
+    timeoutMs = CONVERSATION_UI_DEFAULT_ACK_TIMEOUT_MS,
+    signal?: AbortSignal,
+  ): Promise<ConversationUiDeliverySummary> {
+    let update: ConversationUiUpdate;
+    try {
+      update = validateConversationUiUpdate(input);
+    } catch (error) {
+      throw new ConversationUiDeliveryError(
+        "INVALID_UPDATE", "conversation UI update violates protocol", { cause: error },
+      );
+    }
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 10
+        || timeoutMs > CONVERSATION_UI_MAX_ACK_TIMEOUT_MS) {
+      throw new ConversationUiDeliveryError("INVALID_UPDATE", "conversation UI timeout is invalid");
+    }
+    if (signal?.aborted === true) {
+      throw new ConversationUiDeliveryError("CANCELLED", "conversation UI delivery was cancelled");
+    }
+    const webSocket = this.#connections.get(deviceId);
+    if (webSocket === undefined || webSocket.readyState !== WebSocket.OPEN) {
+      throw new ConversationUiDeliveryError("DISCONNECTED", "paired P4 voice socket is unavailable");
+    }
+    if (this.#pendingConversationUiAcks.size >= CONVERSATION_UI_MAX_PENDING_ACKS) {
+      throw new ConversationUiDeliveryError("LIMIT_EXCEEDED", "conversation UI ack map is full");
+    }
+    const key = conversationUiKey(deviceId, update);
+    if (this.#pendingConversationUiAcks.has(key)) {
+      throw new ConversationUiDeliveryError("LIMIT_EXCEEDED", "conversation UI revision is already pending");
+    }
+    const text = JSON.stringify(update);
+    const textBytes = Buffer.byteLength(text, "utf8");
+    if (textBytes > VOICE_MAX_CONTROL_BYTES
+        || webSocket.bufferedAmount + textBytes > this.#maxBufferedResponseBytes) {
+      throw new ConversationUiDeliveryError("BACKPRESSURE", "conversation UI backpressure limit exceeded");
+    }
+    return await new Promise<ConversationUiDeliverySummary>((resolve, reject) => {
+      const finishResolve = (summary: ConversationUiDeliverySummary): void => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve(summary);
+      };
+      const finishReject = (error: ConversationUiDeliveryError): void => {
+        signal?.removeEventListener("abort", onAbort);
+        reject(error);
+      };
+      const timer = setTimeout(() => {
+        const pending = this.#pendingConversationUiAcks.get(key);
+        if (pending === undefined) return;
+        this.#pendingConversationUiAcks.delete(key);
+        pending.reject(new ConversationUiDeliveryError("TIMEOUT", "conversation UI ack timed out"));
+      }, timeoutMs);
+      timer.unref();
+      this.#pendingConversationUiAcks.set(key, {
+        device_id: deviceId,
+        update,
+        timer,
+        resolve: finishResolve,
+        reject: finishReject,
+      });
+      const onAbort = (): void => {
+        const pending = this.#pendingConversationUiAcks.get(key);
+        if (pending === undefined) return;
+        clearTimeout(pending.timer);
+        this.#pendingConversationUiAcks.delete(key);
+        pending.reject(new ConversationUiDeliveryError(
+          "CANCELLED", "conversation UI delivery was cancelled",
+        ));
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted === true) onAbort();
+      if (!this.#pendingConversationUiAcks.has(key)) return;
+      try {
+        webSocket.send(text, { binary: false }, (error) => {
+          if (!error) return;
+          const pending = this.#pendingConversationUiAcks.get(key);
+          if (pending === undefined) return;
+          clearTimeout(pending.timer);
+          this.#pendingConversationUiAcks.delete(key);
+          pending.reject(new ConversationUiDeliveryError(
+            "DISCONNECTED", "conversation UI send failed", { cause: error },
+          ));
+        });
+      } catch (error) {
+        const pending = this.#pendingConversationUiAcks.get(key);
+        if (pending !== undefined) {
+          clearTimeout(pending.timer);
+          this.#pendingConversationUiAcks.delete(key);
+        }
+        finishReject(new ConversationUiDeliveryError(
+          "DISCONNECTED", "conversation UI send failed", { cause: error },
+        ));
+      }
+    });
+  }
 
   public async playback(
     deviceId: string,
@@ -690,7 +837,18 @@ export class VoiceWebSocketServer {
                 throw new VoiceProtocolError("LIMIT_EXCEEDED", "voice response backpressure limit exceeded");
               }
             } else {
-              const message = parseControl(data);
+              const parsed = parseJsonFrame(data);
+              if ((parsed as { readonly type?: unknown } | null)?.type === "ui.applied") {
+                if (!this.#acceptConversationUiApplied(
+                  deviceId, validateConversationUiApplied(parsed),
+                )) {
+                  throw new ConversationUiProtocolError(
+                    "INVALID_IDENTITY", "conversation UI ack has no matching pending update",
+                  );
+                }
+                return;
+              }
+              const message = validateVoiceControlMessage(parsed);
               const playback = this.#playbacks.get(deviceId);
               if (playback !== undefined && playback.matches(message)
                   && message.type !== "session.open") {
@@ -710,6 +868,7 @@ export class VoiceWebSocketServer {
               ? error.code === "LIMIT_EXCEEDED" ? "LIMIT_EXCEEDED"
                 : error.code === "STALE_EPOCH" ? "STALE_EPOCH"
                   : isBinary ? "INVALID_FRAME" : "INVALID_MESSAGE"
+              : error instanceof ConversationUiProtocolError ? "INVALID_MESSAGE"
               : "INVALID_MESSAGE";
             let sent = false;
             try {
@@ -729,6 +888,7 @@ export class VoiceWebSocketServer {
           receiver.disconnect();
           if (this.#connections.get(deviceId) === webSocket) {
             this.#playbacks.get(deviceId)?.disconnect();
+            this.#rejectConversationUiForDevice(deviceId);
             this.#sink.onDeviceDisconnect?.(deviceId);
             this.#options.on_device_disconnect?.(deviceId);
             this.#connections.delete(deviceId);
@@ -777,6 +937,7 @@ export class VoiceWebSocketServer {
       this.#sink.onDeviceDisconnect?.(deviceId);
       this.#options.on_device_disconnect?.(deviceId);
       connection.terminate();
+      this.#rejectConversationUiForDevice(deviceId);
     }
     for (const playback of this.#playbacks.values()) playback.disconnect();
     this.#playbacks.clear();
@@ -786,6 +947,35 @@ export class VoiceWebSocketServer {
     });
     this.#server = null;
     this.#address = null;
+  }
+
+  #acceptConversationUiApplied(deviceId: string, applied: ConversationUiApplied): boolean {
+    const key = conversationUiKey(deviceId, applied);
+    const pending = this.#pendingConversationUiAcks.get(key);
+    if (pending === undefined) return false;
+    clearTimeout(pending.timer);
+    this.#pendingConversationUiAcks.delete(key);
+    pending.resolve({
+      schema_version: 1,
+      device_id: deviceId,
+      session_id: applied.session_id,
+      stream_id: applied.stream_id,
+      epoch: applied.epoch,
+      revision: applied.revision,
+      status: "completed",
+    });
+    return true;
+  }
+
+  #rejectConversationUiForDevice(deviceId: string): void {
+    for (const [key, pending] of this.#pendingConversationUiAcks) {
+      if (pending.device_id !== deviceId) continue;
+      clearTimeout(pending.timer);
+      this.#pendingConversationUiAcks.delete(key);
+      pending.reject(new ConversationUiDeliveryError(
+        "DISCONNECTED", "conversation UI connection closed",
+      ));
+    }
   }
 
   #trackPendingSocket(socket: Socket): void {

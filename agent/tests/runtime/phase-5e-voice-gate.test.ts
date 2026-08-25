@@ -7,9 +7,11 @@ import {
   createPhase5eDeterministicProvider,
   normalizePhase5eTranscript,
   requirePhase5eRestoredState,
+  validatePhase5eSpeakerlessUiGate,
   validatePhase5eVoiceGate,
   type Phase5eGateInteraction,
   type Phase5ePromptSet,
+  type Phase5eSpeakerlessUiGateInteraction,
 } from "@p4home/runtime";
 
 const prompts: Phase5ePromptSet = {
@@ -126,6 +128,23 @@ function validInteractions(): Phase5eGateInteraction[] {
   ];
 }
 
+function speakerlessInteractions(): Phase5eSpeakerlessUiGateInteraction[] {
+  return validInteractions().slice(0, 3).map((item, index) => ({
+    ...item,
+    kind: index === 2 ? "chat" as const : item.kind as "read" | "write",
+    voice: {
+      ...item.voice,
+      outcome: "completed",
+      role_execution: "completed",
+      ui_delivery: "completed",
+      audio_delivery: "deferred",
+      playback_segments: [],
+      tts_pcm_bytes: 0,
+      tts_duration_ms: 0,
+    },
+  }));
+}
+
 test("Phase 5E prompt matching tolerates punctuation but rejects extra text", () => {
   assert.equal(normalizePhase5eTranscript("请查看书房灯状态。"), "请查看书房灯状态");
   assert.equal(classifyPhase5ePrompt("请查看书房灯状态。", prompts), "read");
@@ -233,6 +252,37 @@ test("Phase 5E verdict requires ordered roles, barge cancellation, voices and re
   (cancelledPlayback as { bytes: number }).bytes = 0;
   assert.throws(() => validatePhase5eVoiceGate({
     interactions: idleCancel,
+    write_action: "turn_on",
+    initial_state: "off",
+    restored_state: "off",
+  }));
+});
+
+test("Phase 5E speakerless verdict requires read, write and chat UI acknowledgements", () => {
+  const verdict = validatePhase5eSpeakerlessUiGate({
+    interactions: speakerlessInteractions(),
+    write_action: "turn_on",
+    initial_state: "off",
+    restored_state: "off",
+  });
+  assert.equal(verdict.ui_deliveries_completed, 3);
+  assert.equal(verdict.audio_delivery_deferred, true);
+
+  const missingUi = speakerlessInteractions();
+  missingUi[2] = structuredClone(missingUi[2]!);
+  (missingUi[2]!.voice as { ui_delivery: string }).ui_delivery = "failed";
+  assert.throws(() => validatePhase5eSpeakerlessUiGate({
+    interactions: missingUi,
+    write_action: "turn_on",
+    initial_state: "off",
+    restored_state: "off",
+  }));
+
+  const unexpectedAudio = speakerlessInteractions();
+  unexpectedAudio[0] = structuredClone(unexpectedAudio[0]!);
+  (unexpectedAudio[0]!.voice as { audio_delivery: string }).audio_delivery = "completed";
+  assert.throws(() => validatePhase5eSpeakerlessUiGate({
+    interactions: unexpectedAudio,
     write_action: "turn_on",
     initial_state: "off",
     restored_state: "off",

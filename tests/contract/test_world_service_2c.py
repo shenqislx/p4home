@@ -73,6 +73,7 @@ class WorldServicePhase2CContractTests(unittest.TestCase):
             [
                 "ui_home_actor_create",
                 "ui_home_actor_apply_snapshot",
+                "ui_home_actor_apply_conversation",
                 "ui_home_actor_create_dialog",
             ],
         )
@@ -84,7 +85,7 @@ class WorldServicePhase2CContractTests(unittest.TestCase):
         source = ACTOR_SOURCE.read_text(encoding="utf-8")
         self.assertRegex(
             source,
-            r"UI_ACTOR_DIALOG_TEXT_MAX\s+\(WORLD_SERVICE_SAY_TEXT_MAX_BYTES \+ 1U\)",
+            r"UI_ACTOR_DIALOG_TEXT_MAX\s+\(CONVERSATION_UI_DIALOG_TEXT_MAX_BYTES \+ 1U\)",
         )
         self.assertIn("ui_home_actor_dialog_page_end", source)
         self.assertNotIn("strncmp(s_dialog_full", source)

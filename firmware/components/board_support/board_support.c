@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "audio_service.h"
+#include "conversation_service.h"
 #include "agent_transport.h"
 #include "display_service.h"
 #include "esp_app_desc.h"
@@ -131,6 +132,11 @@ esp_err_t board_support_init(void)
     esp_err_t world_ret = world_service_init(NULL);
     if (world_ret != ESP_OK) {
         ESP_LOGW(TAG, "world service init failed: %s", esp_err_to_name(world_ret));
+    }
+
+    esp_err_t conversation_ret = conversation_service_init();
+    if (conversation_ret != ESP_OK) {
+        ESP_LOGW(TAG, "conversation service init failed: %s", esp_err_to_name(conversation_ret));
     }
 
     esp_err_t agent_ret = agent_transport_init(NULL);

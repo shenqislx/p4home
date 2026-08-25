@@ -18,6 +18,7 @@
     "gate:phase6": "node scripts/gate-phase6.mjs",
     "gate:phase6-ha-live": "node scripts/check-runtime.mjs && node --import tsx apps/runtime/src/phase6g-ha-memory-gate.ts",
     "gate:phase6-sqlite-live": "node scripts/check-runtime.mjs && node --import tsx apps/runtime/src/phase6i-sqlite-gate.ts",
+    "start:voice": "node scripts/check-runtime.mjs && node --import tsx apps/runtime/src/product-voice-main.ts",
     "typecheck": "node scripts/check-runtime.mjs && tsc --noEmit -p tsconfig.json",
     "test": "node scripts/check-runtime.mjs && node --import tsx --test tests/contracts/*.test.ts tests/core/*.test.ts tests/domain/*.test.ts tests/eval/*.test.ts tests/provider/*.test.ts tests/runtime/*.test.ts tests/storage/*.test.ts",
     "test:ollama-live": "node scripts/check-runtime.mjs && node --import tsx --test tests/integration/ollama-live.test.ts",

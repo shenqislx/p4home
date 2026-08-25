@@ -22,7 +22,9 @@ class Phase6hCatMemoryProfileTests(unittest.TestCase):
         self.assertIn("P4HOME_PHASE6H_MEMORY_CANARY_FILE", workflow)
         self.assertIn("Audit Phase 6H upload candidates", workflow)
         self.assertIn("scripts/audit-phase6h-artifacts.py", workflow)
-        self.assertIn("inputs.validation_profile != 'phase6h_cat_memory' || success()", workflow)
+        upload_condition = workflow.split("      - name: Upload serial artifact", 1)[1]
+        self.assertIn("inputs.validation_profile != 'phase6h_cat_memory'", upload_condition)
+        self.assertIn("|| success())", upload_condition)
 
     def test_auditor_accepts_ids_and_markers_but_rejects_memory_body(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

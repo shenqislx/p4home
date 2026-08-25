@@ -10,6 +10,7 @@ import { RoleScheduler } from "./role-scheduler.ts";
 import { RoleSessionRegistry } from "./role-session.ts";
 import type { RobotHaReadRuntime } from "./robot-ha-read-runner.ts";
 import type { RobotHaWriteRuntime } from "./robot-ha-write-runner.ts";
+import type { RoleMemoryRuntime } from "./role-memory.ts";
 
 export interface UnifiedVoiceRoleDispatcherOptions {
   readonly provider: Pick<OllamaProvider, "chat">;
@@ -20,6 +21,7 @@ export interface UnifiedVoiceRoleDispatcherOptions {
   readonly audit_finalize_timeout_ms?: number;
   readonly clock?: () => number;
   readonly robot_ha?: RobotHaReadRuntime | RobotHaWriteRuntime;
+  readonly memory?: RoleMemoryRuntime;
   readonly on_result?: (
     result: RunRoleInteractionResult,
     interaction: UserTextInteraction,
@@ -59,6 +61,7 @@ export class UnifiedVoiceRoleDispatcher {
         : { audit_finalize_timeout_ms: this.#options.audit_finalize_timeout_ms }),
       ...(this.#options.clock === undefined ? {} : { clock: this.#options.clock }),
       ...(this.#options.robot_ha === undefined ? {} : { robot_ha: this.#options.robot_ha }),
+      ...(this.#options.memory === undefined ? {} : { memory: this.#options.memory }),
     });
     await this.#options.on_result?.(result, interaction);
     return result;

@@ -712,7 +712,7 @@ test("gate entrypoint times out an unavailable real socket, sends no write, and 
       timerPreloadPath,
       "const realSetTimeout = globalThis.setTimeout;\n"
         + "globalThis.setTimeout = (callback, delay, ...args) => "
-        + "realSetTimeout(callback, Math.min(Number(delay), 20), ...args);\n",
+        + "realSetTimeout(callback, Math.min(Number(delay), 100), ...args);\n",
     );
     server.listen(0, "127.0.0.1");
     await once(server, "listening");

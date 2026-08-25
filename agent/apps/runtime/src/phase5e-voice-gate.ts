@@ -20,6 +20,12 @@ export interface Phase5eGateInteraction {
   readonly role: RunRoleInteractionResult;
 }
 
+export interface Phase5eSpeakerlessUiGateInteraction {
+  readonly kind: "read" | "write" | "chat";
+  readonly voice: VoiceInteractionResult;
+  readonly role: RunRoleInteractionResult;
+}
+
 export interface Phase5eVoiceGateVerdict {
   readonly read_passed: true;
   readonly write_passed: true;
@@ -28,6 +34,16 @@ export interface Phase5eVoiceGateVerdict {
   readonly composition_audits_persisted: 4;
   readonly playback_segments: number;
   readonly playback_bytes: number;
+  readonly raw_audio_retained: false;
+}
+
+export interface Phase5eSpeakerlessUiGateVerdict {
+  readonly read_passed: true;
+  readonly write_passed: true;
+  readonly chat_passed: true;
+  readonly ui_deliveries_completed: 3;
+  readonly audio_delivery_deferred: true;
+  readonly composition_audits_persisted: 3;
   readonly raw_audio_retained: false;
 }
 
@@ -233,6 +249,61 @@ export function validatePhase5eVoiceGate(options: {
     composition_audits_persisted: 4,
     playback_segments: segments.length,
     playback_bytes: segments.reduce((total, segment) => total + segment.pcm_bytes, 0),
+    raw_audio_retained: false,
+  };
+}
+
+export function validatePhase5eSpeakerlessUiGate(options: {
+  readonly interactions: readonly Phase5eSpeakerlessUiGateInteraction[];
+  readonly write_action: "turn_off" | "turn_on";
+  readonly initial_state: "off" | "on";
+  readonly restored_state: string | null;
+}): Phase5eSpeakerlessUiGateVerdict {
+  if (options.interactions.length !== 3
+      || options.interactions.map((item) => item.kind).join(",") !== "read,write,chat") {
+    throw new TypeError("Phase 5E speakerless UI gate requires read, write and chat order");
+  }
+  const [read, write, chat] = options.interactions as readonly [
+    Phase5eSpeakerlessUiGateInteraction, Phase5eSpeakerlessUiGateInteraction,
+    Phase5eSpeakerlessUiGateInteraction,
+  ];
+  const completed = (
+    item: Phase5eSpeakerlessUiGateInteraction, roleId: "human" | "robot",
+  ): boolean => (
+    item.voice.outcome === "completed"
+    && item.voice.role_execution === "completed"
+    && item.voice.ui_delivery === "completed"
+    && item.voice.audio_delivery === "deferred"
+    && item.voice.playback_segments.length === 0
+    && item.voice.tts_pcm_bytes === 0
+    && item.role.run.status === "completed"
+    && item.role.run.role_id === roleId
+    && item.role.response.status === "completed"
+  );
+  if (!completed(read, "robot") || !successfulTool(read.role, "home.get_entity")) {
+    throw new TypeError("Phase 5E speakerless read did not complete through Robot and UI");
+  }
+  const targetState = options.write_action === "turn_on" ? "on" : "off";
+  if (!completed(write, "robot")
+      || !successfulTool(write.role, `home.${options.write_action}`, targetState)) {
+    throw new TypeError("Phase 5E speakerless write did not complete through Robot and UI");
+  }
+  if (!completed(chat, "human") || chat.role.response.parts.length !== 1
+      || chat.role.response.parts[0]?.tool_results.length !== 0) {
+    throw new TypeError("Phase 5E speakerless chat did not complete through Human and UI");
+  }
+  if (options.interactions.some((item) => item.role.composition_audit_status !== "persisted")
+      || options.interactions.some((item) => item.voice.raw_audio_retained !== false)
+      || options.restored_state !== options.initial_state) {
+    throw new TypeError("Phase 5E speakerless audit, retention or restoration invariant failed");
+  }
+  return {
+    read_passed: true,
+    write_passed: true,
+    chat_passed: true,
+    ui_deliveries_completed: 3,
+    audio_delivery_deferred: true,
+    composition_audits_persisted: 3,
     raw_audio_retained: false,
   };
 }

@@ -58,6 +58,30 @@ Phase 1 至 Phase 4 已按各自证据门禁关闭。Robot 只开放 alias 级
 仍为 `pending_real_environment`；该状态不因 Phase 6 本地门禁通过而改变。
 任何阶段都不得把 token 暴露给模型、协议 JSON、日志或 artifact。
 
+## 无扬声器 Voice 产品入口（Phase 5E）
+
+`pnpm start:voice` 启动真实产品装配：P4 PCM → 固定版本 Python STT → 统一 Role Router →
+Human/Robot（含受限 HA 与 private Memory）→ P4 独立 Conversation UI。当前扬声器缺失，因此
+`audio_output=deferred`；成功标准是 P4 对话框渲染后返回 `ui.applied`，不能用 HA/模型成功替代
+UI 成功，也不会经 `character.say` 改写 Cat World。
+
+入口要求以下环境变量，所有路径必须为绝对路径；设备 token、TLS 私钥和 HA token 文件须在仓库外，
+其中设备 token/TLS 私钥及 HA token 必须为当前用户所有且权限不宽于 `0600`：
+
+- Agent：`P4HOME_AGENT_DEVICE_ID`、`P4HOME_AGENT_DEVICE_TOKEN_FILE`、
+  `P4HOME_AGENT_TLS_KEY_FILE`、`P4HOME_AGENT_TLS_CERT_FILE`，以及可选
+  `P4HOME_AGENT_HOST`（默认 `0.0.0.0`）、`P4HOME_AGENT_PORT`（默认 `8443`）；
+- STT：`P4HOME_STT_PYTHON`、`P4HOME_STT_WORKER`、`P4HOME_STT_MODEL`，以及可选
+  `P4HOME_STT_TIMEOUT_MS`；
+- Ollama：可选 `OLLAMA_MODEL`、`OLLAMA_BASE_URL`、`P4HOME_OLLAMA_TIMEOUT_MS`；
+- HA：`P4HOME_HA_URL`、`P4HOME_HA_TOKEN_FILE`、`P4HOME_HA_POLICY_FILE`；仅 LAN 明文
+  `http/ws` 场景可显式设置 `P4HOME_HA_ALLOW_INSECURE=1`；
+- 审计/Memory：`P4HOME_PRODUCT_AUDIT_DB`，自动使用 review 已批准的 quota/retention revision 1。
+
+启动日志只输出聚合状态，不输出语音文本、回复正文或凭证。该入口和本地测试通过仍不等于 5E
+实机门禁通过；必须另有真实 P4 串口中的 `VERIFY:phase5e:ui_conversation:PASS` 与
+`VERIFY:phase5e:ui_applied:PASS` 证据。
+
 ## Phase 6 本地门禁
 
 ```bash

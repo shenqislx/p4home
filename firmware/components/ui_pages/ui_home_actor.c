@@ -19,7 +19,7 @@ static const char *TAG = "ui_actor";
 #define UI_ACTOR_ART_H 13
 #define UI_ACTOR_PET_ART_W 10
 #define UI_ACTOR_DIALOG_PAGE_MAX 96U
-#define UI_ACTOR_DIALOG_TEXT_MAX (WORLD_SERVICE_SAY_TEXT_MAX_BYTES + 1U)
+#define UI_ACTOR_DIALOG_TEXT_MAX (CONVERSATION_UI_DIALOG_TEXT_MAX_BYTES + 1U)
 #define UI_ACTOR_DIALOG_PAGE_HOLD_TICKS 24U
 #define UI_ACTOR_PET_LAG 2U
 
@@ -83,6 +83,10 @@ static size_t s_dialog_revealed;
 static uint16_t s_dialog_page_hold;
 static bool s_cursor_visible;
 static uint32_t s_speech_revision;
+static uint32_t s_conversation_epoch;
+static uint32_t s_conversation_revision;
+static bool s_dialog_is_conversation;
+static char s_conversation_dialog[CONVERSATION_UI_DIALOG_TEXT_MAX_BYTES + 1U];
 
 static const lv_image_dsc_t *const s_idle_frames[] = ACTOR_IDLE_FRAMES;
 static const lv_image_dsc_t *const s_walk_frames[] = ACTOR_WALK_FRAMES;
@@ -95,7 +99,7 @@ static const lv_image_dsc_t *const s_paw_frames[] = ACTOR_PAW_FRAMES;
 static const lv_image_dsc_t *const s_pet_frames[] = PET_IDLE_FRAMES;
 
 static void ui_home_actor_set_render_state(ui_actor_render_state_t state);
-static void ui_home_actor_say(const char *text, uint32_t accent);
+static void ui_home_actor_say(const char *text, uint32_t accent, bool log_text);
 
 static bool ui_home_actor_room_index(world_room_id_t room, size_t *room_index)
 {
@@ -587,7 +591,8 @@ void ui_home_actor_apply_snapshot(const world_service_snapshot_t *snapshot)
         default:
             break;
         }
-        ui_home_actor_say(snapshot->speech_text, accent);
+        ui_home_actor_say(snapshot->speech_text, accent, true);
+        s_dialog_is_conversation = false;
         s_speech_revision = snapshot->speech_revision;
     }
     if (snapshot->target_object_id[0] != '\0' &&
@@ -607,6 +612,82 @@ void ui_home_actor_apply_snapshot(const world_service_snapshot_t *snapshot)
         ESP_LOGW(TAG,
                  "VERIFY:phase3d:ui_agent_offline:PASS released_target=%s fallback_room=%s",
                  previous_target, world_service_room_text(snapshot->room));
+    }
+}
+
+void ui_home_actor_apply_conversation(const conversation_snapshot_t *snapshot)
+{
+    if (snapshot == NULL || !snapshot->available) {
+        return;
+    }
+    const conversation_update_t *update = &snapshot->update;
+    if (s_dialog_is_conversation && update->epoch == s_conversation_epoch &&
+        update->revision == s_conversation_revision) {
+        return;
+    }
+
+    const char *role = "结果";
+    uint32_t accent = UI_PAL_ACCENT_CYAN;
+    switch (update->response_role) {
+    case CONVERSATION_ROLE_HUMAN:
+        role = "Human";
+        accent = UI_PAL_ACCENT_VIOLET;
+        break;
+    case CONVERSATION_ROLE_ROBOT:
+        role = "Robot";
+        accent = UI_PAL_LAMP_HI;
+        break;
+    case CONVERSATION_ROLE_MIXED:
+        role = "Human + Robot";
+        accent = UI_PAL_COOL_LIGHT;
+        break;
+    case CONVERSATION_ROLE_SYSTEM:
+        role = "系统";
+        accent = UI_PAL_MUTED;
+        break;
+    case CONVERSATION_ROLE_NONE:
+    default:
+        break;
+    }
+
+    switch (update->stage) {
+    case CONVERSATION_STAGE_LISTENING:
+        snprintf(s_conversation_dialog, sizeof(s_conversation_dialog), "正在聆听…");
+        break;
+    case CONVERSATION_STAGE_TRANSCRIBING:
+        snprintf(s_conversation_dialog, sizeof(s_conversation_dialog),
+                 update->user_text[0] == '\0' ? "正在识别…" : "你：%s\n正在识别…",
+                 update->user_text);
+        break;
+    case CONVERSATION_STAGE_THINKING:
+        snprintf(s_conversation_dialog, sizeof(s_conversation_dialog),
+                 "你：%s\n正在思考…", update->user_text);
+        break;
+    case CONVERSATION_STAGE_COMPLETED:
+        snprintf(s_conversation_dialog, sizeof(s_conversation_dialog),
+                 "你：%s\n%s：%s", update->user_text, role, update->response_text);
+        break;
+    case CONVERSATION_STAGE_FAILED:
+    case CONVERSATION_STAGE_CANCELLED:
+        snprintf(s_conversation_dialog, sizeof(s_conversation_dialog),
+                 "%s：%s", role, update->response_text);
+        break;
+    default:
+        return;
+    }
+
+    ui_home_actor_say(s_conversation_dialog, accent, false);
+    s_dialog_is_conversation = true;
+    s_conversation_epoch = update->epoch;
+    s_conversation_revision = update->revision;
+    ESP_LOGW(TAG,
+             "VERIFY:phase5e:ui_conversation:PASS epoch=%lu revision=%lu stage=%s role=%s execution=%s",
+             (unsigned long)update->epoch, (unsigned long)update->revision,
+             conversation_service_stage_text(update->stage),
+             conversation_service_role_text(update->response_role),
+             conversation_service_execution_text(update->execution_status));
+    if (conversation_service_mark_rendered(update) != ESP_OK) {
+        ESP_LOGW(TAG, "conversation render acknowledgement rejected");
     }
 }
 
@@ -694,7 +775,7 @@ esp_err_t ui_home_actor_create_dialog(lv_obj_t *parent, int32_t art_w, int32_t a
     return ESP_OK;
 }
 
-static void ui_home_actor_say(const char *text, uint32_t accent)
+static void ui_home_actor_say(const char *text, uint32_t accent, bool log_text)
 {
     if (text == NULL || s_dialog_label == NULL) {
         return;
@@ -726,5 +807,9 @@ static void ui_home_actor_say(const char *text, uint32_t accent)
                                       lv_color_hex(accent), LV_PART_MAIN);
         }
     }
-    ESP_LOGI(TAG, "say: %s", s_dialog_full);
+    if (log_text) {
+        ESP_LOGI(TAG, "say: %s", s_dialog_full);
+    } else {
+        ESP_LOGI(TAG, "voice dialog updated bytes=%u", (unsigned)s_dialog_length);
+    }
 }

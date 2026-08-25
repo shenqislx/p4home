@@ -21,6 +21,7 @@ import {
 } from "@p4home/contracts";
 import {
   AggregateVoiceCaptureSink,
+  ConversationUiDeliveryError,
   VoiceWebSocketServer,
 } from "@p4home/runtime";
 import WebSocket from "ws";
@@ -242,6 +243,76 @@ test("independent voice channel authenticates and aggregates bounded PCM without
     eos: true,
   }]);
   assert.equal("payload" in sink.completed[0]!, false);
+});
+
+test("authenticated P4 acknowledges bounded Conversation UI updates independently of voice control", async (t) => {
+  const server = new VoiceWebSocketServer({
+    host: "127.0.0.1",
+    port: 0,
+    device_tokens: { [DEVICE_ID]: DEVICE_TOKEN },
+    allow_insecure_loopback_test: true,
+  });
+  const address = await server.start();
+  t.after(async () => server.close());
+  const socket = await connect(address);
+  t.after(() => socket.terminate());
+
+  const update = {
+    ui_protocol_version: 1,
+    type: "ui.update",
+    session_id: SESSION_ID,
+    stream_id: 7,
+    epoch: 1,
+    revision: 1,
+    stage: "completed",
+    user_text: "打开书房灯",
+    response_text: "书房灯已打开。",
+    response_role: "robot",
+    execution_status: "completed",
+  } as const;
+  const delivery = server.presentConversationUi(DEVICE_ID, update);
+  const received = await nextControl(socket) as unknown as typeof update;
+  assert.deepEqual(received, update);
+  assert.equal(server.pending_conversation_ui_count, 1);
+  socket.send(JSON.stringify({
+    ui_protocol_version: 1,
+    type: "ui.applied",
+    session_id: SESSION_ID,
+    stream_id: 7,
+    epoch: 1,
+    revision: 1,
+  }));
+  assert.deepEqual(await delivery, {
+    schema_version: 1,
+    device_id: DEVICE_ID,
+    session_id: SESSION_ID,
+    stream_id: 7,
+    epoch: 1,
+    revision: 1,
+    status: "completed",
+  });
+  assert.equal(server.pending_conversation_ui_count, 0);
+
+  const controller = new AbortController();
+  const cancelled = server.presentConversationUi(
+    DEVICE_ID, { ...update, revision: 2 }, undefined, controller.signal,
+  );
+  await nextControl(socket);
+  controller.abort();
+  await assert.rejects(cancelled, (error: unknown) => (
+    error instanceof ConversationUiDeliveryError && error.code === "CANCELLED"
+  ));
+  assert.equal(server.pending_conversation_ui_count, 0);
+  const closed = waitClosed(socket);
+  socket.send(JSON.stringify({
+    ui_protocol_version: 1,
+    type: "ui.applied",
+    session_id: SESSION_ID,
+    stream_id: 7,
+    epoch: 1,
+    revision: 2,
+  }));
+  assert.equal(await closed, 1008);
 });
 
 test("voice reconnect requires a higher persisted epoch and invalidates the old socket", async (t) => {

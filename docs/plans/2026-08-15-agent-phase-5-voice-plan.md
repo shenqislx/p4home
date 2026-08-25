@@ -3,7 +3,9 @@
 > Status: `pending_real_environment`
 > Started: 2026-08-23
 > Current Gate: 5D TTS/播放/barge-in 技术门禁通过；5E 真实硬件/HA/语音总门禁因当前
-> WSL2 开发环境不具备验证条件而保持 `pending`
+> WSL2 开发环境不具备验证条件而保持 `pending`。2026-08-25 用户在 Phase 7 前审计中确认
+> 当前尚缺 Human/Robot 响应到 P4 UI 的产品闭环，并明确授权先完成 5E 无扬声器闭环；Phase 7
+> 继续保持 `pending`。
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用
 
@@ -31,6 +33,12 @@ P4 固定离线命令、触摸、HA 与 UI 主链。
    全部低优先级 Cat Run；已发送的 Robot 写请求沿用 Phase 4 `unknown`/reconciliation 语义；
 9. Agent/STT/TTS 离线不得破坏固定离线命令、P4 ↔ HA、触摸、Cat fallback 或稳态 UI 8 FPS；
 10. Cat 不接收用户原始音频、STT 原文或 voice session；Cat 发声不在本 Phase 偷渡。
+11. Voice UI 是独立的只读呈现通道，不复用 Cat 的 `character.say`，不修改 World 语义真值，也不
+    允许 UI 文本反向创建 ToolCall；所有 update 必须绑定活动 capture 的 session/stream/epoch，旧
+    epoch 和回退 revision 必须拒绝；
+12. 扬声器缺失时，`role_execution` 与 `ui_delivery` 是无扬声器闭环的阻断项，
+    `audio_delivery=deferred` 不是失败。HA/Robot 终态、UI 投递和音频投递必须分别记录，任何一个
+    通道都不能改写另一个通道的事实。
 
 ## 3. 启动准备（已完成）
 
@@ -128,6 +136,8 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
 
 只有 5D review 通过后开始：
 
+进行中证据：[Phase 5E Conversation UI Speakerless Closure](../../evidence/agent-phase-5/phase-5e-conversation-ui-speakerless.md)。
+
 - [ ] 加入认证绕过、frame 洪水、超长会话、序号回退、旧 epoch、恶意 transcript、TTS 注入、
   provider 离线/慢响应、P4/HA/Agent 任一断线和进程恢复 holdout；
 - [ ] 核对 Git、日志、SQLite、进程参数和 CI artifact 不含 token 或非 opt-in 原始音频；
@@ -136,6 +146,18 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
   result/state change、P4 回刷、分角色播放和审计关联；
 - [ ] 验证 barge-in、超时、断线、Agent/STT/TTS 离线恢复，以及长跑期间固定命令、触摸、P4 ↔ HA、
   Cat fallback、资源/栈/看门狗和 UI 8 FPS；人工观察不得用自动 marker 冒充。
+- [x] 冻结独立的 Conversation UI Protocol v1：Agent 只能下发有界、已组合的展示文本和结构化
+  execution status；P4 必须以 active epoch/revision fencing 接受，并在 LVGL 对话框显示用户 final
+  transcript 与 Human/Robot 结果；不得借用 Cat `character.say`；
+- [x] 增加常驻产品组装入口，接入真实 Ollama、STT、统一 Router、Robot HA、private Memory、UI，
+  并允许在无扬声器 profile 中显式禁用 TTS/playback；测试/硬件 harness 不能冒充常驻入口；
+- [ ] 在无扬声器条件下先完成真实 P4 的聊天、HA 只读、低风险写入/恢复三条路径，要求
+  `role_execution=completed`、`ui_delivery=completed`，并把 `audio_delivery=deferred` 单独披露；
+  串口 `VERIFY:`、Agent/SQLite 审计、HA state_changed 与用户可见 UI 观察必须相互一致。
+  - [x] 独立 `phase5e_ui` workflow profile、真实模型/HA/STT harness、一次性写入恢复、UI ACK、
+    speakerless input driver、artifact 隐私审计和 manifest 字段已实现并通过本地静态/单元门禁；
+  - [ ] 提交并推送待测 commit 后触发真实 P4 run，下载 artifact 并按 manifest-first 协议判定；
+  - [ ] 用户核对 P4 对话框的三轮可见文本，人工观察不由串口 marker 代替。
 
 退出门禁：所有 5A–5E 技术门禁与真实环境证据通过，再交由用户最终 review。workflow 绿色只证明
 构建/烧录/采集/上传链完成；必须先核对 manifest，再用原始 `VERIFY:` marker、音频指标、HA/Agent
@@ -144,6 +166,8 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
 ## 9. 完成定义
 
 - [ ] 本地唤醒到 Human 对话与 Robot 家控闭环稳定完成；
+- [ ] 无扬声器时，final transcript 与确定性 Composer 结果可在 P4 UI 对话框显示；UI 投递失败不
+  冒充 HA/Role 执行失败，Role 执行成功也不冒充 UI 已显示；
 - [ ] Router、上下文、Tool 权限、Composer 文本和 TTS 播放不串角色；
 - [ ] barge-in、timeout、断线、迟到数据和进程恢复均有确定性终态；
 - [ ] Agent/STT/TTS 离线不破坏固定命令、触摸、P4 ↔ HA、Cat fallback 与 UI；

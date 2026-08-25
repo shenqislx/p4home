@@ -23,7 +23,7 @@ export interface UnifiedVoiceRuntimeOptions {
   readonly stt: Omit<VoiceSttPipelineOptions, "dispatch_final" | "on_capture_open">;
   readonly interaction: Omit<
     VoiceInteractionCoordinatorOptions,
-    "device_ids" | "playback" | "cancel_low_priority_cat"
+    "device_ids" | "playback" | "present_ui" | "cancel_low_priority_cat"
   >;
   readonly cat_run_registry?: LowPriorityCatRunRegistry;
 }
@@ -50,6 +50,10 @@ export class UnifiedVoiceRuntime {
       ...options.interaction,
       device_ids: deviceIds,
       playback: async (deviceId, pcm, signal) => await server.playback(deviceId, pcm, signal),
+      present_ui: async (deviceId, update, signal) => {
+        if (signal.aborted) throw signal.reason;
+        return await server.presentConversationUi(deviceId, update, undefined, signal);
+      },
       cancel_low_priority_cat: () => { this.cat_run_registry.cancelAll("barge_in"); },
     });
     const bindings = bindVoiceInteractionCoordinator(this.coordinator);

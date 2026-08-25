@@ -1,9 +1,25 @@
+import { isDeepStrictEqual } from "node:util";
+
+import {
+  CONVERSATION_UI_MAX_RESPONSE_BYTES,
+  CONVERSATION_UI_MAX_RESPONSE_CHARS,
+  CONVERSATION_UI_MAX_USER_BYTES,
+  CONVERSATION_UI_MAX_USER_CHARS,
+  validateConversationUiUpdate,
+  type ConversationUiUpdate,
+} from "@p4home/contracts";
+import { TTS_MAX_PCM_BYTES, TTS_ROLE_VOICES, TTS_SAMPLE_RATE_HZ } from "@p4home/provider-tts";
+
 import type { ComposedRoleResponse } from "./role-response-composer.ts";
 import type { RunRoleInteractionResult } from "./role-orchestrator.ts";
 import type { UserTextInteraction } from "./role-contracts.ts";
 import type { RoleAwareTtsResult, RoleAwareTtsSegment } from "./role-aware-tts.ts";
 import type { VoicePlaybackSummary } from "./voice-playback-sender.ts";
-import type { VoiceCaptureSummary, VoiceDispatchContext } from "./voice-websocket-server.ts";
+import type {
+  ConversationUiDeliverySummary,
+  VoiceCaptureSummary,
+  VoiceDispatchContext,
+} from "./voice-websocket-server.ts";
 
 const MAX_RESULT_HISTORY = 4_096;
 
@@ -13,7 +29,14 @@ export type VoiceInteractionOutcome =
   | "playback_failed"
   | "role_failed"
   | "stale"
-  | "tts_failed";
+  | "tts_failed"
+  | "ui_failed";
+
+export type VoiceRoleExecutionStatus = "cancelled" | "completed" | "failed" | "partial" | "stale";
+export type VoiceUiDeliveryStatus =
+  | "cancelled" | "completed" | "disabled" | "failed" | "not_attempted";
+export type VoiceAudioDeliveryStatus =
+  | "cancelled" | "completed" | "deferred" | "failed" | "not_attempted";
 
 export interface VoicePlaybackSegmentResult {
   readonly assignment_id: string;
@@ -31,6 +54,9 @@ export interface VoiceInteractionResult extends VoiceDispatchContext {
   readonly schema_version: 1;
   readonly interaction_id: string;
   readonly outcome: VoiceInteractionOutcome;
+  readonly role_execution: VoiceRoleExecutionStatus;
+  readonly ui_delivery: VoiceUiDeliveryStatus;
+  readonly audio_delivery: VoiceAudioDeliveryStatus;
   readonly role_response: ComposedRoleResponse | null;
   readonly composition_audit_status: RunRoleInteractionResult["composition_audit_status"] | null;
   readonly playback_segments: readonly VoicePlaybackSegmentResult[];
@@ -47,12 +73,12 @@ export interface VoiceInteractionCoordinatorOptions {
     interaction: UserTextInteraction,
     signal: AbortSignal,
   ) => Promise<RunRoleInteractionResult>;
-  readonly render_tts: (
+  readonly render_tts?: (
     interactionId: string,
     response: ComposedRoleResponse,
     signal: AbortSignal,
   ) => Promise<RoleAwareTtsResult>;
-  readonly playback: (
+  readonly playback?: (
     deviceId: string,
     pcm: Uint8Array,
     signal: AbortSignal,
@@ -61,6 +87,13 @@ export interface VoiceInteractionCoordinatorOptions {
     reason: "barge_in",
     context: VoiceDispatchContext,
   ) => void;
+  readonly ui_output?: "disabled" | "required";
+  readonly audio_output?: "disabled" | "required";
+  readonly present_ui?: (
+    deviceId: string,
+    update: ConversationUiUpdate,
+    signal: AbortSignal,
+  ) => Promise<ConversationUiDeliverySummary>;
   readonly clock?: () => number;
   readonly max_results?: number;
 }
@@ -96,6 +129,91 @@ function assertContext(context: VoiceDispatchContext): void {
       || !Number.isInteger(context.epoch) || context.epoch < 1) {
     throw new TypeError("voice interaction context is invalid");
   }
+}
+
+function boundedUiText(value: string, maxChars: number, maxBytes: number): string {
+  const normalized = value.trim();
+  if ([...normalized].length <= maxChars && Buffer.byteLength(normalized, "utf8") <= maxBytes) {
+    return normalized;
+  }
+  const suffix = "…";
+  const output: string[] = [];
+  let bytes = Buffer.byteLength(suffix, "utf8");
+  for (const character of normalized) {
+    const nextBytes = Buffer.byteLength(character, "utf8");
+    if (output.length + 1 >= maxChars || bytes + nextBytes > maxBytes) break;
+    output.push(character);
+    bytes += nextBytes;
+  }
+  return `${output.join("")}${suffix}`;
+}
+
+function conversationResponseRole(response: ComposedRoleResponse): ConversationUiUpdate["response_role"] {
+  const roles = new Set(response.parts.map((part) => part.role_id));
+  if (roles.size > 1) return "mixed";
+  return roles.has("robot") ? "robot" : "human";
+}
+
+function conversationExecutionStatus(
+  response: ComposedRoleResponse,
+): ConversationUiUpdate["execution_status"] {
+  const terminals = response.parts.flatMap((part) => part.tool_results);
+  if (terminals.some((terminal) => terminal.status === "error"
+      && terminal.error.code === "HA_OUTCOME_UNKNOWN")) return "unknown";
+  if (response.status === "failed" || response.status === "partial"
+      || terminals.some((terminal) => terminal.status === "error")) return "failed";
+  return terminals.length === 0 ? "not_applicable" : "completed";
+}
+
+function completedConversationUiUpdate(
+  interaction: UserTextInteraction,
+  response: ComposedRoleResponse,
+  context: VoiceDispatchContext,
+  revision: number,
+): ConversationUiUpdate {
+  if (response.parts.length === 0 || response.text.trim().length === 0) {
+    throw new TypeError("conversation UI requires a composed role response");
+  }
+  return validateConversationUiUpdate({
+    ui_protocol_version: 1,
+    type: "ui.update",
+    session_id: context.session_id,
+    stream_id: context.stream_id,
+    epoch: context.epoch,
+    revision,
+    stage: "completed",
+    user_text: boundedUiText(
+      interaction.text, CONVERSATION_UI_MAX_USER_CHARS, CONVERSATION_UI_MAX_USER_BYTES,
+    ),
+    response_text: boundedUiText(
+      response.text, CONVERSATION_UI_MAX_RESPONSE_CHARS, CONVERSATION_UI_MAX_RESPONSE_BYTES,
+    ),
+    response_role: conversationResponseRole(response),
+    execution_status: conversationExecutionStatus(response),
+  });
+}
+
+function roleExecutionStatus(
+  outcome: VoiceInteractionOutcome,
+  response: ComposedRoleResponse | null,
+): VoiceRoleExecutionStatus {
+  if (outcome === "stale") return "stale";
+  if (response !== null) return response.status;
+  if (outcome === "cancelled") return "cancelled";
+  return "failed";
+}
+
+function defaultAudioDelivery(
+  outcome: VoiceInteractionOutcome,
+  audioOutput: "disabled" | "required",
+): VoiceAudioDeliveryStatus {
+  if (audioOutput === "disabled") return "deferred";
+  if (outcome === "completed") return "completed";
+  if (outcome === "cancelled") return "cancelled";
+  if (outcome === "role_failed" || outcome === "stale" || outcome === "ui_failed") {
+    return "not_attempted";
+  }
+  return "failed";
 }
 
 function abortError(reason: string): DOMException {
@@ -189,6 +307,8 @@ export class VoiceInteractionCoordinator {
   readonly #results: VoiceInteractionResult[] = [];
   readonly #deviceIds: ReadonlySet<string>;
   readonly #maxResults: number;
+  readonly #uiOutput: "disabled" | "required";
+  readonly #audioOutput: "disabled" | "required";
   #closed = false;
 
   public constructor(options: VoiceInteractionCoordinatorOptions) {
@@ -206,9 +326,20 @@ export class VoiceInteractionCoordinator {
     if (!Number.isInteger(maxResults) || maxResults < 0 || maxResults > MAX_RESULT_HISTORY) {
       throw new RangeError("voice interaction result history must be bounded");
     }
+    const uiOutput = options.ui_output ?? "disabled";
+    const audioOutput = options.audio_output ?? "required";
+    if (uiOutput === "required" && options.present_ui === undefined) {
+      throw new TypeError("required conversation UI output needs a presenter");
+    }
+    if (audioOutput === "required"
+        && (options.render_tts === undefined || options.playback === undefined)) {
+      throw new TypeError("required audio output needs TTS and playback");
+    }
     this.#options = options;
     this.#deviceIds = deviceIds;
     this.#maxResults = maxResults;
+    this.#uiOutput = uiOutput;
+    this.#audioOutput = audioOutput;
   }
 
   public onCaptureOpen(summary: VoiceCaptureSummary): void {
@@ -261,9 +392,11 @@ export class VoiceInteractionCoordinator {
     const active = { epoch: context.epoch, controller };
     this.#active.set(context.device_id, active);
 
-    let stage: "role" | "tts" | "playback" = "role";
+    let stage: "role" | "ui" | "tts" | "playback" = "role";
     let roleResult: RunRoleInteractionResult | null = null;
     let rendered: RoleAwareTtsResult | null = null;
+    let uiDelivery: VoiceUiDeliveryStatus = this.#uiOutput === "disabled"
+      ? "disabled" : "not_attempted";
     const playbackSegments: VoicePlaybackSegmentResult[] = [];
     const playbackIdentities = new Set<string>();
     try {
@@ -279,8 +412,38 @@ export class VoiceInteractionCoordinator {
           roleResult.composition_audit_status, [], 0, 0, startedAtMs,
         ));
       }
+      if (this.#uiOutput === "required") {
+        stage = "ui";
+        const presenter = this.#options.present_ui;
+        if (presenter === undefined) throw new TypeError("conversation UI presenter is unavailable");
+        const update = completedConversationUiUpdate(interaction, roleResult.response, context, 1);
+        const delivery = await presenter(context.device_id, update, controller.signal);
+        if (delivery.schema_version !== 1 || delivery.status !== "completed"
+            || delivery.device_id !== context.device_id
+            || delivery.session_id !== context.session_id
+            || delivery.stream_id !== context.stream_id
+            || delivery.epoch !== context.epoch || delivery.revision !== update.revision) {
+          throw new TypeError("conversation UI delivery identity is invalid");
+        }
+        uiDelivery = "completed";
+      }
+      if (controller.signal.aborted) {
+        return this.#record(this.#result(
+          interaction.interaction_id, context, "cancelled", roleResult.response,
+          roleResult.composition_audit_status, [], 0, 0, startedAtMs,
+          uiDelivery === "completed" ? "completed" : "cancelled",
+          this.#audioOutput === "disabled" ? "deferred" : "not_attempted",
+        ));
+      }
+      if (this.#audioOutput === "disabled") {
+        return this.#record(this.#result(
+          interaction.interaction_id, context, "completed", roleResult.response,
+          roleResult.composition_audit_status, [], 0, 0, startedAtMs,
+          uiDelivery, "deferred",
+        ));
+      }
       stage = "tts";
-      rendered = await this.#options.render_tts(
+      rendered = await this.#options.render_tts!(
         interaction.interaction_id, roleResult.response, controller.signal,
       );
       assertRenderedResult(rendered, interaction.interaction_id, roleResult.response);
@@ -294,7 +457,7 @@ export class VoiceInteractionCoordinator {
       stage = "playback";
       for (const segment of rendered.segments) {
         if (controller.signal.aborted) break;
-        const playback = await this.#options.playback(
+        const playback = await this.#options.playback!(
           context.device_id, segment.pcm, controller.signal,
         );
         assertPlaybackSummary(
@@ -330,20 +493,30 @@ export class VoiceInteractionCoordinator {
         rendered.pcm_bytes,
         rendered.duration_ms,
         startedAtMs,
+        uiDelivery,
+        controller.signal.aborted || playbackCancelled ? "cancelled"
+          : completed ? "completed" : "failed",
       ));
     } catch {
+      const cancelled = controller.signal.aborted;
       return this.#record(this.#result(
         interaction.interaction_id,
         context,
-        controller.signal.aborted
+        cancelled
           ? "cancelled"
-          : stage === "role" ? "role_failed" : stage === "tts" ? "tts_failed" : "playback_failed",
+          : stage === "role" ? "role_failed"
+            : stage === "ui" ? "ui_failed"
+              : stage === "tts" ? "tts_failed" : "playback_failed",
         roleResult?.response ?? null,
         roleResult?.composition_audit_status ?? null,
         playbackSegments,
         rendered?.pcm_bytes ?? 0,
         rendered?.duration_ms ?? 0,
         startedAtMs,
+        stage === "ui" ? cancelled ? "cancelled" : "failed" : uiDelivery,
+        this.#audioOutput === "disabled" ? "deferred"
+          : stage === "role" || stage === "ui" ? "not_attempted"
+            : cancelled ? "cancelled" : "failed",
       ));
     } finally {
       upstreamSignal.removeEventListener("abort", onUpstreamAbort);
@@ -383,12 +556,18 @@ export class VoiceInteractionCoordinator {
     ttsPcmBytes: number,
     ttsDurationMs: number,
     startedAtMs: number,
+    uiDelivery: VoiceUiDeliveryStatus = this.#uiOutput === "disabled"
+      ? "disabled" : "not_attempted",
+    audioDelivery: VoiceAudioDeliveryStatus = defaultAudioDelivery(outcome, this.#audioOutput),
   ): VoiceInteractionResult {
     return {
       schema_version: 1,
       ...context,
       interaction_id: interactionId,
       outcome,
+      role_execution: roleExecutionStatus(outcome, roleResponse),
+      ui_delivery: uiDelivery,
+      audio_delivery: audioDelivery,
       role_response: roleResponse === null ? null : structuredClone(roleResponse),
       composition_audit_status: auditStatus,
       playback_segments: structuredClone(playbackSegments),
@@ -419,12 +598,10 @@ export function bindVoiceInteractionCoordinator(
     dispatch_final: async (interaction, signal, context) => {
       const result = await coordinator.run(interaction, signal, context);
       if (result.outcome === "role_failed" || result.outcome === "stale"
+          || result.outcome === "ui_failed"
           || (result.outcome === "cancelled" && signal.aborted)) {
         throw new Error(`voice interaction did not dispatch: ${result.outcome}`);
       }
     },
   };
 }
-import { isDeepStrictEqual } from "node:util";
-
-import { TTS_MAX_PCM_BYTES, TTS_ROLE_VOICES, TTS_SAMPLE_RATE_HZ } from "@p4home/provider-tts";

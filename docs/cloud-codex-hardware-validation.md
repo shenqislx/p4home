@@ -47,7 +47,7 @@ Actions secret。workflow 只把解码结果写入 `$RUNNER_TEMP`，不会复制
 
 | 参数 | 默认值 | 约束 |
 |---|---|---|
-| `validation_profile` | `generic` | `generic`、`phase2d_agent`、`phase3d_object`、`phase4c_ha`、`phase5a_voice`、`phase5b_voice`、`phase5c_stt`、`phase5e_e2e` 或 `phase6h_cat_memory` |
+| `validation_profile` | `generic` | `generic`、`phase2d_agent`、`phase3d_object`、`phase4c_ha`、`phase5a_voice`、`phase5b_voice`、`phase5c_stt`、`phase5e_e2e`、`phase5e_ui` 或 `phase6h_cat_memory` |
 | `serial_port` | `/dev/cu.usbserial-210` | runner 上的字符设备 |
 | `monitor_seconds` | `120` | `10–7200` 秒 |
 | `agent_host` | 空 | Agent profile 时必填；P4 可访问的 runner LAN host |
@@ -85,6 +85,15 @@ runner 临时 sdkconfig 中打开 audio startup selftest、ESP-SR 和 Phase 5A m
 transport；它不创建 Voice socket、不向 Agent 发送 PCM，也不接入 STT/TTS。自动证据覆盖 codec、
 非零 PCM、AFE feed/fetch、lease、资源/看门狗和 UI；真实 `Hi ESP`、`turn on the light` 口播与
 speaker 可听播放属于人工观察，必须和自动 marker 分开报告。
+
+Phase 5E 无扬声器闭环使用独立的 `phase5e_ui`，`monitor_seconds` 至少为 900 秒。runner 通过
+Mac 系统扬声器只生成固定的麦克风测试输入，依次覆盖 Robot 读取、Robot 写入并恢复，以及 Human
+聊天；Agent 使用固定版本 STT、真实 Ollama 模型、非管理员 Robot HA 身份、生产 Memory/审计策略，
+并将 `ui_output` 设为 `required`、`audio_output` 设为 `disabled`。每轮只有在 P4 Home 页面实际接受
+对话更新并回送匹配的 `ui.applied` 后才算完成。上传证据必须同时出现 3 个
+`VERIFY:phase5e:ui_conversation:PASS`、3 个 `VERIFY:phase5e:ui_applied:PASS`、Agent 汇总
+`VERIFY:phase5e:voice_ui_e2e:PASS` 与隐私审计 marker；不得出现 playback opened。P4 扬声器输出在
+该 profile 中明确记为 deferred，不作为失败，也不得被报告为通过。
 
 Phase 6H Cat + Memory 使用独立的 `phase6h_cat_memory`，`monitor_seconds` 至少为 120 秒，
 Device Protocol 固定为 v2。runner 在 `0700` 临时目录创建 `0600` SQLite，只写入一条 Cat-private、
@@ -144,6 +153,10 @@ Robot 客户端关闭后的 P4 standalone/8 FPS 状态，以及串口实体 ID �
 `phase5a_audio_selftest_enabled=true` 与 `phase5a_agent_transport_disabled=true`。这些字段只证明专用
 构建边界，不能替代非零 PCM、AFE、wake、固定命令、播放和稳态 marker；人工听觉观察也不能由
 manifest 推断。
+`phase5e_ui` 还记录 `phase5e_ui_input_driver_status=0`、固定 STT 版本、Agent gate 结果与
+`phase5e_artifact_audit_status=pass`。Mac input driver 成功只证明测试语音已注入，不能替代 P4 UI
+渲染/ACK marker、真实模型调用、HA 读写恢复和 Agent 汇总判定。harness 或 input driver 的业务
+失败不会阻断已通过隐私审计的证据上传；隐私审计失败仍会 fail closed 并跳过 Phase 5E artifact。
 
 ## 5. 判定顺序
 
