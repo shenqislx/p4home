@@ -1,8 +1,8 @@
 # Phase 6 Real-environment Gate Evidence
 
 > Date: 2026-08-24
-> Status: `ready_for_final_review`
-> Plan: [Phase 6 real-environment gates](../../docs/plans/2026-08-24-agent-phase-6-real-environment-gates-plan.md)
+> Status: `completed_with_accepted_deferrals`
+> Plan: [Phase 6 real-environment gates](../../docs/archive/plans/agent/2026-08-24-agent-phase-6-real-environment-gates-plan.md)
 
 ## 6F real-model Memory gate — PASS
 
@@ -181,6 +181,14 @@ rotation or media-level secure delete.
   2026-08-25;
 - household multi-user/subject identity model — deferred 2026-08-25.
 
-Quota/retention revision 1 is approved, implemented and commit-bound. Phase 6 is ready for final
-review. Deferred items remain unvalidated, not failed. Phase 7 remains unauthorized and has not
-started.
+Quota/retention revision 1 is approved, implemented and commit-bound. On 2026-08-25 the user passed
+final review, accepted all deferred items listed above and closed Phase 6. Deferred items remain
+unvalidated, not failed. Phase 7 remains unauthorized and has not started.
+
+Closure regression on macOS arm64 / Node `v24.19.0`:
+
+- `pnpm gate:phase6`: PASS;
+- Phase 6B/6C runtime tests: `21/21` PASS;
+- Memory evaluator tests: `15/15` PASS;
+- storage tests: `48/48` PASS;
+- deterministic Phase 6 report independently verified and atomically published.

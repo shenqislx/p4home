@@ -1,11 +1,13 @@
 # Agent Phase 6 — Memory Plan
 
-> Status: `ready_for_final_review`
+> Status: `completed`
 > Started: 2026-08-24
-> Current Gate: 6F 真实模型、6G HA、6H P4 Cat + Memory 和 6I quota/retention 已通过；
-> Voice + Memory 与其余家庭侧/物理门禁经用户决定延期，等待最终 review；
+> Completed: 2026-08-25
+> Reviewed: 2026-08-25
+> Closure: 6F、6G、6H P4 Cat + Memory 和 6I quota/retention 已通过；
+> 用户接受 Voice + Memory 与其余家庭侧/物理门禁延期；
 > Phase 7 等待另行明确授权
-> Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
+> Architecture: [P4 Local Agent Architecture](../../../p4-local-agent-architecture.md)
 > Depends on: Phase 2 stable; Router/Robot/Human/Cat 专项 eval 骨架 established
 > Execution Environment: 6A–6E 为 WSL2 本地/模拟验证；6F/6G/6I 已在 macOS 真实环境执行，
 > 6H P4 Cat + Memory 已在 ESP32-P4 实机执行；Voice/家庭数据/其余物理与身份门禁延期
@@ -14,8 +16,9 @@
 [Phase 6 真实环境门禁计划](./2026-08-24-agent-phase-6-real-environment-gates-plan.md)。
 6F 真实 35B + 脱敏合成 Memory 门禁已通过；6G 真实 HA 只读真值门禁已从
 干净工作树复跑通过并绑定提交 `7e9aa4d`。6I 的 APFS 权限、WAL/NORMAL、受控
-`SIGKILL`、完整性/损坏拒绝、在线备份和 checkpoint 冷备份子门禁已从干净工作树复跑通过并
-production-policy 刷新证据绑定提交 `899b746`。6H P4 Cat + Memory run `32819132030` 已通过并绑定 `9688887`；
+`SIGKILL`、完整性/损坏拒绝、在线备份和 checkpoint 冷备份子门禁已从干净工作树复跑通过；
+production-policy 刷新证据绑定提交 `899b746`。6H P4 Cat + Memory run `32819132030` 已通过并绑定
+`9688887`；
 quota/retention revision 1 参数已获批并实现。Voice + Memory、真实家庭数据、真实断电、
 加密/介质级删除与家庭身份门禁于 2026-08-25 经用户决定延期，仍属未验证而非通过。
 
@@ -275,9 +278,9 @@ visibility matrix v1 保持 private。
   `42/43`、相同命令立即复跑 `43/43`；Voice 隔离稳定 `14/15`、`socket hang up`。
   这些失败未被 gate 吞掉或改写成全仓库通过，且未修改无关 Voice；
 - 本地证据见
-  [phase-6e-local-gate.md](../../evidence/agent-phase-6/phase-6e-local-gate.md)；
+  [phase-6e-local-gate.md](../../../../evidence/agent-phase-6/phase-6e-local-gate.md)；
   用户已批准的版本化矩阵见
-  [visibility-matrix.md](../../evidence/agent-phase-6/visibility-matrix.md)；
+  [visibility-matrix.md](../../../../evidence/agent-phase-6/visibility-matrix.md)；
 - 所有真实环境项目均以 `status=pending` 逐项记录：真实 `qwen3.6:35b-mlx` grounded answer/
   prompt injection、代表性家庭 recall/precision/conflict、真实 HA Robot + Memory（HA 仍是真值）、
   真实 P4 Cat + Memory（World 仍是真值）、长期 SQLite/WAL/crash/power-loss/backup/quota/retention/
@@ -320,15 +323,25 @@ visibility matrix v1 保持 private。
   产品召回。最新完整 `pnpm test` 仍引用既有 `383/389` 失败结果，不改写为 pass。
 
 退出门禁：编码、本地模拟门禁、visibility matrix v1 private 裁决、6F/6G/6H Cat 与 6I
-quota/retention 已完成；经用户延期的 Voice/家庭数据/物理/身份项保持未验证。完成本轮
-commit-bound 6I evidence 后进入 Phase 6 最终 review，不自动授权 Phase 7。
+quota/retention 已完成。2026-08-25 用户最终 review 通过，接受 Voice/家庭数据/物理/身份项延期，
+Phase 6 正式关闭。延期项保持未验证，不自动授权 Phase 7。
 
 ## 8. 完成定义
 
 - [x] 记忆来源可追踪、可删除；
 - [x] 确定性写入策略拒绝凭证和原始音频候选，evidence 不保存 Memory 正文；
 - [x] 实现与 6G/6H Cat 实机证据保持 World State 从 P4/HA 读取，Memory 不作为真值；
-- [x] 召回效果有确定性量化证据；真实模型和代表性家庭效果仍 pending；
+- [x] 召回效果有确定性量化证据；真实模型门禁通过，代表性家庭效果由用户接受延期；
 - [x] 角色记忆可见性有量化对照，且用户已确认 v1 保持 private；跨角色读取不会隐式发生；
-- [x] WSL2 无法完成的真实环境验证已逐项记录为 `pending`；
-- [ ] Phase 7 获得另行明确授权并启动（当前未授权、未启动）。
+- [x] 未完成的真实环境验证已逐项记录，并由用户最终 review 接受延期；
+- Phase 7 仍需另行明确授权（当前未授权、未启动）。
+
+## 9. 最终 review 与关闭
+
+2026-08-25，用户明确裁决“review 通过，接受上述延期并关闭”：
+
+- Phase 6 技术与已选真实环境门禁通过，最终 review 通过；
+- Voice + Memory、代表性家庭数据、真实断电、加密/密钥轮换/身份绑定、介质级 secure-delete、
+  家庭多用户/subject 身份作为已接受延期项保留，状态仍为未验证；
+- Phase 6 状态改为 `completed` 并归档；
+- 本裁决不关闭 Phase 5 的语音真实环境门禁，也不构成 Phase 7 启动授权。

@@ -776,7 +776,7 @@ startup tone 人工观察待补；5D 分角色 TTS、播放与 barge-in 技术�
 
 ### Phase 6 — Memory
 
-执行计划：[Phase 6 — Memory](./plans/2026-08-15-agent-phase-6-memory-plan.md)
+归档计划：[Phase 6 — Memory](./archive/plans/agent/2026-08-15-agent-phase-6-memory-plan.md)
 
 交付：摘要、用户事实、任务结果、检索与删除机制；比较角色私有、共享 ACL、共享用户事实 +
 角色私有记忆三种方案，并由评测与用户 review 决定最终可见性矩阵。
@@ -784,7 +784,7 @@ startup tone 人工观察待补；5D 分角色 TTS、播放与 barge-in 技术�
 退出条件：跨 Session 偏好召回可评测，错误记忆可追溯和删除。
 
 2026-08-24，6A–6E 本地实现与确定性门禁完成；补齐 6H P4 Cat + Memory 和 6I
-quota/retention 后，状态为 `ready_for_final_review`。
+quota/retention 后，2026-08-25 用户最终 review 通过、接受明确延期项并关闭 Phase 6。
 Memory contract/SQLite、确定性写入与冲突/删除、独立 context budget、private 产品召回和三种
 visibility projection 的 evaluator 均有量化证据；`pnpm gate:phase6` 在 Node `v24.19.0` /
 pnpm `11.19.0` 下通过。用户已批准
@@ -798,7 +798,7 @@ grounded/prompt-injection 门禁已通过；6G 真实 HA 只读门禁证明 Memo
 审计通过；DB/WAL/index quota 与分类 retention revision 1 已获批并实现。代表性家庭数据、Voice +
 Memory、家庭身份模型、SQLite 真实断电、加密/secure-delete 经用户决定延期；Phase 5 仍为
 `pending_real_environment`，Phase 7
-等待另行明确授权且未启动。确定性 FTS 已满足当前冻结场景，因此 Vector DB 当前不立项，但真实
+等待另行明确授权且未启动。延期项仍未验证。确定性 FTS 已满足当前冻结场景，因此 Vector DB 当前不立项，但真实
 数据证据不足，后续仍可在独立计划中重新评估。
 
 SQLite 删除保证仅覆盖产品查询和数据库逻辑对象；删除前备份、旧 WAL 帧、APFS snapshot 与

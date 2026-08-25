@@ -1,9 +1,11 @@
 # Agent Phase 6 — Real-environment Gates Plan
 
-> Status: `ready_for_final_review`
+> Status: `completed`
 > Started: 2026-08-24
+> Completed: 2026-08-25
+> Reviewed: 2026-08-25
 > Parent: [Phase 6 — Memory](./2026-08-15-agent-phase-6-memory-plan.md)
-> Current Gate: 6F real-model、6G real HA read、6H P4 Cat + Memory 及 6I
+> Closure: 6F real-model、6G real HA read、6H P4 Cat + Memory 及 6I
 > filesystem/quota/retention 已通过；Voice + Memory 与其余家庭侧/物理门禁经用户决定延期
 
 ## 1. Boundaries
@@ -37,7 +39,7 @@
   consented and labeled representative-household fixture.
 
 Artifact:
-[phase-6f-live-model-memory.json](../../evidence/agent-phase-6/phase-6f-live-model-memory.json)
+[phase-6f-live-model-memory.json](../../../../evidence/agent-phase-6/phase-6f-live-model-memory.json)
 
 ## 3. 6G — Real HA truth precedence, read-only
 
@@ -53,7 +55,7 @@ Artifact:
   the result is labeled `commit_bound` and binds commit `7e9aa4d`.
 
 Artifact:
-[phase-6g-ha-memory-read.json](../../evidence/agent-phase-6/phase-6g-ha-memory-read.json)
+[phase-6g-ha-memory-read.json](../../../../evidence/agent-phase-6/phase-6g-ha-memory-read.json)
 
 ## 4. 6H — Real P4 Cat and Voice + Memory
 
@@ -75,7 +77,7 @@ Cat + Memory 的 self-hosted run `32819132030` 已在 ESP32-P4 rev v1.0、串口
 Voice + Memory 因当前缺少麦克风且用户不在现场，于 2026-08-25 明确延期，不计为失败。
 
 Artifact:
-[phase-6h-p4-cat-memory.json](../../evidence/agent-phase-6/phase-6h-p4-cat-memory.json)
+[phase-6h-p4-cat-memory.json](../../../../evidence/agent-phase-6/phase-6h-p4-cat-memory.json)
 
 ## 5. 6I — SQLite production filesystem and durability
 
@@ -95,15 +97,15 @@ Artifact:
   and bounded purge propagation are implemented and gated.
 - [x] Approve revision 1 production byte limits (DB 128 MiB, WAL 256 MiB, index 256 MiB)
   and retention durations; the policy is explicit opt-in, while synthetic thresholds remain only
-  fail-closed probes. See [SQLite quota and retention policy](../sqlite-quota-retention-policy.md).
+  fail-closed probes. See [SQLite quota and retention policy](../../../sqlite-quota-retention-policy.md).
 - [ ] Encryption/key rotation design and identity binding are approved. Deferred by user review
   on 2026-08-25 while the user is away.
-- [x] [Secure-delete boundary documentation](../sqlite-deletion-remnants.md) and
+- [x] [Secure-delete boundary documentation](../../../sqlite-deletion-remnants.md) and
   regression tests distinguish SQLite row deletion, WAL/backup remnants and SSD
   wear-leveling limits. Media-level secure-delete remains unvalidated.
 
 Artifact:
-[phase-6i-sqlite-filesystem.json](../../evidence/agent-phase-6/phase-6i-sqlite-filesystem.json)
+[phase-6i-sqlite-filesystem.json](../../../../evidence/agent-phase-6/phase-6i-sqlite-filesystem.json)
 
 The current result is `commit_bound`, binds implementation commit
 `899b7465174f8e555bb817785d220434cef786ab`, and records `quota_gate_validated=true`,
@@ -118,5 +120,6 @@ away and no microphone is available: Voice + Memory, representative household da
 power-loss, encryption/key rotation/identity binding, media-level secure-delete, and household
 multi-user/subject identity. They remain unvalidated and are not failures.
 
-The refreshed commit-bound 6I artifact is recorded; Phase 6 is ready for final review. Passing or
-deferring these gates does not authorize Phase 7.
+The refreshed commit-bound 6I artifact is recorded. On 2026-08-25 the user passed final review,
+accepted the listed deferrals and closed Phase 6. Deferred gates remain unvalidated; closure does
+not authorize Phase 7.
