@@ -44,7 +44,7 @@ static const char *TAG = "ui_home";
 #define UI_HOME_CLOUD_COUNT 3U
 #define UI_HOME_PARTICLE_COUNT 12U
 #define UI_HOME_FOG_BAND_COUNT 3U
-#define UI_HOME_HUD_DIALOG_ART_H 30
+#define UI_HOME_HUD_DIALOG_ART_H 38
 
 /* HH:MM drawn from hud_digits sprites. The bundled pixel fonts only carry the
  * CJK ranges they were generated for, and LVGL cannot scale a font, so a hero

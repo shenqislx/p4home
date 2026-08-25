@@ -23,8 +23,8 @@ class Phase5EConversationUiContractTest(unittest.TestCase):
         actor = ACTOR_SOURCE.read_text(encoding="utf-8")
         home = HOME_SOURCE.read_text(encoding="utf-8")
         generator_source = FONT_GENERATOR.read_text(encoding="utf-8")
-        self.assertIn("UI_ACTOR_DIALOG_PAGE_MAX 160U", actor)
-        self.assertIn("UI_HOME_HUD_DIALOG_ART_H 30", home)
+        self.assertIn("UI_ACTOR_DIALOG_PAGE_MAX 224U", actor)
+        self.assertIn("UI_HOME_HUD_DIALOG_ART_H 38", home)
         self.assertIn('"--bpp",\n        "2",', generator_source)
 
         spec = importlib.util.spec_from_file_location("ui_cjk_font_generator", FONT_GENERATOR)
