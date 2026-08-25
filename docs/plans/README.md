@@ -25,7 +25,7 @@
 | 3 | Cat Object World | `completed` | sofa 等对象锚点与 Cat 交互动作 | [Phase 3 归档](../archive/plans/agent/2026-08-15-agent-phase-3-object-world-plan.md) |
 | 4 | Robot HA & Multi-role | `completed` | Robot 受限 HA 工具、Human/Robot 语义分割 | [Phase 4 归档](../archive/plans/agent/2026-08-15-agent-phase-4-ha-tool-plan.md) |
 | 5 | Role-aware Voice | `pending_real_environment` | 5A–5D 技术主体完成；5E 实机总门禁待具备硬件条件后补 | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
-| 6 | Role-aware Memory | `local_complete_pending_real_environment` | 6A–6E 本地门禁与用户 private 裁决完成；真实环境证据待补 | [Phase 6](./2026-08-15-agent-phase-6-memory-plan.md) |
+| 6 | Role-aware Memory | `ready_for_final_review` | 6H P4 Cat 与 6I quota/retention 已补齐；其余真实项经用户决定延期 | [Phase 6](./2026-08-15-agent-phase-6-memory-plan.md) |
 | 7 | Cat Autonomy | `pending` | Timer/HA 事件驱动、低频、可审计 Cat 行为 | [Phase 7](./2026-08-15-agent-phase-7-autonomy-plan.md) |
 
 ## 下一步
@@ -70,9 +70,9 @@ Phase 6A–6E 本地实现和模拟门禁已完成：Memory contract/SQLite、�
 private 产品 recall、三种 visibility evaluator 和可重复 `pnpm gate:phase6` 均已通过。2026-08-24
 用户已批准 [visibility matrix v1](../../evidence/agent-phase-6/visibility-matrix.md) 保持
 `private`；三类 Memory 均保持 owner-role private，`shared_acl/hybrid` 仅存在于实验 evaluator，
-不启用跨角色产品召回。当前状态为 `local_complete_pending_real_environment`；Current Gate 仅为
-代表性家庭数据、P4/Voice 端到端、家庭身份模型和 SQLite 真实断电、
-quota/retention/加密/secure-delete 证据。6I APFS 权限、WAL/NORMAL、受控进程终止、
+不启用跨角色产品召回。当前状态为 `ready_for_final_review`。6H P4 Cat + Memory 已通过；
+quota/retention revision 1 已获批并实现。代表性家庭数据、Voice + Memory、家庭身份模型和 SQLite
+真实断电、加密/secure-delete 经用户决定延期。6I APFS 权限、WAL/NORMAL、受控进程终止、
 完整性/损坏拒绝、在线备份和 checkpoint 冷备份子门禁已从干净工作树复跑通过并绑定提交
 `db42974`。
 
@@ -80,7 +80,7 @@ quota/retention/加密/secure-delete 证据。6I APFS 权限、WAL/NORMAL、受�
 `qwen3.6:35b-mlx` 完成两次真实 Memory 调用，grounded recall、prompt-injection
 边界与 private 跨角色隔离均通过。6G 真实 HA 只读门禁证明 Memory 不覆盖 HA
 当前真值且 `service_calls=0`，已从干净工作树复跑并绑定提交。6I 文件系统子门禁也已从干净
-工作树复跑通过并绑定提交 `db42974`。见
+工作树复跑通过并绑定提交 `db42974`；本轮将刷新 quota/retention 的 commit-bound evidence。见
 [Phase 6 真实环境门禁](./2026-08-24-agent-phase-6-real-environment-gates-plan.md)。
 确定性 FTS 已满足冻结场景，当前不立项 Vector DB；真实家庭数据证据不足，不能外推为长期结论。
 Phase 5 仍为 `pending_real_environment`。Phase 7 保持 `pending`，需另行明确授权且不得启动。

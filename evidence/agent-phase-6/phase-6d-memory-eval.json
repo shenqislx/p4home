@@ -1,11 +1,11 @@
 {
   "schema_version": 2,
   "suite_version": "phase6d-visibility-strategy/v2",
-  "generated_at": "2026-08-24T09:53:02.387Z",
+  "generated_at": "2026-08-25T08:16:25.069Z",
   "runtime": {
     "node": "v24.19.0",
-    "platform": "linux",
-    "arch": "x64",
+    "platform": "darwin",
+    "arch": "arm64",
     "environment": "deterministic_local",
     "real_model_calls": 0
   },

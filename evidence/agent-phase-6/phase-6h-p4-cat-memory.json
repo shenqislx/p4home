@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "profile": "phase6h_cat_memory",
+  "workflow_status": "success",
+  "artifact_integrity": "valid",
+  "functional_verdict": "pass",
+  "run_id": "32819132030",
+  "run_attempt": "1",
+  "job_id": "97713402242",
+  "run_url": "https://github.com/shenqislx/p4home/actions/runs/32819132030",
+  "git_sha": "9688887c7979e03bf11a1e640aac771736389a48",
+  "serial_port": "/dev/cu.usbserial-210",
+  "chip": "ESP32-P4",
+  "chip_revision": "v1.0",
+  "monitor_seconds": 120,
+  "capture_seconds": 240,
+  "app_image": "p4home_firmware.bin",
+  "app_size_bytes": 1487424,
+  "app_sha256": "e1582b55577f47b78125f7133caa06d6770c889fda6a88bfd9fe33293dffb40f",
+  "dependency_lock_sha256": "7a9dd40763204be5a8385d837d31f1af1482a712766546245e10ebcc2cff9a95",
+  "agent_harness_status": "0",
+  "artifact_audit_status": "pass",
+  "memory_status": "ok",
+  "selected_memory_ids": [
+    "p6h-stale"
+  ],
+  "memory_body_in_artifact": false,
+  "memory_database_mode": "600",
+  "stale_claim_seen_as_untrusted_data": true,
+  "world_authority": "p4_object_snapshot",
+  "final_world": {
+    "target_object_id": "living_room.sofa",
+    "pose": "sitting",
+    "occupied": true,
+    "state_version": 6
+  },
+  "poweron_reset_count": 1,
+  "crash_marker_count": 0,
+  "verify_markers": [
+    "VERIFY:phase3d:device_object_action:PASS action=go_to target=living_room.sofa pose=standing state_version=4",
+    "VERIFY:phase3d:device_object_action:PASS action=sit target=living_room.sofa pose=sitting state_version=6",
+    "VERIFY:phase6h:cat_memory_recall:PASS memory_id=p6h-stale projection=private treatment=untrusted_data",
+    "VERIFY:phase6h:world_truth_wins:PASS target=living_room.sofa pose=sitting occupied=true state_version=6",
+    "VERIFY:phase6h:artifact_privacy:PASS memory_body=false db_mode=600",
+    "VERIFY:phase6h:artifact_audit:PASS memory_body=false credentials=false"
+  ],
+  "evidence_boundary": "The workflow is transport only. This committed summary was derived from the manifest first and the sanitized monitor log second. It contains no Memory body, canary, credentials, TLS private key or full serial log. Voice + Memory is not covered."
+}

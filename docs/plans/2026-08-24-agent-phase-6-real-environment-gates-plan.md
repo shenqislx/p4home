@@ -3,10 +3,8 @@
 > Status: `in_progress`
 > Started: 2026-08-24
 > Parent: [Phase 6 — Memory](./2026-08-15-agent-phase-6-memory-plan.md)
-> Current Gate: 6F real-model, commit-bound 6G real HA read and the bounded commit-bound
-> 6I filesystem/process-kill/online-and-cold-backup gate passed; P4/Voice,
-> representative household data, remaining SQLite gates and household
-> identity remain pending
+> Current Gate: 6F real-model、6G real HA read、6H P4 Cat + Memory 及 6I
+> filesystem/quota/retention 已通过；Voice + Memory 与其余家庭侧/物理门禁经用户决定延期
 
 ## 1. Boundaries
 
@@ -68,12 +66,16 @@ Artifact:
   final snapshot follow the P4 World/Object runtime.
 - [ ] Voice: prove real P4 microphone → STT → role runtime → private Memory recall
   → TTS/P4 playback, with no raw audio or Memory body in artifacts.
-- [ ] Require explicit `VERIFY:phase6h:*:PASS` markers and reject crash/reset-loop,
+- [x] Require explicit `VERIFY:phase6h:*:PASS` markers and reject crash/reset-loop,
   credential leakage or a workflow-only verdict.
 
-The workflow/harness implementation is local and pre-commit. This gate still requires review,
-commit/push authorization and a self-hosted hardware run. No P4 has been flashed for 6H yet,
-so none of the new `VERIFY:phase6h:*` markers are accepted hardware evidence.
+Cat + Memory 的 self-hosted run `32819132030` 已在 ESP32-P4 rev v1.0、串口
+`/dev/cu.usbserial-210` 上通过。artifact 绑定提交 `9688887`，四个专用 `VERIFY:phase6h:*:PASS`
+标记完整，World 以 P4 Object snapshot 为真值，且 Memory 正文/凭据未进入 artifact。
+Voice + Memory 因当前缺少麦克风且用户不在现场，于 2026-08-25 明确延期，不计为失败。
+
+Artifact:
+[phase-6h-p4-cat-memory.json](../../evidence/agent-phase-6/phase-6h-p4-cat-memory.json)
 
 ## 5. 6I — SQLite production filesystem and durability
 
@@ -91,9 +93,11 @@ so none of the new `VERIFY:phase6h:*` markers are accepted hardware evidence.
 - [x] Database/WAL/index quota mechanisms and synthetic APFS fail-closed gates are implemented.
 - [x] Complete kind/sensitivity retention matrix enforcement, default expiry, legacy-open rejection
   and bounded purge propagation are implemented and gated.
-- [ ] Approve production byte limits and the proposed retention durations; synthetic gate thresholds
-  are not production defaults. See [SQLite quota and retention policy](../sqlite-quota-retention-policy.md).
-- [ ] Encryption/key rotation design and identity binding are approved.
+- [x] Approve revision 1 production byte limits (DB 128 MiB, WAL 256 MiB, index 256 MiB)
+  and retention durations; the policy is explicit opt-in, while synthetic thresholds remain only
+  fail-closed probes. See [SQLite quota and retention policy](../sqlite-quota-retention-policy.md).
+- [ ] Encryption/key rotation design and identity binding are approved. Deferred by user review
+  on 2026-08-25 while the user is away.
 - [x] [Secure-delete boundary documentation](../sqlite-deletion-remnants.md) and
   regression tests distinguish SQLite row deletion, WAL/backup remnants and SSD
   wear-leveling limits. Media-level secure-delete remains unvalidated.
@@ -101,13 +105,16 @@ so none of the new `VERIFY:phase6h:*` markers are accepted hardware evidence.
 Artifact:
 [phase-6i-sqlite-filesystem.json](../../evidence/agent-phase-6/phase-6i-sqlite-filesystem.json)
 
-The current result is labeled `commit_bound` and binds implementation commit
-`8438b8fa0e90f517a1d287d344987820d6c6bb7f`. No production SQLite item is closed by
-the 6F/6G temporary `:memory:` stores, and the bounded 6I gate does not close the
-unchecked items above.
+The current committed artifact will be refreshed from a clean implementation commit after the
+revision 1 policy lands. No production SQLite item is closed by the 6F/6G temporary `:memory:`
+stores, and the bounded 6I gate does not close the unchecked items above.
 
 ## 6. Exit rule
 
-Phase 6 remains `local_complete_pending_real_environment` until every required
-real gate is either passed with its declared evidence or explicitly deferred by
-user review. Passing 6F/6G or the bounded 6I subset does not authorize Phase 7.
+The following gates were explicitly deferred by user review on 2026-08-25 because the user is
+away and no microphone is available: Voice + Memory, representative household data, real
+power-loss, encryption/key rotation/identity binding, media-level secure-delete, and household
+multi-user/subject identity. They remain unvalidated and are not failures.
+
+Phase 6 can move to final review once the refreshed commit-bound 6I artifact is recorded. Passing
+or deferring these gates does not authorize Phase 7.

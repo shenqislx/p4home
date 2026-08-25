@@ -26,10 +26,14 @@ import {
   type AuditStorageErrorCode,
   type MemoryCreate,
   type MemoryKind,
-  type MemoryRetentionPolicy,
   type MemorySensitivity,
   type SqliteStorageQuota,
 } from "@p4home/storage-sqlite";
+
+import {
+  PRODUCTION_MEMORY_STORAGE_POLICY_V1,
+  productionMemoryStoreOptions,
+} from "./memory-storage-policy.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -80,6 +84,12 @@ export interface Phase6iAssessmentInput {
   readonly retention_overlong_rejected: boolean;
   readonly retention_legacy_reopen_rejected: boolean;
   readonly retention_expired_purge_propagated: boolean;
+  readonly production_policy_validated: boolean;
+  readonly production_policy_revision: number;
+  readonly production_database_quota_limit_bytes: number;
+  readonly production_wal_quota_limit_bytes: number;
+  readonly production_index_quota_limit_bytes: number;
+  readonly production_retention_policy_revision: number;
 }
 
 export interface Phase6iSqliteGateResult extends Phase6iAssessmentInput {
@@ -139,14 +149,28 @@ export function assessPhase6iQuotaGate(input: Phase6iAssessmentInput): boolean {
     && input.wal_quota_rejected_with_pinned_reader
     && input.wal_quota_bytes <= input.wal_quota_limit_bytes
     && input.index_quota_rejected
-    && input.index_quota_bytes <= input.index_quota_limit_bytes;
+    && input.index_quota_bytes <= input.index_quota_limit_bytes
+    && input.production_policy_validated
+    && input.production_policy_revision
+      === PRODUCTION_MEMORY_STORAGE_POLICY_V1.policy_revision
+    && input.production_database_quota_limit_bytes
+      === PRODUCTION_MEMORY_STORAGE_POLICY_V1.storage_quota.max_database_bytes
+    && input.production_wal_quota_limit_bytes
+      === PRODUCTION_MEMORY_STORAGE_POLICY_V1.storage_quota.max_wal_bytes
+    && input.production_index_quota_limit_bytes
+      === PRODUCTION_MEMORY_STORAGE_POLICY_V1.storage_quota.max_index_bytes;
 }
 
 export function assessPhase6iRetentionGate(input: Phase6iAssessmentInput): boolean {
   return input.retention_matrix_validated
     && input.retention_overlong_rejected
     && input.retention_legacy_reopen_rejected
-    && input.retention_expired_purge_propagated;
+    && input.retention_expired_purge_propagated
+    && input.production_policy_validated
+    && input.production_policy_revision
+      === PRODUCTION_MEMORY_STORAGE_POLICY_V1.policy_revision
+    && input.production_retention_policy_revision
+      === PRODUCTION_MEMORY_STORAGE_POLICY_V1.memory_retention.retention_policy_revision;
 }
 
 function mode(path: string): string {
@@ -204,27 +228,8 @@ function createProbeMemory(memoryId: string, createdAtMs = 1) {
   };
 }
 
-const POLICY_DAY_MS = 86_400_000;
-const SYNTHETIC_RETENTION_POLICY: MemoryRetentionPolicy = {
-  retention_policy_revision: 19,
-  max_age_ms: {
-    conversation_summary: {
-      normal: 30 * POLICY_DAY_MS,
-      personal: 14 * POLICY_DAY_MS,
-      restricted: 7 * POLICY_DAY_MS,
-    },
-    user_fact: {
-      normal: 365 * POLICY_DAY_MS,
-      personal: 180 * POLICY_DAY_MS,
-      restricted: 30 * POLICY_DAY_MS,
-    },
-    task_outcome: {
-      normal: 90 * POLICY_DAY_MS,
-      personal: 60 * POLICY_DAY_MS,
-      restricted: 30 * POLICY_DAY_MS,
-    },
-  },
-};
+const PRODUCTION_RETENTION_POLICY =
+  PRODUCTION_MEMORY_STORAGE_POLICY_V1.memory_retention;
 
 function policySource(kind: MemoryKind): MemoryCreate["source"] {
   return ({
@@ -283,6 +288,12 @@ interface StoragePolicyProbeResult {
   readonly retention_overlong_rejected: boolean;
   readonly retention_legacy_reopen_rejected: boolean;
   readonly retention_expired_purge_propagated: boolean;
+  readonly production_policy_validated: boolean;
+  readonly production_policy_revision: number;
+  readonly production_database_quota_limit_bytes: number;
+  readonly production_wal_quota_limit_bytes: number;
+  readonly production_index_quota_limit_bytes: number;
+  readonly production_retention_policy_revision: number;
 }
 
 async function storagePolicyProbe(directory: string): Promise<StoragePolicyProbeResult> {
@@ -398,7 +409,7 @@ async function storagePolicyProbe(directory: string): Promise<StoragePolicyProbe
   {
     using store = new SynchronousSqliteAuditStore(retentionPath, {
       reconcile_on_open: false,
-      memory_retention: SYNTHETIC_RETENTION_POLICY,
+      memory_retention: PRODUCTION_RETENTION_POLICY,
     });
     for (const kind of [
       "conversation_summary",
@@ -413,7 +424,7 @@ async function storagePolicyProbe(directory: string): Promise<StoragePolicyProbe
         ));
         retentionMatrixValidated &&=
           record.expires_at_ms === 1_000
-            + SYNTHETIC_RETENTION_POLICY.max_age_ms[kind][sensitivity];
+            + PRODUCTION_RETENTION_POLICY.max_age_ms[kind][sensitivity];
       }
     }
     try {
@@ -421,7 +432,7 @@ async function storagePolicyProbe(directory: string): Promise<StoragePolicyProbe
         "retention-too-long",
         "user_fact",
         "restricted",
-        1_001 + SYNTHETIC_RETENTION_POLICY.max_age_ms.user_fact.restricted,
+        1_001 + PRODUCTION_RETENTION_POLICY.max_age_ms.user_fact.restricted,
       ));
     } catch (error) {
       assertExpectedStorageError(
@@ -469,7 +480,7 @@ async function storagePolicyProbe(directory: string): Promise<StoragePolicyProbe
   try {
     using ignored = new SynchronousSqliteAuditStore(legacyPath, {
       reconcile_on_open: false,
-      memory_retention: SYNTHETIC_RETENTION_POLICY,
+      memory_retention: PRODUCTION_RETENTION_POLICY,
     });
     void ignored;
   } catch (error) {
@@ -495,6 +506,55 @@ async function storagePolicyProbe(directory: string): Promise<StoragePolicyProbe
     retention_overlong_rejected: retentionOverlongRejected,
     retention_legacy_reopen_rejected: retentionLegacyReopenRejected,
     retention_expired_purge_propagated: retentionExpiredPurgePropagated,
+    ...await productionPolicyProbe(directory),
+  };
+}
+
+async function productionPolicyProbe(
+  directory: string,
+): Promise<Pick<
+  StoragePolicyProbeResult,
+  | "production_policy_validated"
+  | "production_policy_revision"
+  | "production_database_quota_limit_bytes"
+  | "production_wal_quota_limit_bytes"
+  | "production_index_quota_limit_bytes"
+  | "production_retention_policy_revision"
+>> {
+  const policy = PRODUCTION_MEMORY_STORAGE_POLICY_V1;
+  const options = productionMemoryStoreOptions();
+  let validated = true;
+  using store = new SynchronousSqliteAuditStore(
+    join(directory, "production-policy.sqlite"),
+    { reconcile_on_open: false, ...options },
+  );
+  for (const kind of [
+    "conversation_summary",
+    "user_fact",
+    "task_outcome",
+  ] as const) {
+    for (const sensitivity of ["normal", "personal", "restricted"] as const) {
+      const memory = await store.createMemory(policyMemory(
+        `production-${kind}-${sensitivity}`,
+        kind,
+        sensitivity,
+      ));
+      validated &&= memory.expires_at_ms === 1_000
+        + policy.memory_retention.max_age_ms[kind][sensitivity];
+    }
+  }
+  const usage = store.inspectStorageUsage();
+  validated &&= usage.database_bytes <= policy.storage_quota.max_database_bytes
+    && usage.wal_bytes <= policy.storage_quota.max_wal_bytes
+    && usage.index_bytes <= policy.storage_quota.max_index_bytes;
+  return {
+    production_policy_validated: validated,
+    production_policy_revision: policy.policy_revision,
+    production_database_quota_limit_bytes: policy.storage_quota.max_database_bytes,
+    production_wal_quota_limit_bytes: policy.storage_quota.max_wal_bytes,
+    production_index_quota_limit_bytes: policy.storage_quota.max_index_bytes,
+    production_retention_policy_revision:
+      policy.memory_retention.retention_policy_revision,
   };
 }
 
@@ -785,7 +845,9 @@ async function main(): Promise<number> {
     + `database=${result.database_quota_bytes}/${result.database_quota_limit_bytes} `
     + `wal=${result.wal_quota_bytes}/${result.wal_quota_limit_bytes} `
     + `index=${result.index_quota_bytes}/${result.index_quota_limit_bytes} `
-    + `retention_matrix=${result.retention_matrix_validated}\n`,
+    + `retention_matrix=${result.retention_matrix_validated} `
+    + `production_policy=${result.production_policy_revision}:`
+    + `${result.production_policy_validated}\n`,
   );
   return result.passed ? 0 : 1;
 }

@@ -67,6 +67,7 @@ evidence/agent-phase-6/*
 !evidence/agent-phase-6/phase-6d-memory-eval.json
 !evidence/agent-phase-6/phase-6f-live-model-memory.json
 !evidence/agent-phase-6/phase-6g-ha-memory-read.json
+!evidence/agent-phase-6/phase-6h-p4-cat-memory.json
 !evidence/agent-phase-6/phase-6i-sqlite-filesystem.json
 evidence/agent-phase-4/artifacts/*
 !evidence/agent-phase-4/artifacts/*.json

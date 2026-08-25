@@ -53,15 +53,16 @@ fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 r
 数字播放 marker 不替代该输出证明。5D 分角色 TTS、播放与 barge-in 技术门禁已通过；5E
 安全/评测/真实硬件总门禁因当前 WSL2 不具备验证条件而保持 `pending_real_environment`，默认 SR
 仍关闭。2026-08-24 用户明确授权 Phase 6 先在 WSL2 完成编码、确定性测试与模拟验证。Phase 6A–6E
-本地门禁现已完成，状态为 `local_complete_pending_real_environment`：Memory contract/SQLite、
+本地门禁现已完成，当前进入 `ready_for_final_review`：Memory contract/SQLite、
 确定性写入与删除、private 产品召回、三种 visibility 策略对照和 `pnpm gate:phase6` 均有本地证据。
 2026-08-24 用户已批准 visibility matrix v1 保持 `private`；三类 Memory 均保持 owner-role private，
 `shared_acl/hybrid` 仅限 experimental evaluator，跨角色产品召回未启用。6F 真实 35B
 门禁已通过，6G 真实 HA 只读门禁已从干净工作树复跑通过并绑定提交。6I APFS 权限、WAL/NORMAL、
 受控进程终止、完整性/损坏拒绝、在线备份和 checkpoint 冷备份子门禁已从干净工作树复跑通过，
-证据绑定提交 `8438b8f`。
-Current Gate 仅剩代表性家庭数据、P4/Voice 端到端、家庭身份模型和 SQLite 真实断电、
-quota/retention/加密/secure-delete 证据；这些项目全部保持 `pending`。
+证据绑定提交 `8438b8f`。6H P4 Cat + Memory run `32819132030` 已通过，World 仍以 P4 snapshot
+为真值且 artifact 隐私审计通过；DB/WAL/index quota revision 1（128/256/256 MiB）与分类
+retention revision 1 已获批并实现。代表性家庭数据、Voice + Memory、家庭身份、真实断电、
+加密与介质级 secure-delete 于 2026-08-25 经用户决定延期，均保持未验证而非通过。
 Vector DB 仍不立项。Phase 5 仍为 `pending_real_environment`；Phase 7 仍为 `pending`，需另行明确
 授权且尚未启动。完整清单和复现入口见
 [Phase 6 real-environment gate evidence](./evidence/agent-phase-6/phase-6-real-environment-gates.md)。

@@ -1,15 +1,16 @@
 # P4 Home Agent Runtime
 
 Phase 1 至 Phase 4 已关闭，Phase 5 保持 `pending_real_environment`；Phase 6A–6E 的本地实现与
-确定性门禁已完成，状态为 `local_complete_pending_real_environment`。当前 workspace 包含冻结契约、Ollama
+确定性门禁已完成，当前为 `ready_for_final_review`。当前 workspace 包含冻结契约、Ollama
 原生 Tool Calling、有限文本 Agent Loop、Role Contract/Router、Cat P4 World、Robot HA、Role-aware
 Voice，以及可追溯/可过期/可删除的 role-scoped Memory。2026-08-24 用户已批准 visibility matrix
 v1 保持 `private`；三类 Memory 均保持 owner-role private，跨角色产品召回禁用，
 `shared_acl/hybrid` 仅用于 experimental evaluator。确定性测试不要求 Ollama、Home Assistant 或
 P4。6F 真实 35B 门禁已通过；6G 真实 HA 只读门禁已从干净工作树复跑通过并绑定提交。
 6I APFS 权限、WAL/NORMAL、受控进程终止、在线备份和 checkpoint 冷备份子门禁已从干净工作树
-复跑通过，证据绑定提交 `8438b8f`。P4/Voice、真实家庭数据、剩余长期 SQLite 与身份验证保持
-`pending`。Vector DB 仍不立项；
+复跑通过，证据绑定提交 `8438b8f`。6H P4 Cat + Memory 已通过，生产 quota/retention revision 1
+已获批并实现；Voice、真实家庭数据、真实断电、加密/介质删除与身份验证经用户决定延期。
+Vector DB 仍不立项；
 Phase 7 需另行明确授权且尚未启动。
 
 ## 环境

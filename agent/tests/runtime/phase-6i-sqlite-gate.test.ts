@@ -8,6 +8,10 @@ import {
   runPhase6iSqliteGate,
   type Phase6iAssessmentInput,
 } from "../../apps/runtime/src/phase6i-sqlite-gate.ts";
+import {
+  PRODUCTION_MEMORY_STORAGE_POLICY_V1,
+  productionMemoryStoreOptions,
+} from "../../apps/runtime/src/memory-storage-policy.ts";
 
 const PASSING: Phase6iAssessmentInput = {
   directory_mode: "700",
@@ -48,6 +52,12 @@ const PASSING: Phase6iAssessmentInput = {
   retention_overlong_rejected: true,
   retention_legacy_reopen_rejected: true,
   retention_expired_purge_propagated: true,
+  production_policy_validated: true,
+  production_policy_revision: 1,
+  production_database_quota_limit_bytes: 128 * 1_024 * 1_024,
+  production_wal_quota_limit_bytes: 256 * 1_024 * 1_024,
+  production_index_quota_limit_bytes: 256 * 1_024 * 1_024,
+  production_retention_policy_revision: 1,
 };
 
 test("Phase 6I assessment fails closed for every required filesystem signal", () => {
@@ -87,10 +97,55 @@ test("Phase 6I assessment fails closed for every required filesystem signal", ()
     { retention_overlong_rejected: false },
     { retention_legacy_reopen_rejected: false },
     { retention_expired_purge_propagated: false },
+    { production_policy_validated: false },
+    { production_policy_revision: 2 },
+    { production_database_quota_limit_bytes: 1 },
+    { production_wal_quota_limit_bytes: 1 },
+    { production_index_quota_limit_bytes: 1 },
+    { production_retention_policy_revision: 2 },
   ];
   for (const mutation of mutations) {
     assert.equal(assessPhase6iSqliteGate({ ...PASSING, ...mutation }), false);
   }
+});
+
+test("production Memory storage policy is explicit and returned as defensive copies", () => {
+  assert.equal(Object.isFrozen(PRODUCTION_MEMORY_STORAGE_POLICY_V1), true);
+  assert.equal(Object.isFrozen(PRODUCTION_MEMORY_STORAGE_POLICY_V1.storage_quota), true);
+  assert.equal(
+    Object.isFrozen(PRODUCTION_MEMORY_STORAGE_POLICY_V1.memory_retention.max_age_ms.user_fact),
+    true,
+  );
+  assert.deepEqual(PRODUCTION_MEMORY_STORAGE_POLICY_V1.storage_quota, {
+    max_database_bytes: 128 * 1_024 * 1_024,
+    max_wal_bytes: 256 * 1_024 * 1_024,
+    max_index_bytes: 256 * 1_024 * 1_024,
+  });
+  assert.deepEqual(PRODUCTION_MEMORY_STORAGE_POLICY_V1.memory_retention.max_age_ms, {
+    conversation_summary: {
+      normal: 30 * 86_400_000,
+      personal: 14 * 86_400_000,
+      restricted: 7 * 86_400_000,
+    },
+    user_fact: {
+      normal: 365 * 86_400_000,
+      personal: 180 * 86_400_000,
+      restricted: 30 * 86_400_000,
+    },
+    task_outcome: {
+      normal: 90 * 86_400_000,
+      personal: 60 * 86_400_000,
+      restricted: 30 * 86_400_000,
+    },
+  });
+  const first = productionMemoryStoreOptions();
+  const second = productionMemoryStoreOptions();
+  assert.notEqual(first.storage_quota, second.storage_quota);
+  assert.notEqual(first.memory_retention, second.memory_retention);
+  assert.notEqual(
+    first.memory_retention?.max_age_ms.user_fact,
+    second.memory_retention?.max_age_ms.user_fact,
+  );
 });
 
 test("Phase 6I quota and retention validated flags reflect their own probes", () => {
@@ -113,6 +168,10 @@ test("Phase 6I gate runs on a real filesystem without overstating pending gates"
   assert.equal(result.online_backup_api_validated, true);
   assert.equal(result.quota_gate_validated, true);
   assert.equal(result.retention_gate_validated, true);
+  assert.equal(result.production_policy_validated, true);
+  assert.equal(result.production_database_quota_limit_bytes, 128 * 1_024 * 1_024);
+  assert.equal(result.production_wal_quota_limit_bytes, 256 * 1_024 * 1_024);
+  assert.equal(result.production_index_quota_limit_bytes, 256 * 1_024 * 1_024);
   assert.equal(result.encryption_gate_validated, false);
   assert.equal(result.secure_delete_gate_validated, false);
 });

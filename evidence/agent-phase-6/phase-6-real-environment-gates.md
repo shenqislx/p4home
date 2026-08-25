@@ -68,6 +68,33 @@ Artifact:
 The result is labeled `evidence_scope=commit_bound`: it was produced from a clean
 worktree and binds commit `7e9aa4d4b334b89c899007b13dddc745a6546dd8`.
 
+## 6H real P4 Cat + Memory — COMMIT-BOUND PASS
+
+- workflow run: `32819132030`, job `97713402242`, transport status `success`;
+- manifest binds commit `9688887c7979e03bf11a1e640aac771736389a48`, profile
+  `phase6h_cat_memory`, `/dev/cu.usbserial-210`, ESP32-P4 rev v1.0;
+- app image: 1,487,424 bytes, SHA-256
+  `e1582b55577f47b78125f7133caa06d6770c889fda6a88bfd9fe33293dffb40f`;
+- harness status `0`, artifact audit `pass`, one POWERON reset and zero crash markers;
+- stale private Memory was selected only as untrusted data; `go_to` and `sit` completed, and the
+  final World remained the P4 Object snapshot (`sitting`, occupied, state version 6);
+- committed evidence contains no Memory body, canary, credential, TLS private key or full serial log.
+
+Strong markers:
+
+```text
+VERIFY:phase6h:cat_memory_recall:PASS memory_id=p6h-stale projection=private treatment=untrusted_data
+VERIFY:phase6h:world_truth_wins:PASS target=living_room.sofa pose=sitting occupied=true state_version=6
+VERIFY:phase6h:artifact_privacy:PASS memory_body=false db_mode=600
+VERIFY:phase6h:artifact_audit:PASS memory_body=false credentials=false
+```
+
+Artifact: [phase-6h-p4-cat-memory.json](./phase-6h-p4-cat-memory.json)
+
+The functional verdict is `pass`; it comes from manifest integrity plus raw markers, not the green
+workflow alone. Voice + Memory is not covered and was explicitly deferred on 2026-08-25 because
+the user is away and no microphone is available.
+
 ## 6I real SQLite filesystem subset — COMMIT-BOUND PASS
 
 Command:
@@ -130,18 +157,20 @@ Regression:
 Artifact:
 [phase-6i-sqlite-filesystem.json](./phase-6i-sqlite-filesystem.json)
 
-The result is `commit_bound`: it was produced from a clean worktree and binds
-implementation commit `8438b8fa0e90f517a1d287d344987820d6c6bb7f`. It does not claim
-real power-loss, quota, retention, encryption/key rotation or media-level secure delete.
+The existing result is `commit_bound` and binds implementation commit
+`8438b8fa0e90f517a1d287d344987820d6c6bb7f`; it predates the revision 1 production-policy
+approval and will be replaced by a clean-commit rerun. It does not claim real power-loss,
+encryption/key rotation or media-level secure delete.
 
 ## Still pending
 
-- consented, redacted, labeled representative household Memory dataset;
-- P4 Cat + Memory artifact-first hardware profile and run;
-- Voice + Memory artifact-first hardware profile and run;
-- SQLite real power-loss, quota, retention, encryption/key rotation
-  and media-level secure-delete evidence;
-- household multi-user/subject identity model.
+- consented, redacted, labeled representative household Memory dataset — deferred 2026-08-25;
+- Voice + Memory artifact-first hardware profile and run — deferred 2026-08-25, no microphone and
+  user away;
+- SQLite real power-loss, encryption/key rotation and media-level secure-delete — deferred
+  2026-08-25;
+- household multi-user/subject identity model — deferred 2026-08-25.
 
-Phase 6 remains `local_complete_pending_real_environment`; Phase 7 remains
-unauthorized and has not started.
+Quota/retention revision 1 is approved and implemented; its refreshed clean-commit evidence is the
+remaining action before Phase 6 final review. Deferred items remain unvalidated, not failed. Phase 7
+remains unauthorized and has not started.

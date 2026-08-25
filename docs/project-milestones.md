@@ -1,6 +1,6 @@
 # P4 Home 当前里程碑
 
-> Updated: 2026-08-24
+> Updated: 2026-08-25
 > Current Architecture: [P4 Local Agent Architecture](./p4-local-agent-architecture.md)
 > Active Work: [Agent Phase Plans](./plans/README.md)
 
@@ -26,23 +26,25 @@
 | M7.3 Cat Object World | `completed` | sofa/window/desk 等 Cat 对象级动作，实机门禁与最终 review 已通过 |
 | M7.4 Robot HA & Multi-role | `completed` | 4A–4E 技术/真实环境门禁及用户最终 review 已通过 |
 | M7.5 Role-aware Voice | `pending_real_environment` | 5A–5D 技术主体完成；5E 实机总门禁与 P4 可听观察待补 |
-| M7.6 Role-aware Memory | `local_complete_pending_real_environment` | 6A–6E 本地门禁与用户 private 裁决完成；真实环境证据 pending |
+| M7.6 Role-aware Memory | `ready_for_final_review` | 6F/6G/6H Cat 与 6I quota/retention 已通过；其余真实门禁经用户决定延期 |
 | M7.7 Cat Autonomy | `pending` | Timer/HA 事件驱动、低优先级、可关闭 Cat 行为 |
 
 M7.6 的稳定本地结论是：Memory contract/SQLite、确定性写入/冲突/删除、private 产品召回、三种
 visibility evaluator 和 `pnpm gate:phase6` 已通过；2026-08-24 用户已批准 matrix v1 保持
 `private`，三类 Memory 均为 owner-role private，`shared_acl/hybrid` 仍为 evaluator-only，未启用
-跨角色产品召回。6I APFS 权限、WAL/NORMAL、受控进程终止、完整性/损坏拒绝、在线备份和 checkpoint
-冷备份子门禁已从干净工作树复跑通过并绑定提交 `8438b8f`。代表性家庭数据、P4 Cat/Voice 端到端、SQLite
-真实断电/quota/retention/加密/secure-delete、家庭身份模型证据仍为 `pending`。
-Current Gate 仅为这些真实环境项；[visibility matrix](../evidence/agent-phase-6/visibility-matrix.md)
+跨角色产品召回。6H P4 Cat + Memory run `32819132030` 已证明旧 Memory 仅作 untrusted data，P4
+Object snapshot 保持 World 真值，artifact 隐私审计通过。6I APFS 权限、WAL/NORMAL、受控进程终止、
+完整性/损坏拒绝、在线/冷备份与 DB/WAL/index quota 和分类 retention 已通过；revision 1 采用
+128/256/256 MiB 和 30/14/7、365/180/30、90/60/30 天矩阵。代表性家庭数据、Voice + Memory、
+真实断电、加密/secure-delete 和家庭身份模型于 2026-08-25 经用户决定延期，保持未验证。
+[visibility matrix](../evidence/agent-phase-6/visibility-matrix.md)
 用户裁决已完成。这不改变 M7.5 `pending_real_environment`；Vector DB 仍不立项，M7.7 需另行明确
 授权且尚未启动。
 
 2026-08-24 补充门禁：真实 `qwen3.6:35b-mlx` 在脱敏合成 Memory 上的 grounded
 recall/prompt-injection/private 隔离已通过；真实 HA 只读门禁也证明 Memory 不覆盖
 HA 真值且无 service call，结果已从干净工作树复跑并绑定提交；6I 文件系统子门禁也已从干净
-工作树复跑通过并绑定提交 `8438b8f`；真实家庭数据、P4/Voice、剩余 SQLite 生产耐久和身份模型仍为 `pending`。
+工作树复跑通过并绑定提交 `8438b8f`；后续 P4 Cat 和 quota/retention 已补齐，其余项已明确延期。
 
 ## 3. M6 遗留裁决
 

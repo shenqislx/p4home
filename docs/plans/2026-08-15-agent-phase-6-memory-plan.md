@@ -2,20 +2,22 @@
 
 > Status: `local_complete_pending_real_environment`
 > Started: 2026-08-24
-> Current Gate: 6F 真实模型、6G HA 提交绑定只读门禁和 6I 文件系统提交绑定子门禁已通过；
-> 其余真实环境证据 pending；
+> Current Gate: 6F 真实模型、6G HA、6H P4 Cat + Memory 和 6I quota/retention 已通过；
+> Voice + Memory 与其余家庭侧/物理门禁经用户决定延期，等待最终 review；
 > Phase 7 等待另行明确授权
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2 stable; Router/Robot/Human/Cat 专项 eval 骨架 established
-> Execution Environment: 6A–6E 为 WSL2 本地/模拟验证；6F/6G/6I 已在 macOS 真实环境执行；
-> P4/Voice、家庭数据、剩余 SQLite 生产耐久及身份门禁保持 `pending`
+> Execution Environment: 6A–6E 为 WSL2 本地/模拟验证；6F/6G/6I 已在 macOS 真实环境执行，
+> 6H P4 Cat + Memory 已在 ESP32-P4 实机执行；Voice/家庭数据/其余物理与身份门禁延期
 
 2026-08-24 已启动独立的
 [Phase 6 真实环境门禁计划](./2026-08-24-agent-phase-6-real-environment-gates-plan.md)。
 6F 真实 35B + 脱敏合成 Memory 门禁已通过；6G 真实 HA 只读真值门禁已从
 干净工作树复跑通过并绑定提交 `7e9aa4d`。6I 的 APFS 权限、WAL/NORMAL、受控
 `SIGKILL`、完整性/损坏拒绝、在线备份和 checkpoint 冷备份子门禁已从干净工作树复跑通过并
-绑定提交 `db42974`；P4/Voice、真实家庭数据、剩余 SQLite 生产耐久与家庭身份门禁继续 `pending`。
+绑定提交 `db42974`。6H P4 Cat + Memory run `32819132030` 已通过并绑定 `9688887`；
+quota/retention revision 1 参数已获批并实现。Voice + Memory、真实家庭数据、真实断电、
+加密/介质级删除与家庭身份门禁于 2026-08-25 经用户决定延期，仍属未验证而非通过。
 
 ## 1. 目标
 
@@ -289,8 +291,8 @@ visibility matrix v1 保持 private。
   继续禁用；
 - `shared_acl/hybrid` 继续只用于 experimental evaluator；未来任何放开必须新建版本化矩阵并
   再次 review，当前裁决不构成启用授权；
-- 该用户决策已完成，不属于真实环境 pending；Phase 6 仍不得表述为生产验收完成，长期 SQLite
-  与全部真实模型/家庭/HA/P4/Voice 证据继续 pending；
+- 该用户决策已完成，不属于真实环境 pending；此后 6F/6G/6H Cat 与 6I quota/retention 已补齐，
+  Voice、家庭数据及其余物理/身份门禁按 2026-08-25 用户决定延期；
 - Phase 7 未获授权、未启动。
 
 6E independent defect-first review（2026-08-24）：
@@ -317,14 +319,15 @@ visibility matrix v1 保持 private。
 - review 后本地 gate 重新通过；未运行或修改 Phase 4/Voice 实现，未启动 Phase 7，未启用跨角色
   产品召回。最新完整 `pnpm test` 仍引用既有 `383/389` 失败结果，不改写为 pass。
 
-退出门禁：编码、本地模拟门禁和用户 visibility matrix v1 private 裁决完成；真实环境项目保持
-`pending`，不得据此宣称 Phase 6 生产或硬件验收通过。
+退出门禁：编码、本地模拟门禁、visibility matrix v1 private 裁决、6F/6G/6H Cat 与 6I
+quota/retention 已完成；经用户延期的 Voice/家庭数据/物理/身份项保持未验证。完成本轮
+commit-bound 6I evidence 后进入 Phase 6 最终 review，不自动授权 Phase 7。
 
 ## 8. 完成定义
 
 - [x] 记忆来源可追踪、可删除；
 - [x] 确定性写入策略拒绝凭证和原始音频候选，evidence 不保存 Memory 正文；
-- [x] 实现边界保持 World State 从 P4/HA 读取，Memory 不作为真值；真实端到端证据仍 pending；
+- [x] 实现与 6G/6H Cat 实机证据保持 World State 从 P4/HA 读取，Memory 不作为真值；
 - [x] 召回效果有确定性量化证据；真实模型和代表性家庭效果仍 pending；
 - [x] 角色记忆可见性有量化对照，且用户已确认 v1 保持 private；跨角色读取不会隐式发生；
 - [x] WSL2 无法完成的真实环境验证已逐项记录为 `pending`；

@@ -37,6 +37,7 @@ export * from "./role-session.ts";
 export * from "./structured-logger.ts";
 export * from "./text-agent-audit.ts";
 export * from "./memory-policy.ts";
+export * from "./memory-storage-policy.ts";
 export * from "./memory-write-coordinator.ts";
 export * from "./role-memory.ts";
 export * from "./role-context-builder.ts";

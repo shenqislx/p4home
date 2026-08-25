@@ -2,8 +2,8 @@
 
 > Status: `deferred`
 > Created: 2026-08-16
-> Updated: 2026-08-24
-> Current scope: Phase 6 本地正确性已覆盖；生产耐久、容量、安全与运维仍 deferred
+> Updated: 2026-08-25
+> Current scope: quota/retention revision 1 已冻结；真实断电、加密、介质删除与其余运维仍 deferred
 > Review before: 任何真实家庭长期 Memory 部署
 
 ## 已在 Demo 阶段解决
@@ -35,8 +35,8 @@
 | 明确加密、密钥管理和防篡改策略 | 多用户主机或正式家庭部署前 | 敏感字段分类、静态加密、密钥轮换和审计完整性方案通过 review |
 | AgentProfile 使用不可变 revision，并在 Run 保存授权快照 | 支持 Profile 在线修改或多个 Profile 前 | 历史 Run 可还原当时授权，不受后续配置修改影响 |
 | 决定 `synchronous=FULL`、checkpoint 和断电耐久策略 | 正式长期运行前 | kill/power-loss 测试证明约定的最近提交保留范围 |
-| 增加总数据库/各数据类磁盘 quota | 连续运行或真实家庭 Memory 前 | 写入、WAL 和索引增长有硬上限；达到限额时 fail closed |
-| 批准按数据类/敏感度的保留期策略 | 写入真实家庭 Memory 前 | expiry 默认值、审计保留、删除传播和法律/用户预期经 review |
+| 增加总数据库/各数据类磁盘 quota（revision 1 已完成） | 连续运行或真实家庭 Memory 前 | DB/WAL/index 采用 128/256/256 MiB，达到限额时 fail closed |
+| 批准按数据类/敏感度的保留期策略（revision 1 已完成） | 写入真实家庭 Memory 前 | 9 格 expiry 默认值、超长拒绝与删除传播已 review/gate |
 | Action 主键扩展为设备作用域 | 支持多个 P4 设备前 | 使用 `(device_id, action_id)` 保持协议幂等语义 |
 | 增加 `integrity_check`、损坏隔离和可恢复备份 | 正式运维前 | 数据库损坏时 fail closed，并能恢复到已声明的恢复点 |
 | 定义 WAL/checkpoint、备份一致性与恢复演练 | 正式长期运行前 | 备份包含所需 sidecar/checkpoint 状态；恢复点与数据损失窗口可重复验证 |
@@ -44,7 +44,8 @@
 
 2026-08-25 更新：DB/WAL/index quota 的 fail-closed 实现和真实 APFS 合成门禁已完成；完整
 kind/sensitivity retention 矩阵、默认 expiry、旧记录重开拒绝和 bounded purge 传播也已完成。
-当前待 review 的是生产字节限额与 retention 天数，而不是执行机制。具体语义和候选矩阵见
+生产字节限额与 retention 天数已于 2026-08-25 获用户批准，并作为显式 opt-in revision 1
+策略落地；合成小配额仍只用于 fail-closed 边界探针。具体语义和冻结矩阵见
 [SQLite quota 与分类 retention 策略](../sqlite-quota-retention-policy.md)。
 
 ## 非目标
