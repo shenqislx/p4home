@@ -53,6 +53,7 @@ export interface WorkerOperationArgs {
   readonly deleteMemoryCascade: [MemoryDeletionRequest];
   readonly getMemoryDeletionAudit: [string, MemoryOwnerRole];
   readonly purgeExpiredMemories: [number, number];
+  readonly inspectStorageUsage: [];
   readonly backup: [string];
   readonly close: [];
 }

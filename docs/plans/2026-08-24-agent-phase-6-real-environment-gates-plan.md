@@ -59,19 +59,21 @@ Artifact:
 
 ## 4. 6H — Real P4 Cat and Voice + Memory
 
-- [ ] Add a dedicated Phase 6 hardware profile; do not reuse Phase 5E markers as
+- [x] Add a dedicated `phase6h_cat_memory` hardware profile; do not reuse Phase 5E markers as
   Memory proof.
-- [ ] Bind manifest `git_sha`, run id, profile, serial port, flash image hash and
+- [x] Reuse the artifact manifest binding for `git_sha`, run id, profile, serial port, flash image hash and
   dependency lock to the commit under test.
-- [ ] P4 Cat: inject a stale Cat-private world record, then prove the action and
+- [x] Implement P4 Cat stale private-Memory injection and artifact privacy audit; the harness requires
+  the action and
   final snapshot follow the P4 World/Object runtime.
 - [ ] Voice: prove real P4 microphone → STT → role runtime → private Memory recall
   → TTS/P4 playback, with no raw audio or Memory body in artifacts.
 - [ ] Require explicit `VERIFY:phase6h:*:PASS` markers and reject crash/reset-loop,
   credential leakage or a workflow-only verdict.
 
-This gate requires a reviewed workflow change, commit/push authorization and a
-self-hosted hardware run. It has not started and no P4 was flashed in 6F/6G/6I.
+The workflow/harness implementation is local and pre-commit. This gate still requires review,
+commit/push authorization and a self-hosted hardware run. No P4 has been flashed for 6H yet,
+so none of the new `VERIFY:phase6h:*` markers are accepted hardware evidence.
 
 ## 5. 6I — SQLite production filesystem and durability
 
@@ -86,7 +88,11 @@ self-hosted hardware run. It has not started and no P4 was flashed in 6F/6G/6I.
 - [x] Clean-commit rerun passed and binds implementation commit `8438b8f`.
   Real power-loss remains a separate
   result and is not closed by the controlled kill or backup probes.
-- [ ] Database/WAL/index quota and per-class retention fail closed at their limits.
+- [x] Database/WAL/index quota mechanisms and synthetic APFS fail-closed gates are implemented.
+- [x] Complete kind/sensitivity retention matrix enforcement, default expiry, legacy-open rejection
+  and bounded purge propagation are implemented and gated.
+- [ ] Approve production byte limits and the proposed retention durations; synthetic gate thresholds
+  are not production defaults. See [SQLite quota and retention policy](../sqlite-quota-retention-policy.md).
 - [ ] Encryption/key rotation design and identity binding are approved.
 - [x] [Secure-delete boundary documentation](../sqlite-deletion-remnants.md) and
   regression tests distinguish SQLite row deletion, WAL/backup remnants and SSD

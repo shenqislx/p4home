@@ -7,6 +7,7 @@ import {
   linkSync,
   lstatSync,
   openSync,
+  statfsSync,
   unlinkSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -112,6 +113,42 @@ export interface SqliteAuditStoreOptions {
    * accepting new work. Disable only for a concurrent diagnostic reader.
    */
   readonly reconcile_on_open?: boolean;
+  /** Optional file-backed storage ceilings. Every write is admitted conservatively. */
+  readonly storage_quota?: SqliteStorageQuota;
+  /** Optional complete retention matrix. Null expiry is replaced by the matching default. */
+  readonly memory_retention?: MemoryRetentionPolicy;
+}
+
+export interface SqliteStorageQuota {
+  readonly max_database_bytes: number;
+  readonly max_wal_bytes: number;
+  readonly max_index_bytes: number;
+}
+
+export type MemoryRetentionMatrix = Readonly<Record<
+  MemoryKind,
+  Readonly<Record<MemorySensitivity, number>>
+>>;
+
+export interface MemoryRetentionPolicy {
+  /** Revision of the retention matrix itself; independent of Memory ACL policy_revision. */
+  readonly retention_policy_revision: number;
+  readonly max_age_ms: MemoryRetentionMatrix;
+}
+
+export interface SqliteStorageUsage {
+  readonly page_size: number;
+  readonly database_pages: number;
+  readonly database_bytes: number;
+  readonly wal_bytes: number;
+  readonly index_bytes: number;
+}
+
+interface ValidatedStorageQuota extends SqliteStorageQuota {
+  readonly page_size: number;
+  readonly max_database_pages: number;
+  readonly max_transaction_wal_bytes: number;
+  readonly max_transaction_index_bytes: number;
 }
 
 export interface AuditRecoveryReport {
@@ -133,10 +170,25 @@ export interface SqliteBackupResult {
   readonly mode: "600";
 }
 
+export type AuditStorageErrorCode =
+  | "MEMORY_RETENTION_EXPIRY_EXCEEDED"
+  | "MEMORY_RETENTION_EXISTING_ROW_VIOLATION"
+  | "SQLITE_DATABASE_QUOTA_EXCEEDED"
+  | "SQLITE_INDEX_QUOTA_HEADROOM"
+  | "SQLITE_INDEX_QUOTA_EXCEEDED"
+  | "SQLITE_WAL_QUOTA_HEADROOM";
+
+interface AuditStorageErrorOptions extends ErrorOptions {
+  readonly code?: AuditStorageErrorCode;
+}
+
 export class AuditStorageError extends Error {
-  public constructor(message: string, options: ErrorOptions = {}) {
+  public readonly code: AuditStorageErrorCode | undefined;
+
+  public constructor(message: string, options: AuditStorageErrorOptions = {}) {
     super(message, options);
     this.name = "AuditStorageError";
+    this.code = options.code;
   }
 }
 
@@ -481,6 +533,68 @@ interface ValidatedMemoryCreate extends MemoryCreate {
   readonly supersedes_memory_id: string | null;
 }
 
+function validateRetentionPolicy(policy: MemoryRetentionPolicy): MemoryRetentionPolicy {
+  const policyRevision = positiveInteger(
+    policy.retention_policy_revision,
+    "memory retention retention_policy_revision",
+  );
+  const kinds = [...MEMORY_KINDS];
+  const sensitivities = [...MEMORY_SENSITIVITIES];
+  if (
+    policy.max_age_ms === null
+    || typeof policy.max_age_ms !== "object"
+    || Array.isArray(policy.max_age_ms)
+    || Object.keys(policy.max_age_ms).length !== kinds.length
+  ) {
+    throw new AuditStorageError("memory retention max_age_ms must cover every memory kind");
+  }
+  const matrix = {} as Record<MemoryKind, Record<MemorySensitivity, number>>;
+  for (const kind of kinds) {
+    const rules = policy.max_age_ms[kind];
+    if (
+      rules === null
+      || typeof rules !== "object"
+      || Array.isArray(rules)
+      || Object.keys(rules).length !== sensitivities.length
+    ) {
+      throw new AuditStorageError(
+        `memory retention max_age_ms.${kind} must cover every sensitivity`,
+      );
+    }
+    const normalized = {} as Record<MemorySensitivity, number>;
+    for (const sensitivity of sensitivities) {
+      normalized[sensitivity] = positiveInteger(
+        rules[sensitivity],
+        `memory retention max_age_ms.${kind}.${sensitivity}`,
+      );
+    }
+    matrix[kind] = normalized;
+  }
+  return { retention_policy_revision: policyRevision, max_age_ms: matrix };
+}
+
+function applyRetentionPolicy(
+  value: ValidatedMemoryCreate,
+  policy: MemoryRetentionPolicy | undefined,
+): ValidatedMemoryCreate {
+  if (policy === undefined) {
+    return value;
+  }
+  const maxAgeMs = policy.max_age_ms[value.kind][value.sensitivity];
+  const maximumExpiry = value.created_at_ms + maxAgeMs;
+  if (!Number.isSafeInteger(maximumExpiry)) {
+    throw new AuditStorageError("memory retention expiry exceeds the safe integer range");
+  }
+  const expiresAtMs = value.expires_at_ms ?? maximumExpiry;
+  if (expiresAtMs > maximumExpiry) {
+    throw new AuditStorageError(
+      `memory expiry exceeds retention limit for ${value.kind}/${value.sensitivity}`,
+      { code: "MEMORY_RETENTION_EXPIRY_EXCEEDED" },
+    );
+  }
+  return { ...value, expires_at_ms: expiresAtMs };
+}
+
 function validatedMemoryCreate(memory: MemoryCreate): ValidatedMemoryCreate {
   if (memory.schema_version !== MEMORY_SCHEMA_VERSION) {
     throw new AuditStorageError(
@@ -759,6 +873,9 @@ function toolCallFromRow(row: Record<string, unknown>): StoredToolCall {
 
 export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Disposable {
   readonly #database: DatabaseSync;
+  readonly #databasePath: string;
+  readonly #memoryRetention: MemoryRetentionPolicy | undefined;
+  #storageQuota: ValidatedStorageQuota | undefined;
   #closed = false;
 
   public constructor(path: string, options: SqliteAuditStoreOptions = {}) {
@@ -767,6 +884,13 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
       throw new RangeError("timeout_ms must be an integer between 0 and 120000");
     }
     const databasePath = preparePrivateDatabasePath(path);
+    if (databasePath === ":memory:" && options.storage_quota !== undefined) {
+      throw new AuditStorageError("storage_quota requires a file-backed SQLite database");
+    }
+    this.#databasePath = databasePath;
+    this.#memoryRetention = options.memory_retention === undefined
+      ? undefined
+      : validateRetentionPolicy(options.memory_retention);
     this.#database = new DatabaseSync(databasePath, {
       timeout: timeoutMs,
       enableForeignKeyConstraints: true,
@@ -776,8 +900,16 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
     });
     try {
       setOperationalPragmas(this.#database, timeoutMs);
-      this.#migrate();
       assertPrivateDatabaseFiles(databasePath);
+      if (options.storage_quota !== undefined) {
+        this.#configureStorageQuota(options.storage_quota);
+      }
+      this.#migrate();
+      // Migrations are quota-bound writes. Reclaim their WAL before callers can
+      // open a reader and pin bootstrap frames against the first application write.
+      this.#prepareQuotaWrite();
+      assertPrivateDatabaseFiles(databasePath);
+      this.#assertExistingRetentionCompliance();
       if (options.reconcile_on_open !== false) {
         this.reconcileInterruptedRuns(Date.now());
       }
@@ -791,41 +923,47 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
   public async saveAgentProfile(profile: AgentProfile): Promise<void> {
     this.#assertOpen();
     const profileAllowedTools = allowedTools(profile.allowed_tools, "allowed_tools");
-    this.#database.prepare(`
-      INSERT INTO agent_profiles (agent_profile_id, name, locale, allowed_tools_json)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(agent_profile_id) DO UPDATE SET
-        name = excluded.name,
-        locale = excluded.locale,
-        allowed_tools_json = excluded.allowed_tools_json
-    `).run(
-      profile.agent_profile_id,
-      profile.name,
-      profile.locale,
-      json(profileAllowedTools, "allowed_tools"),
-    );
+    this.#transaction(() => {
+      this.#database.prepare(`
+        INSERT INTO agent_profiles (agent_profile_id, name, locale, allowed_tools_json)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(agent_profile_id) DO UPDATE SET
+          name = excluded.name,
+          locale = excluded.locale,
+          allowed_tools_json = excluded.allowed_tools_json
+      `).run(
+        profile.agent_profile_id,
+        profile.name,
+        profile.locale,
+        json(profileAllowedTools, "allowed_tools"),
+      );
+    });
   }
 
   public async saveSession(session: Session): Promise<void> {
     this.#assertOpen();
-    const write = this.#database.prepare(`
-      INSERT INTO sessions (
-        session_id, agent_profile_id, created_at_ms, updated_at_ms
-      ) VALUES (?, ?, ?, ?)
-      ON CONFLICT(session_id) DO UPDATE SET
-        updated_at_ms = excluded.updated_at_ms
-      WHERE sessions.agent_profile_id = excluded.agent_profile_id
-        AND sessions.created_at_ms = excluded.created_at_ms
-        AND excluded.updated_at_ms >= sessions.updated_at_ms
-    `).run(
-      session.session_id,
-      session.agent_profile_id,
-      session.created_at_ms,
-      session.updated_at_ms,
-    );
-    if (Number(write.changes) !== 1) {
-      throw new AuditStorageError(`session ${session.session_id} conflicts with stored identity or time`);
-    }
+    this.#transaction(() => {
+      const write = this.#database.prepare(`
+        INSERT INTO sessions (
+          session_id, agent_profile_id, created_at_ms, updated_at_ms
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+          updated_at_ms = excluded.updated_at_ms
+        WHERE sessions.agent_profile_id = excluded.agent_profile_id
+          AND sessions.created_at_ms = excluded.created_at_ms
+          AND excluded.updated_at_ms >= sessions.updated_at_ms
+      `).run(
+        session.session_id,
+        session.agent_profile_id,
+        session.created_at_ms,
+        session.updated_at_ms,
+      );
+      if (Number(write.changes) !== 1) {
+        throw new AuditStorageError(
+          `session ${session.session_id} conflicts with stored identity or time`,
+        );
+      }
+    });
   }
 
   public async saveRun(run: Run): Promise<void> {
@@ -978,7 +1116,7 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
 
   public async createMemory(memory: MemoryCreate): Promise<MemoryRecord> {
     this.#assertOpen();
-    const value = validatedMemoryCreate(memory);
+    const value = applyRetentionPolicy(validatedMemoryCreate(memory), this.#memoryRetention);
     return this.#transactionWithResult(() => {
       this.#insertMemory(value);
       return this.#readMemoryById(value.memory_id);
@@ -992,7 +1130,7 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
         "canonical memory requires idempotency_key and subject_key",
       );
     }
-    const value = validatedMemoryCreate(memory);
+    const value = applyRetentionPolicy(validatedMemoryCreate(memory), this.#memoryRetention);
     return this.#transactionWithResult(() => {
       const retry = this.#database.prepare(`
         SELECT * FROM memories WHERE idempotency_key = ?
@@ -1113,7 +1251,7 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
       if (updatedAtMs < existing.updated_at_ms) {
         throw new AuditStorageError("memory.updated_at_ms cannot move backwards");
       }
-      const value = validatedMemoryCreate({
+      const value = applyRetentionPolicy(validatedMemoryCreate({
         schema_version: MEMORY_SCHEMA_VERSION,
         memory_id: existing.memory_id,
         kind: update.kind === undefined ? existing.kind : update.kind,
@@ -1144,7 +1282,7 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
         idempotency_key: existing.idempotency_key,
         subject_key: existing.subject_key,
         supersedes_memory_id: existing.supersedes_memory_id,
-      });
+      }), this.#memoryRetention);
       if (value.policy_revision < existing.policy_revision) {
         throw new AuditStorageError("memory.policy_revision cannot move backwards");
       }
@@ -1349,11 +1487,13 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
     this.#assertOpen();
     const id = boundedText(memoryId, "memoryId", MAX_MEMORY_ID_LENGTH);
     const role = memoryRole(requesterRole, "requesterRole");
-    const write = this.#database.prepare(`
-      DELETE FROM memories
-      WHERE memory_id = ? AND owner_role = ?
-    `).run(id, role);
-    return Number(write.changes) === 1;
+    return this.#transactionWithResult(() => {
+      const write = this.#database.prepare(`
+        DELETE FROM memories
+        WHERE memory_id = ? AND owner_role = ?
+      `).run(id, role);
+      return Number(write.changes) === 1;
+    });
   }
 
   public async deleteMemoryCascade(
@@ -1493,17 +1633,19 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
     if (boundedLimit > MAX_MEMORY_PURGE_SIZE) {
       throw new AuditStorageError(`limit cannot exceed ${MAX_MEMORY_PURGE_SIZE}`);
     }
-    const write = this.#database.prepare(`
-      DELETE FROM memories
-      WHERE rowid IN (
-        SELECT rowid
-        FROM memories
-        WHERE expires_at_ms IS NOT NULL AND expires_at_ms <= ?
-        ORDER BY expires_at_ms, memory_id
-        LIMIT ?
-      )
-    `).run(now, boundedLimit);
-    return Number(write.changes);
+    return this.#transactionWithResult(() => {
+      const write = this.#database.prepare(`
+        DELETE FROM memories
+        WHERE rowid IN (
+          SELECT rowid
+          FROM memories
+          WHERE expires_at_ms IS NOT NULL AND expires_at_ms <= ?
+          ORDER BY expires_at_ms, memory_id
+          LIMIT ?
+        )
+      `).run(now, boundedLimit);
+      return Number(write.changes);
+    });
   }
 
   public reconcileInterruptedRuns(recoveredAtMs: number): AuditRecoveryReport {
@@ -1687,6 +1829,35 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
       journal_mode: stringValue(journal?.journal_mode, "PRAGMA journal_mode"),
       synchronous: numberValue(synchronous?.synchronous, "PRAGMA synchronous"),
       secure_delete: numberValue(secureDelete?.secure_delete, "PRAGMA secure_delete"),
+    };
+  }
+
+  public inspectStorageUsage(): SqliteStorageUsage {
+    this.#assertOpen();
+    const pageSize = numberValue(
+      this.#database.prepare("PRAGMA page_size").get()?.page_size,
+      "PRAGMA page_size",
+    );
+    const databasePages = numberValue(
+      this.#database.prepare("PRAGMA page_count").get()?.page_count,
+      "PRAGMA page_count",
+    );
+    const indexBytes = numberValue(
+      this.#database.prepare(`
+        SELECT COALESCE(SUM(stat.pgsize), 0) AS index_bytes
+        FROM dbstat AS stat
+        WHERE stat.name IN (
+          SELECT name FROM sqlite_schema WHERE type = 'index'
+        ) OR stat.name GLOB 'memories_fts*'
+      `).get()?.index_bytes,
+      "SQLite index bytes",
+    );
+    return {
+      page_size: pageSize,
+      database_pages: databasePages,
+      database_bytes: pageSize * databasePages,
+      wal_bytes: this.#fileSizeIfPresent(`${this.#databasePath}-wal`),
+      index_bytes: indexBytes,
     };
   }
 
@@ -2050,26 +2221,239 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
     }
   }
 
+  #fileSizeIfPresent(path: string): number {
+    if (this.#databasePath === ":memory:") {
+      return 0;
+    }
+    try {
+      return lstatSync(path).size;
+    } catch (error) {
+      if (filesystemErrorCode(error) === "ENOENT") {
+        return 0;
+      }
+      throw new AuditStorageError(`SQLite quota file cannot be inspected: ${path}`, {
+        cause: error,
+      });
+    }
+  }
+
+  #configureStorageQuota(quota: SqliteStorageQuota): void {
+    const maxDatabaseBytes = positiveInteger(
+      quota.max_database_bytes,
+      "storage_quota.max_database_bytes",
+    );
+    const maxWalBytes = positiveInteger(
+      quota.max_wal_bytes,
+      "storage_quota.max_wal_bytes",
+    );
+    const maxIndexBytes = positiveInteger(
+      quota.max_index_bytes,
+      "storage_quota.max_index_bytes",
+    );
+    const checkpoint = this.#database.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    if (numberValue(checkpoint?.busy, "quota checkpoint busy") !== 0) {
+      throw new AuditStorageError("storage quota cannot initialize while WAL readers are active");
+    }
+    const usage = this.inspectStorageUsage();
+    const maxDatabasePages = Math.floor(maxDatabaseBytes / usage.page_size);
+    if (maxDatabasePages < usage.database_pages) {
+      throw new AuditStorageError("storage database quota is below current database usage");
+    }
+    const maxTransactionWalBytes = 32
+      + maxDatabasePages * (usage.page_size + 24);
+    if (!Number.isSafeInteger(maxTransactionWalBytes) || maxWalBytes < maxTransactionWalBytes) {
+      throw new AuditStorageError(
+        "storage WAL quota must cover one worst-case database-sized transaction",
+      );
+    }
+    const maxTransactionIndexBytes = maxDatabasePages * usage.page_size;
+    if (maxIndexBytes < usage.index_bytes + maxTransactionIndexBytes) {
+      throw new AuditStorageError(
+        "storage index quota must preserve one worst-case database-sized write headroom",
+      );
+    }
+    const applied = numberValue(
+      this.#database.prepare(`PRAGMA max_page_count = ${maxDatabasePages}`).get()
+        ?.max_page_count,
+      "PRAGMA max_page_count",
+    );
+    if (applied !== maxDatabasePages) {
+      throw new AuditStorageError("SQLite did not apply the requested database page quota");
+    }
+    const checkpointPages = Math.max(
+      1,
+      Math.floor(maxWalBytes / (usage.page_size + 24) / 2),
+    );
+    this.#database.exec(
+      `PRAGMA wal_autocheckpoint = ${checkpointPages}; `
+      + `PRAGMA journal_size_limit = ${maxWalBytes}; PRAGMA cache_spill = OFF;`,
+    );
+    this.#storageQuota = {
+      max_database_bytes: maxDatabaseBytes,
+      max_wal_bytes: maxWalBytes,
+      max_index_bytes: maxIndexBytes,
+      page_size: usage.page_size,
+      max_database_pages: maxDatabasePages,
+      max_transaction_wal_bytes: maxTransactionWalBytes,
+      max_transaction_index_bytes: maxTransactionIndexBytes,
+    };
+  }
+
+  #assertExistingRetentionCompliance(): void {
+    const policy = this.#memoryRetention;
+    if (policy === undefined) {
+      return;
+    }
+    const rows = this.#database.prepare(`
+      SELECT memory_id, kind, sensitivity, created_at_ms, expires_at_ms
+      FROM memories
+    `).all();
+    for (const row of rows) {
+      const kind = enumValue(row.kind, MEMORY_KINDS, "stored memory kind");
+      const sensitivity = enumValue(
+        row.sensitivity,
+        MEMORY_SENSITIVITIES,
+        "stored memory sensitivity",
+      );
+      const createdAtMs = numberValue(row.created_at_ms, "stored memory created_at_ms");
+      const expiresAtMs = nullableNumber(row.expires_at_ms, "stored memory expires_at_ms");
+      const maximumExpiry = createdAtMs + policy.max_age_ms[kind][sensitivity];
+      if (
+        expiresAtMs === null
+        || !Number.isSafeInteger(maximumExpiry)
+        || expiresAtMs > maximumExpiry
+      ) {
+        throw new AuditStorageError(
+          `stored memory ${stringValue(row.memory_id, "stored memory_id")} violates retention policy`,
+          { code: "MEMORY_RETENTION_EXISTING_ROW_VIOLATION" },
+        );
+      }
+    }
+  }
+
+  #prepareQuotaWrite(): void {
+    if (this.#storageQuota === undefined) {
+      return;
+    }
+    // TRUNCATE succeeds when no reader pins an older snapshot. A pinned WAL is
+    // still allowed only when a complete worst-case transaction fits below the cap.
+    const busyTimeout = numberValue(
+      this.#database.prepare("PRAGMA busy_timeout").get()?.timeout,
+      "PRAGMA busy_timeout",
+    );
+    try {
+      this.#database.exec("PRAGMA busy_timeout = 0");
+      this.#database.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    } finally {
+      this.#database.exec(`PRAGMA busy_timeout = ${busyTimeout}`);
+    }
+  }
+
+  #assertQuotaWriteAdmitted(): void {
+    const quota = this.#storageQuota;
+    if (quota === undefined) {
+      return;
+    }
+    const walBytes = this.#fileSizeIfPresent(`${this.#databasePath}-wal`);
+    if (walBytes + quota.max_transaction_wal_bytes > quota.max_wal_bytes) {
+      throw new AuditStorageError("storage WAL quota has insufficient write headroom", {
+        code: "SQLITE_WAL_QUOTA_HEADROOM",
+      });
+    }
+    const indexBytes = this.inspectStorageUsage().index_bytes;
+    if (indexBytes + quota.max_transaction_index_bytes > quota.max_index_bytes) {
+      throw new AuditStorageError("storage index quota has insufficient write headroom", {
+        code: "SQLITE_INDEX_QUOTA_HEADROOM",
+      });
+    }
+  }
+
+  #assertQuotaBeforeCommit(): void {
+    const quota = this.#storageQuota;
+    if (quota === undefined) {
+      return;
+    }
+    const usage = this.inspectStorageUsage();
+    if (usage.database_pages > quota.max_database_pages) {
+      throw new AuditStorageError("storage database quota exceeded", {
+        code: "SQLITE_DATABASE_QUOTA_EXCEEDED",
+      });
+    }
+    if (usage.index_bytes > quota.max_index_bytes) {
+      throw new AuditStorageError("storage index quota exceeded", {
+        code: "SQLITE_INDEX_QUOTA_EXCEEDED",
+      });
+    }
+  }
+
+  #normalizeQuotaFailure(error: unknown): unknown {
+    const quota = this.#storageQuota;
+    if (
+      quota === undefined
+      || error instanceof AuditStorageError
+      || !(error instanceof Error)
+      || !/database or disk is full/iu.test(error.message)
+    ) {
+      return error;
+    }
+    const appliedMaxPageCount = numberValue(
+      this.#database.prepare("PRAGMA max_page_count").get()?.max_page_count,
+      "PRAGMA max_page_count after SQLITE_FULL",
+    );
+    let freeBytes: bigint;
+    try {
+      const filesystem = statfsSync(dirname(this.#databasePath), { bigint: true });
+      freeBytes = filesystem.bavail * filesystem.bsize;
+    } catch {
+      return error;
+    }
+    if (
+      appliedMaxPageCount !== quota.max_database_pages
+      || freeBytes <= BigInt(quota.max_transaction_wal_bytes + quota.page_size)
+    ) {
+      return error;
+    }
+    return new AuditStorageError("storage database quota exceeded", {
+      cause: error,
+      code: "SQLITE_DATABASE_QUOTA_EXCEEDED",
+    });
+  }
+
   #transaction(operation: () => void): void {
+    this.#prepareQuotaWrite();
     this.#database.exec("BEGIN IMMEDIATE");
     try {
+      this.#assertQuotaWriteAdmitted();
       operation();
+      this.#assertQuotaBeforeCommit();
       this.#database.exec("COMMIT");
     } catch (error) {
-      this.#database.exec("ROLLBACK");
-      throw error;
+      try {
+        this.#database.exec("ROLLBACK");
+      } catch {
+        // SQLITE_FULL may roll the transaction back automatically. Preserve
+        // the original quota/storage failure instead of masking it.
+      }
+      throw this.#normalizeQuotaFailure(error);
     }
   }
 
   #transactionWithResult<T>(operation: () => T): T {
+    this.#prepareQuotaWrite();
     this.#database.exec("BEGIN IMMEDIATE");
     try {
+      this.#assertQuotaWriteAdmitted();
       const result = operation();
+      this.#assertQuotaBeforeCommit();
       this.#database.exec("COMMIT");
       return result;
     } catch (error) {
-      this.#database.exec("ROLLBACK");
-      throw error;
+      try {
+        this.#database.exec("ROLLBACK");
+      } catch {
+        // See #transaction: SQLite can auto-rollback a full database.
+      }
+      throw this.#normalizeQuotaFailure(error);
     }
   }
 

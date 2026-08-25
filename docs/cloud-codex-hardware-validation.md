@@ -47,7 +47,7 @@ Actions secret。workflow 只把解码结果写入 `$RUNNER_TEMP`，不会复制
 
 | 参数 | 默认值 | 约束 |
 |---|---|---|
-| `validation_profile` | `generic` | `generic`、`phase2d_agent`、`phase3d_object`、`phase4c_ha` 或 `phase5a_voice` |
+| `validation_profile` | `generic` | `generic`、`phase2d_agent`、`phase3d_object`、`phase4c_ha`、`phase5a_voice`、`phase5b_voice`、`phase5c_stt`、`phase5e_e2e` 或 `phase6h_cat_memory` |
 | `serial_port` | `/dev/cu.usbserial-210` | runner 上的字符设备 |
 | `monitor_seconds` | `120` | `10–7200` 秒 |
 | `agent_host` | 空 | Agent profile 时必填；P4 可访问的 runner LAN host |
@@ -85,6 +85,18 @@ runner 临时 sdkconfig 中打开 audio startup selftest、ESP-SR 和 Phase 5A m
 transport；它不创建 Voice socket、不向 Agent 发送 PCM，也不接入 STT/TTS。自动证据覆盖 codec、
 非零 PCM、AFE feed/fetch、lease、资源/看门狗和 UI；真实 `Hi ESP`、`turn on the light` 口播与
 speaker 可听播放属于人工观察，必须和自动 marker 分开报告。
+
+Phase 6H Cat + Memory 使用独立的 `phase6h_cat_memory`，`monitor_seconds` 至少为 120 秒，
+Device Protocol 固定为 v2。runner 在 `0700` 临时目录创建 `0600` SQLite，只写入一条 Cat-private、
+带随机 canary 且故意与实时 World 冲突的旧记录；Memory 以 `untrusted_memory` 数据进入 Cat 上下文，
+但动作目标和最终坐姿必须服从 P4 Object snapshot。原始串口和 harness 输出只保存在 runner 私有
+临时目录；上传候选在写 manifest 前扫描一次性 device token、TLS 私钥、Memory canary，以及完整、
+截断和编码形式的私密材料，审计通过后才原子生成 `firmware/monitor.log`。审计失败时不打印原始
+串口、不生成发布日志并跳过 artifact 上传。artifact/manifest 只允许出现 Memory ID、projection 状态、P4 最终状态与
+`phase6h_artifact_audit_status`。专用证据为 `VERIFY:phase6h:cat_memory_recall:PASS`、
+`VERIFY:phase6h:world_truth_wins:PASS`、`VERIFY:phase6h:artifact_privacy:PASS` 和审计 marker；
+缺少任一功能 marker 时，Cloud Codex 必须判为 `inconclusive`，不能只凭 workflow 绿色通过；
+harness 业务退出码和 `VERIFY:*:FAIL` 本身不改变 transport job 状态，隐私发布失败仍会 fail closed。
 
 ## 4. Artifact Contract
 

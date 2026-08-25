@@ -20,7 +20,16 @@ import { promisify } from "node:util";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { SynchronousSqliteAuditStore } from "@p4home/storage-sqlite";
+import {
+  AuditStorageError,
+  SynchronousSqliteAuditStore,
+  type AuditStorageErrorCode,
+  type MemoryCreate,
+  type MemoryKind,
+  type MemoryRetentionPolicy,
+  type MemorySensitivity,
+  type SqliteStorageQuota,
+} from "@p4home/storage-sqlite";
 
 const execFileAsync = promisify(execFile);
 
@@ -58,6 +67,19 @@ export interface Phase6iAssessmentInput {
   readonly backup_mode: string;
   readonly backup_integrity_check: string;
   readonly backup_restored_memory_count: number;
+  readonly database_quota_rejected: boolean;
+  readonly database_quota_bytes: number;
+  readonly database_quota_limit_bytes: number;
+  readonly wal_quota_rejected_with_pinned_reader: boolean;
+  readonly wal_quota_bytes: number;
+  readonly wal_quota_limit_bytes: number;
+  readonly index_quota_rejected: boolean;
+  readonly index_quota_bytes: number;
+  readonly index_quota_limit_bytes: number;
+  readonly retention_matrix_validated: boolean;
+  readonly retention_overlong_rejected: boolean;
+  readonly retention_legacy_reopen_rejected: boolean;
+  readonly retention_expired_purge_propagated: boolean;
 }
 
 export interface Phase6iSqliteGateResult extends Phase6iAssessmentInput {
@@ -75,8 +97,8 @@ export interface Phase6iSqliteGateResult extends Phase6iAssessmentInput {
   readonly cold_backup_after_checkpoint: true;
   readonly real_power_loss_performed: false;
   readonly online_backup_api_validated: true;
-  readonly quota_gate_validated: false;
-  readonly retention_gate_validated: false;
+  readonly quota_gate_validated: boolean;
+  readonly retention_gate_validated: boolean;
   readonly encryption_gate_validated: false;
   readonly secure_delete_gate_validated: false;
   readonly reason: "ok" | "gate_failed";
@@ -106,7 +128,25 @@ export function assessPhase6iSqliteGate(input: Phase6iAssessmentInput): boolean 
     && input.online_backup_excludes_post_snapshot_memory
     && input.backup_mode === "600"
     && input.backup_integrity_check === "ok"
-    && input.backup_restored_memory_count === 1;
+    && input.backup_restored_memory_count === 1
+    && assessPhase6iQuotaGate(input)
+    && assessPhase6iRetentionGate(input);
+}
+
+export function assessPhase6iQuotaGate(input: Phase6iAssessmentInput): boolean {
+  return input.database_quota_rejected
+    && input.database_quota_bytes <= input.database_quota_limit_bytes
+    && input.wal_quota_rejected_with_pinned_reader
+    && input.wal_quota_bytes <= input.wal_quota_limit_bytes
+    && input.index_quota_rejected
+    && input.index_quota_bytes <= input.index_quota_limit_bytes;
+}
+
+export function assessPhase6iRetentionGate(input: Phase6iAssessmentInput): boolean {
+  return input.retention_matrix_validated
+    && input.retention_overlong_rejected
+    && input.retention_legacy_reopen_rejected
+    && input.retention_expired_purge_propagated;
 }
 
 function mode(path: string): string {
@@ -161,6 +201,300 @@ function createProbeMemory(memoryId: string, createdAtMs = 1) {
     tags: ["phase6i-probe"],
     created_at_ms: createdAtMs,
     expires_at_ms: null,
+  };
+}
+
+const POLICY_DAY_MS = 86_400_000;
+const SYNTHETIC_RETENTION_POLICY: MemoryRetentionPolicy = {
+  retention_policy_revision: 19,
+  max_age_ms: {
+    conversation_summary: {
+      normal: 30 * POLICY_DAY_MS,
+      personal: 14 * POLICY_DAY_MS,
+      restricted: 7 * POLICY_DAY_MS,
+    },
+    user_fact: {
+      normal: 365 * POLICY_DAY_MS,
+      personal: 180 * POLICY_DAY_MS,
+      restricted: 30 * POLICY_DAY_MS,
+    },
+    task_outcome: {
+      normal: 90 * POLICY_DAY_MS,
+      personal: 60 * POLICY_DAY_MS,
+      restricted: 30 * POLICY_DAY_MS,
+    },
+  },
+};
+
+function policySource(kind: MemoryKind): MemoryCreate["source"] {
+  return ({
+    conversation_summary: "model_derived",
+    user_fact: "user_explicit",
+    task_outcome: "task_execution",
+  } as const)[kind];
+}
+
+function policyMemory(
+  memoryId: string,
+  kind: MemoryKind,
+  sensitivity: MemorySensitivity,
+  expiresAtMs: number | null = null,
+): MemoryCreate {
+  return {
+    ...createProbeMemory(memoryId, 1_000),
+    kind,
+    source: policySource(kind),
+    sensitivity,
+    policy_revision: 1,
+    expires_at_ms: expiresAtMs,
+  };
+}
+
+function assertExpectedStorageError(
+  error: unknown,
+  code: AuditStorageErrorCode,
+  label: string,
+): void {
+  assert.ok(error instanceof AuditStorageError, `${label} must throw AuditStorageError`);
+  assert.equal(error.code, code, `${label} must throw ${code}`);
+}
+
+function syntheticQuota(maxDatabaseBytes = 512 * 1_024): SqliteStorageQuota {
+  const pageSize = 4_096;
+  const pages = Math.floor(maxDatabaseBytes / pageSize);
+  return {
+    max_database_bytes: maxDatabaseBytes,
+    max_wal_bytes: 32 + pages * (pageSize + 24),
+    max_index_bytes: maxDatabaseBytes * 2,
+  };
+}
+
+interface StoragePolicyProbeResult {
+  readonly database_quota_rejected: boolean;
+  readonly database_quota_bytes: number;
+  readonly database_quota_limit_bytes: number;
+  readonly wal_quota_rejected_with_pinned_reader: boolean;
+  readonly wal_quota_bytes: number;
+  readonly wal_quota_limit_bytes: number;
+  readonly index_quota_rejected: boolean;
+  readonly index_quota_bytes: number;
+  readonly index_quota_limit_bytes: number;
+  readonly retention_matrix_validated: boolean;
+  readonly retention_overlong_rejected: boolean;
+  readonly retention_legacy_reopen_rejected: boolean;
+  readonly retention_expired_purge_propagated: boolean;
+}
+
+async function storagePolicyProbe(directory: string): Promise<StoragePolicyProbeResult> {
+  const quota = syntheticQuota();
+  const databasePath = join(directory, "quota-database.sqlite");
+  let databaseQuotaRejected = false;
+  let databaseQuotaBytes = 0;
+  {
+    using store = new SynchronousSqliteAuditStore(databasePath, {
+      reconcile_on_open: false,
+      storage_quota: quota,
+    });
+    for (let index = 0; index < 100; index += 1) {
+      const memoryId = `quota-database-${index}`;
+      try {
+        await store.createMemory({
+          ...createProbeMemory(memoryId, index + 1),
+          content: `quota-database-${index}:${"x".repeat(32_000)}`,
+        });
+      } catch (error) {
+        assertExpectedStorageError(
+          error,
+          "SQLITE_DATABASE_QUOTA_EXCEEDED",
+          "database quota probe",
+        );
+        assert.equal(await store.getMemory(memoryId, "robot", Number.MAX_SAFE_INTEGER), null);
+        databaseQuotaRejected = true;
+        break;
+      }
+    }
+    databaseQuotaBytes = store.inspectStorageUsage().database_bytes;
+  }
+
+  const indexPath = join(directory, "quota-index.sqlite");
+  let baselineIndexBytes = 0;
+  {
+    using baseline = new SynchronousSqliteAuditStore(indexPath, {
+      reconcile_on_open: false,
+    });
+    baselineIndexBytes = baseline.inspectStorageUsage().index_bytes;
+  }
+  let indexQuotaRejected = false;
+  let indexQuotaBytes = 0;
+  {
+    using store = new SynchronousSqliteAuditStore(indexPath, {
+      reconcile_on_open: false,
+      storage_quota: {
+        ...quota,
+        max_index_bytes: baselineIndexBytes + quota.max_database_bytes,
+      },
+    });
+    for (let index = 0; index < 100; index += 1) {
+      const memoryId = `quota-index-${index}`;
+      try {
+        await store.createMemory({
+          ...createProbeMemory(memoryId, index + 1),
+          content: (`quota-index-${index} ${"unique-search-term ".repeat(100)}`).trim(),
+          tags: [`quota-index-${index}`],
+        });
+      } catch (error) {
+        assertExpectedStorageError(
+          error,
+          "SQLITE_INDEX_QUOTA_HEADROOM",
+          "index quota probe",
+        );
+        assert.equal(await store.getMemory(memoryId, "robot", Number.MAX_SAFE_INTEGER), null);
+        indexQuotaRejected = true;
+        break;
+      }
+    }
+    indexQuotaBytes = store.inspectStorageUsage().index_bytes;
+  }
+
+  const walPath = join(directory, "quota-wal.sqlite");
+  let walQuotaRejected = false;
+  let walQuotaBytes = 0;
+  let reader: DatabaseSync | undefined;
+  try {
+    using store = new SynchronousSqliteAuditStore(walPath, {
+      reconcile_on_open: false,
+      storage_quota: quota,
+    });
+    reader = new DatabaseSync(walPath, { readOnly: true });
+    reader.exec("BEGIN");
+    reader.prepare("SELECT COUNT(*) FROM memories").get();
+    await store.createMemory(createProbeMemory("quota-wal-first"));
+    try {
+      await store.createMemory(createProbeMemory("quota-wal-rejected", 2));
+    } catch (error) {
+      assertExpectedStorageError(
+        error,
+        "SQLITE_WAL_QUOTA_HEADROOM",
+        "WAL quota probe",
+      );
+      assert.equal(
+        await store.getMemory("quota-wal-rejected", "robot", Number.MAX_SAFE_INTEGER),
+        null,
+      );
+      walQuotaRejected = true;
+    }
+    walQuotaBytes = store.inspectStorageUsage().wal_bytes;
+  } finally {
+    if (reader !== undefined) {
+      reader.exec("ROLLBACK");
+      reader.close();
+    }
+  }
+
+  const retentionPath = join(directory, "retention.sqlite");
+  let retentionMatrixValidated = true;
+  let retentionOverlongRejected = false;
+  let retentionExpiredPurgePropagated = false;
+  {
+    using store = new SynchronousSqliteAuditStore(retentionPath, {
+      reconcile_on_open: false,
+      memory_retention: SYNTHETIC_RETENTION_POLICY,
+    });
+    for (const kind of [
+      "conversation_summary",
+      "user_fact",
+      "task_outcome",
+    ] as const) {
+      for (const sensitivity of ["normal", "personal", "restricted"] as const) {
+        const record = await store.createMemory(policyMemory(
+          `retention-${kind}-${sensitivity}`,
+          kind,
+          sensitivity,
+        ));
+        retentionMatrixValidated &&=
+          record.expires_at_ms === 1_000
+            + SYNTHETIC_RETENTION_POLICY.max_age_ms[kind][sensitivity];
+      }
+    }
+    try {
+      await store.createMemory(policyMemory(
+        "retention-too-long",
+        "user_fact",
+        "restricted",
+        1_001 + SYNTHETIC_RETENTION_POLICY.max_age_ms.user_fact.restricted,
+      ));
+    } catch (error) {
+      assertExpectedStorageError(
+        error,
+        "MEMORY_RETENTION_EXPIRY_EXCEEDED",
+        "retention overlong probe",
+      );
+      assert.equal(
+        await store.getMemory("retention-too-long", "robot", Number.MAX_SAFE_INTEGER),
+        null,
+      );
+      retentionOverlongRejected = true;
+    }
+    const expired = await store.createMemory(policyMemory(
+      "retention-expired",
+      "conversation_summary",
+      "normal",
+      1_001,
+    ));
+    const purged = await store.purgeExpiredMemories(1_001);
+    retentionExpiredPurgePropagated = purged === 1
+      && await store.getMemory(expired.memory_id, "robot", 1_001) === null;
+  }
+
+  const legacyPath = join(directory, "retention-legacy.sqlite");
+  {
+    using legacy = new SynchronousSqliteAuditStore(legacyPath, {
+      reconcile_on_open: false,
+    });
+    await legacy.createMemory({
+      ...createProbeMemory("retention-legacy"),
+      policy_revision: 1,
+    });
+  }
+  {
+    using readable = new SynchronousSqliteAuditStore(legacyPath, {
+      reconcile_on_open: false,
+    });
+    assert.notEqual(
+      await readable.getMemory("retention-legacy", "robot", Number.MAX_SAFE_INTEGER),
+      null,
+    );
+  }
+  let retentionLegacyReopenRejected = false;
+  try {
+    using ignored = new SynchronousSqliteAuditStore(legacyPath, {
+      reconcile_on_open: false,
+      memory_retention: SYNTHETIC_RETENTION_POLICY,
+    });
+    void ignored;
+  } catch (error) {
+    assertExpectedStorageError(
+      error,
+      "MEMORY_RETENTION_EXISTING_ROW_VIOLATION",
+      "retention legacy reopen probe",
+    );
+    retentionLegacyReopenRejected = true;
+  }
+
+  return {
+    database_quota_rejected: databaseQuotaRejected,
+    database_quota_bytes: databaseQuotaBytes,
+    database_quota_limit_bytes: quota.max_database_bytes,
+    wal_quota_rejected_with_pinned_reader: walQuotaRejected,
+    wal_quota_bytes: walQuotaBytes,
+    wal_quota_limit_bytes: quota.max_wal_bytes,
+    index_quota_rejected: indexQuotaRejected,
+    index_quota_bytes: indexQuotaBytes,
+    index_quota_limit_bytes: baselineIndexBytes + quota.max_database_bytes,
+    retention_matrix_validated: retentionMatrixValidated,
+    retention_overlong_rejected: retentionOverlongRejected,
+    retention_legacy_reopen_rejected: retentionLegacyReopenRejected,
+    retention_expired_purge_propagated: retentionExpiredPurgePropagated,
   };
 }
 
@@ -374,6 +708,7 @@ export async function runPhase6iSqliteGate(): Promise<Phase6iSqliteGateResult> {
     const corruptionRejected = storeOpenRejected(corruptPath);
 
     const killResult = await controlledKillProbe(join(directory, "kill.sqlite"));
+    const storagePolicy = await storagePolicyProbe(directory);
     const assessment: Phase6iAssessmentInput = {
       directory_mode: directoryMode,
       database_mode: databaseMode,
@@ -401,8 +736,11 @@ export async function runPhase6iSqliteGate(): Promise<Phase6iSqliteGateResult> {
       backup_mode: mode(backupPath),
       backup_integrity_check: backupIntegrityCheck,
       backup_restored_memory_count: backupRestoredMemoryCount,
+      ...storagePolicy,
     };
     const passed = assessPhase6iSqliteGate(assessment);
+    const quotaGateValidated = assessPhase6iQuotaGate(assessment);
+    const retentionGateValidated = assessPhase6iRetentionGate(assessment);
     return {
       schema_version: 1,
       profile: "phase6i_sqlite_filesystem_v1",
@@ -418,8 +756,8 @@ export async function runPhase6iSqliteGate(): Promise<Phase6iSqliteGateResult> {
       cold_backup_after_checkpoint: true,
       real_power_loss_performed: false,
       online_backup_api_validated: true,
-      quota_gate_validated: false,
-      retention_gate_validated: false,
+      quota_gate_validated: quotaGateValidated,
+      retention_gate_validated: retentionGateValidated,
       encryption_gate_validated: false,
       secure_delete_gate_validated: false,
       ...assessment,
@@ -441,6 +779,13 @@ async function main(): Promise<number> {
     + `mode=${result.database_mode} wal=${result.wal_mode} shm=${result.shm_mode} `
     + `kill=${result.controlled_kill_signal ?? "none"} integrity=${result.integrity_check} `
     + `online_backup=${result.online_backup_integrity_check}\n`,
+  );
+  process.stdout.write(
+    `VERIFY:phase6i:storage_policy:${result.passed ? "PASS" : "FAIL"} `
+    + `database=${result.database_quota_bytes}/${result.database_quota_limit_bytes} `
+    + `wal=${result.wal_quota_bytes}/${result.wal_quota_limit_bytes} `
+    + `index=${result.index_quota_bytes}/${result.index_quota_limit_bytes} `
+    + `retention_matrix=${result.retention_matrix_validated}\n`,
   );
   return result.passed ? 0 : 1;
 }

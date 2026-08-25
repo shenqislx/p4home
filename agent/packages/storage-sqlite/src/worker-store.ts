@@ -16,6 +16,7 @@ import {
   type AuditRecoveryReport,
   type SqliteBackupResult,
   type SqliteAuditStoreOptions,
+  type SqliteStorageUsage,
 } from "./sqlite-store.ts";
 import type {
   AuditStore,
@@ -218,6 +219,10 @@ implements AuditStore, MemoryStore, Disposable, AsyncDisposable {
 
   public async backup(destinationPath: string): Promise<SqliteBackupResult> {
     return await this.#request("backup", [destinationPath]) as SqliteBackupResult;
+  }
+
+  public async inspectStorageUsage(): Promise<SqliteStorageUsage> {
+    return await this.#request("inspectStorageUsage", []) as SqliteStorageUsage;
   }
 
   public close(): void {

@@ -123,6 +123,9 @@ if (store !== undefined) {
         case "purgeExpiredMemories":
           value = await auditStore.purgeExpiredMemories(...request.args);
           break;
+        case "inspectStorageUsage":
+          value = auditStore.inspectStorageUsage();
+          break;
         case "backup":
           value = await auditStore.backup(...request.args);
           break;

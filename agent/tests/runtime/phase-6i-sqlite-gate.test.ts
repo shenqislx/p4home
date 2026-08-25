@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assessPhase6iQuotaGate,
+  assessPhase6iRetentionGate,
   assessPhase6iSqliteGate,
   runPhase6iSqliteGate,
   type Phase6iAssessmentInput,
@@ -33,6 +35,19 @@ const PASSING: Phase6iAssessmentInput = {
   backup_mode: "600",
   backup_integrity_check: "ok",
   backup_restored_memory_count: 1,
+  database_quota_rejected: true,
+  database_quota_bytes: 500,
+  database_quota_limit_bytes: 500,
+  wal_quota_rejected_with_pinned_reader: true,
+  wal_quota_bytes: 400,
+  wal_quota_limit_bytes: 500,
+  index_quota_rejected: true,
+  index_quota_bytes: 300,
+  index_quota_limit_bytes: 300,
+  retention_matrix_validated: true,
+  retention_overlong_rejected: true,
+  retention_legacy_reopen_rejected: true,
+  retention_expired_purge_propagated: true,
 };
 
 test("Phase 6I assessment fails closed for every required filesystem signal", () => {
@@ -62,10 +77,30 @@ test("Phase 6I assessment fails closed for every required filesystem signal", ()
     { backup_mode: "644" },
     { backup_integrity_check: "malformed" },
     { backup_restored_memory_count: 0 },
+    { database_quota_rejected: false },
+    { database_quota_bytes: 501 },
+    { wal_quota_rejected_with_pinned_reader: false },
+    { wal_quota_bytes: 501 },
+    { index_quota_rejected: false },
+    { index_quota_bytes: 301 },
+    { retention_matrix_validated: false },
+    { retention_overlong_rejected: false },
+    { retention_legacy_reopen_rejected: false },
+    { retention_expired_purge_propagated: false },
   ];
   for (const mutation of mutations) {
     assert.equal(assessPhase6iSqliteGate({ ...PASSING, ...mutation }), false);
   }
+});
+
+test("Phase 6I quota and retention validated flags reflect their own probes", () => {
+  assert.equal(assessPhase6iQuotaGate(PASSING), true);
+  assert.equal(assessPhase6iRetentionGate(PASSING), true);
+  assert.equal(assessPhase6iQuotaGate({ ...PASSING, database_quota_rejected: false }), false);
+  assert.equal(
+    assessPhase6iRetentionGate({ ...PASSING, retention_overlong_rejected: false }),
+    false,
+  );
 });
 
 test("Phase 6I gate runs on a real filesystem without overstating pending gates", async () => {
@@ -76,8 +111,8 @@ test("Phase 6I gate runs on a real filesystem without overstating pending gates"
   assert.equal(result.cold_backup_after_checkpoint, true);
   assert.equal(result.real_power_loss_performed, false);
   assert.equal(result.online_backup_api_validated, true);
-  assert.equal(result.quota_gate_validated, false);
-  assert.equal(result.retention_gate_validated, false);
+  assert.equal(result.quota_gate_validated, true);
+  assert.equal(result.retention_gate_validated, true);
   assert.equal(result.encryption_gate_validated, false);
   assert.equal(result.secure_delete_gate_validated, false);
 });

@@ -42,6 +42,11 @@
 | 定义 WAL/checkpoint、备份一致性与恢复演练 | 正式长期运行前 | 备份包含所需 sidecar/checkpoint 状态；恢复点与数据损失窗口可重复验证 |
 | 定义介质级 secure-delete 能力与限制 | 用户要求不可恢复删除或处理高敏感数据前 | 明确 SQLite hard delete、WAL、备份、SSD wear leveling 的边界并验证方案 |
 
+2026-08-25 更新：DB/WAL/index quota 的 fail-closed 实现和真实 APFS 合成门禁已完成；完整
+kind/sensitivity retention 矩阵、默认 expiry、旧记录重开拒绝和 bounded purge 传播也已完成。
+当前待 review 的是生产字节限额与 retention 天数，而不是执行机制。具体语义和候选矩阵见
+[SQLite quota 与分类 retention 策略](../sqlite-quota-retention-policy.md)。
+
 ## 非目标
 
 - Phase 1 不引入远程数据库、Vector DB 或分布式事务；
