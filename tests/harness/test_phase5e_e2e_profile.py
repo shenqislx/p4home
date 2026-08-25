@@ -190,6 +190,40 @@ class Phase5eProfileTests(unittest.TestCase):
             artifact.write_text("A" * 512, encoding="ascii")
             self.assertNotEqual(subprocess.run(command, check=False).returncode, 0)
 
+    def test_artifact_audit_checks_sqlite_storage_type_not_column_affinity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            secret = root / "secret"
+            secret.write_text("top-secret-token-value", encoding="ascii")
+            artifact = root / "monitor.log"
+            artifact.write_text("VERIFY:phase5e:voice_ui_e2e:FAIL\n", encoding="utf-8")
+            database = root / "audit.db"
+            with sqlite3.connect(database) as connection:
+                connection.execute("CREATE TABLE events (payload BLOB, flexible ANY)")
+                connection.execute("INSERT INTO events VALUES ('{}', 'safe metadata')")
+            status = root / "status"
+            command = [
+                "python3", str(AUDIT), "--artifact", str(artifact),
+                "--secret-file", str(secret), "--audit-db", str(database),
+                "--status-file", str(status),
+            ]
+            self.assertEqual(subprocess.run(command, check=False).returncode, 0)
+
+            with sqlite3.connect(database) as connection:
+                connection.execute(
+                    "INSERT INTO events VALUES (?, 'safe metadata')",
+                    (sqlite3.Binary(b"binary payload"),),
+                )
+            self.assertNotEqual(subprocess.run(command, check=False).returncode, 0)
+
+            with sqlite3.connect(database) as connection:
+                connection.execute("DELETE FROM events WHERE typeof(payload) = 'blob'")
+                connection.execute(
+                    "INSERT INTO events VALUES ('{}', ?)",
+                    ("A" * 512,),
+                )
+            self.assertNotEqual(subprocess.run(command, check=False).returncode, 0)
+
     def test_artifact_audit_accepts_speakerless_ui_metadata(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

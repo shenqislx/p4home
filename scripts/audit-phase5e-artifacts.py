@@ -122,17 +122,19 @@ def audit_sqlite(path: pathlib.Path, reasons: set[str]) -> None:
                 normalized_names = [re.sub(r"[^a-z0-9]", "", name) for name in names]
                 if any("audio" in name or "pcm" in name for name in normalized_names):
                     reasons.add("raw_audio_column")
-                blob_columns = [str(row[1]) for row in columns if "BLOB" in str(row[2]).upper()]
-                for column in blob_columns:
-                    count = connection.execute(
-                        f'SELECT COUNT(*) FROM "{table}" WHERE "{column}" IS NOT NULL'
+                for column in (str(row[1]) for row in columns):
+                    if not column.replace("_", "").isalnum():
+                        reasons.add("sqlite_shape")
+                        continue
+                    blob_count = connection.execute(
+                        f'''SELECT COUNT(*) FROM "{table}"
+                            WHERE typeof("{column}") = 'blob' '''
                     ).fetchone()[0]
-                    if count:
+                    if blob_count:
                         reasons.add("sqlite_blob")
-                text_columns = [str(row[1]) for row in columns if "TEXT" in str(row[2]).upper()]
-                for column in text_columns:
                     for (value,) in connection.execute(
-                        f'SELECT "{column}" FROM "{table}" WHERE "{column}" IS NOT NULL'
+                        f'''SELECT "{column}" FROM "{table}"
+                            WHERE typeof("{column}") = 'text' '''
                     ):
                         encoded = str(value).encode("utf-8")
                         if RAW_FIELD.search(encoded) or BASE64_CANDIDATE.search(encoded):
