@@ -44,7 +44,7 @@ Object snapshot 保持 World 真值，artifact 隐私审计通过。6I APFS 权�
 2026-08-24 补充门禁：真实 `qwen3.6:35b-mlx` 在脱敏合成 Memory 上的 grounded
 recall/prompt-injection/private 隔离已通过；真实 HA 只读门禁也证明 Memory 不覆盖
 HA 真值且无 service call，结果已从干净工作树复跑并绑定提交；6I 文件系统子门禁也已从干净
-工作树复跑通过并绑定提交 `8438b8f`；后续 P4 Cat 和 quota/retention 已补齐，其余项已明确延期。
+工作树复跑通过，production-policy 刷新证据绑定提交 `899b746`；其余项已明确延期。
 
 ## 3. M6 遗留裁决
 

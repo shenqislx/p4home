@@ -74,13 +74,13 @@ private 产品 recall、三种 visibility evaluator 和可重复 `pnpm gate:phas
 quota/retention revision 1 已获批并实现。代表性家庭数据、Voice + Memory、家庭身份模型和 SQLite
 真实断电、加密/secure-delete 经用户决定延期。6I APFS 权限、WAL/NORMAL、受控进程终止、
 完整性/损坏拒绝、在线备份和 checkpoint 冷备份子门禁已从干净工作树复跑通过并绑定提交
-`db42974`。
+`899b746`。
 
 2026-08-24 后续真实环境进度：6F 已在 macOS arm64 / Ollama `0.32.15` 上用
 `qwen3.6:35b-mlx` 完成两次真实 Memory 调用，grounded recall、prompt-injection
 边界与 private 跨角色隔离均通过。6G 真实 HA 只读门禁证明 Memory 不覆盖 HA
 当前真值且 `service_calls=0`，已从干净工作树复跑并绑定提交。6I 文件系统子门禁也已从干净
-工作树复跑通过并绑定提交 `db42974`；本轮将刷新 quota/retention 的 commit-bound evidence。见
+工作树复跑通过；quota/retention 刷新 evidence 已绑定提交 `899b746`。见
 [Phase 6 真实环境门禁](./2026-08-24-agent-phase-6-real-environment-gates-plan.md)。
 确定性 FTS 已满足冻结场景，当前不立项 Vector DB；真实家庭数据证据不足，不能外推为长期结论。
 Phase 5 仍为 `pending_real_environment`。Phase 7 保持 `pending`，需另行明确授权且不得启动。

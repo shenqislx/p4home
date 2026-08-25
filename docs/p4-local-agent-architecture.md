@@ -794,7 +794,7 @@ Memory 均为 owner-role private，`shared_acl/hybrid` 继续 evaluator-only。�
 grounded/prompt-injection 门禁已通过；6G 真实 HA 只读门禁证明 Memory 不覆盖 HA
 真值且无 service call，并已在干净工作树上绑定提交。6I APFS 权限、WAL/NORMAL、受控进程终止、
 完整性/损坏拒绝、在线备份和 checkpoint 冷备份子门禁已从干净工作树复跑通过并绑定提交
-`8438b8f`。6H P4 Cat run `32819132030` 已证明 P4 snapshot 保持 World 真值且 artifact 隐私
+`899b746`。6H P4 Cat run `32819132030` 已证明 P4 snapshot 保持 World 真值且 artifact 隐私
 审计通过；DB/WAL/index quota 与分类 retention revision 1 已获批并实现。代表性家庭数据、Voice +
 Memory、家庭身份模型、SQLite 真实断电、加密/secure-delete 经用户决定延期；Phase 5 仍为
 `pending_real_environment`，Phase 7

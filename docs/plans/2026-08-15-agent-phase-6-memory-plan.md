@@ -1,6 +1,6 @@
 # Agent Phase 6 — Memory Plan
 
-> Status: `local_complete_pending_real_environment`
+> Status: `ready_for_final_review`
 > Started: 2026-08-24
 > Current Gate: 6F 真实模型、6G HA、6H P4 Cat + Memory 和 6I quota/retention 已通过；
 > Voice + Memory 与其余家庭侧/物理门禁经用户决定延期，等待最终 review；
@@ -15,7 +15,7 @@
 6F 真实 35B + 脱敏合成 Memory 门禁已通过；6G 真实 HA 只读真值门禁已从
 干净工作树复跑通过并绑定提交 `7e9aa4d`。6I 的 APFS 权限、WAL/NORMAL、受控
 `SIGKILL`、完整性/损坏拒绝、在线备份和 checkpoint 冷备份子门禁已从干净工作树复跑通过并
-绑定提交 `db42974`。6H P4 Cat + Memory run `32819132030` 已通过并绑定 `9688887`；
+production-policy 刷新证据绑定提交 `899b746`。6H P4 Cat + Memory run `32819132030` 已通过并绑定 `9688887`；
 quota/retention revision 1 参数已获批并实现。Voice + Memory、真实家庭数据、真实断电、
 加密/介质级删除与家庭身份门禁于 2026-08-25 经用户决定延期，仍属未验证而非通过。
 

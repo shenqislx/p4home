@@ -1,6 +1,6 @@
 # Agent Phase 6 — Real-environment Gates Plan
 
-> Status: `in_progress`
+> Status: `ready_for_final_review`
 > Started: 2026-08-24
 > Parent: [Phase 6 — Memory](./2026-08-15-agent-phase-6-memory-plan.md)
 > Current Gate: 6F real-model、6G real HA read、6H P4 Cat + Memory 及 6I
@@ -87,7 +87,7 @@ Artifact:
   recovery retains committed records and passes `integrity_check`.
 - [x] The online backup API publishes a new `0600` file atomically, rejects an existing
   destination/insecure parent, passes `integrity_check`, and has an explicit snapshot boundary.
-- [x] Clean-commit rerun passed and binds implementation commit `8438b8f`.
+- [x] Clean-commit rerun passed and binds implementation commit `899b746`.
   Real power-loss remains a separate
   result and is not closed by the controlled kill or backup probes.
 - [x] Database/WAL/index quota mechanisms and synthetic APFS fail-closed gates are implemented.
@@ -105,9 +105,11 @@ Artifact:
 Artifact:
 [phase-6i-sqlite-filesystem.json](../../evidence/agent-phase-6/phase-6i-sqlite-filesystem.json)
 
-The current committed artifact will be refreshed from a clean implementation commit after the
-revision 1 policy lands. No production SQLite item is closed by the 6F/6G temporary `:memory:`
-stores, and the bounded 6I gate does not close the unchecked items above.
+The current result is `commit_bound`, binds implementation commit
+`899b7465174f8e555bb817785d220434cef786ab`, and records `quota_gate_validated=true`,
+`retention_gate_validated=true` plus `production_policy_revision=1`. No production SQLite item is
+closed by the 6F/6G temporary `:memory:` stores, and the bounded 6I gate does not close the unchecked
+items above.
 
 ## 6. Exit rule
 
@@ -116,5 +118,5 @@ away and no microphone is available: Voice + Memory, representative household da
 power-loss, encryption/key rotation/identity binding, media-level secure-delete, and household
 multi-user/subject identity. They remain unvalidated and are not failures.
 
-Phase 6 can move to final review once the refreshed commit-bound 6I artifact is recorded. Passing
-or deferring these gates does not authorize Phase 7.
+The refreshed commit-bound 6I artifact is recorded; Phase 6 is ready for final review. Passing or
+deferring these gates does not authorize Phase 7.

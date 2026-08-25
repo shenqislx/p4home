@@ -1,7 +1,7 @@
 # Phase 6 Real-environment Gate Evidence
 
 > Date: 2026-08-24
-> Status: `partial_pass`
+> Status: `ready_for_final_review`
 > Plan: [Phase 6 real-environment gates](../../docs/plans/2026-08-24-agent-phase-6-real-environment-gates-plan.md)
 
 ## 6F real-model Memory gate — PASS
@@ -117,13 +117,24 @@ Result on macOS/APFS with Node `v24.19.0`:
 - actual Store pragmas: `journal_mode=wal`, `synchronous=1` (`NORMAL`);
 - clean reopen and `integrity_check=ok`;
 - synthetic truncation corruption: rejected;
-- controlled child-process `SIGKILL`: recovered `97` committed synthetic records,
+- controlled child-process `SIGKILL`: recovered `113` committed synthetic records,
   post-kill `integrity_check=ok`, checkpoint busy count `0`, and bounded reopen read passed;
 - online backup while the Store remains open: atomically published mode `0600`,
   `integrity_check=ok`, expected pre-snapshot record restored, post-snapshot record absent;
 - explicit-checkpoint cold backup: mode `0600`, `integrity_check=ok`, one expected
   synthetic record restored;
 - artifact contains verdicts/counts only and is mode `0600`.
+
+Quota/retention revision 1 refresh:
+
+- the small boundary probes rejected DB growth at `483328/524288` bytes, a pinned-reader WAL write
+  at `49472/527392` bytes, and index headroom growth at `147456/663552` bytes;
+- the approved production policy opened a real APFS Store with DB/WAL/index limits
+  `134217728/268435456/268435456` bytes (128/256/256 MiB);
+- all 9 `kind × sensitivity` default expiry values matched retention revision 1; overlong expiry,
+  violating legacy reopen and expired-row residue all failed closed;
+- artifact fields are `quota_gate_validated=true`, `retention_gate_validated=true` and
+  `production_policy_validated=true`.
 
 Deletion-remnant boundary (commit-bound follow-up):
 
@@ -157,10 +168,9 @@ Regression:
 Artifact:
 [phase-6i-sqlite-filesystem.json](./phase-6i-sqlite-filesystem.json)
 
-The existing result is `commit_bound` and binds implementation commit
-`8438b8fa0e90f517a1d287d344987820d6c6bb7f`; it predates the revision 1 production-policy
-approval and will be replaced by a clean-commit rerun. It does not claim real power-loss,
-encryption/key rotation or media-level secure delete.
+The result is `commit_bound`, was produced from a clean worktree, and binds implementation commit
+`899b7465174f8e555bb817785d220434cef786ab`. It does not claim real power-loss, encryption/key
+rotation or media-level secure delete.
 
 ## Still pending
 
@@ -171,6 +181,6 @@ encryption/key rotation or media-level secure delete.
   2026-08-25;
 - household multi-user/subject identity model — deferred 2026-08-25.
 
-Quota/retention revision 1 is approved and implemented; its refreshed clean-commit evidence is the
-remaining action before Phase 6 final review. Deferred items remain unvalidated, not failed. Phase 7
-remains unauthorized and has not started.
+Quota/retention revision 1 is approved, implemented and commit-bound. Phase 6 is ready for final
+review. Deferred items remain unvalidated, not failed. Phase 7 remains unauthorized and has not
+started.
