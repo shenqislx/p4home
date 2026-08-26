@@ -151,6 +151,9 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
   transcript 与 Human/Robot 结果；不得借用 Cat `character.say`；
 - [x] 增加常驻产品组装入口，接入真实 Ollama、STT、统一 Router、Robot HA、private Memory、UI，
   并允许在无扬声器 profile 中显式禁用 TTS/playback；测试/硬件 harness 不能冒充常驻入口；
+- [x] 增加默认 Human-only 的常驻装配与 `product_human` 固件 profile；该模式不读取 HA 凭据、不构造
+  Robot HA 客户端，Robot/混合路由 fail-closed 为 Human 澄清，并以稳定私有 identity 取代 workflow
+  临时凭据；真人手动聊天、重启恢复和 UI 肉眼观察仍待部署后验证；
 - [ ] 在无扬声器条件下先完成真实 P4 的聊天、HA 只读、低风险写入/恢复三条路径，要求
   `role_execution=completed`、`ui_delivery=completed`，并把 `audio_delivery=deferred` 单独披露；
   串口 `VERIFY:`、Agent/SQLite 审计、HA state_changed 与用户可见 UI 观察必须相互一致。

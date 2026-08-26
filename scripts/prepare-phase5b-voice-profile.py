@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the Phase 5B voice transport profile and ephemeral credentials."""
+"""Apply validation or persistent product Voice transport configuration."""
 
 from __future__ import annotations
 
@@ -14,7 +14,9 @@ import urllib.parse
 
 DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 SPKI_RE = re.compile(r"^[0-9a-f]{64}$")
-PROFILE_COMMENT = "# Ephemeral Phase 5B Voice hardware validation profile."
+VALIDATION_PROFILE_COMMENT = "# Ephemeral Phase 5B Voice hardware validation profile."
+PRODUCT_PROFILE_COMMENT = "# Persistent Human-only Voice product profile."
+PROFILE_MODES = ("validation", "product")
 
 
 def validate(uri: str, device_id: str, token: str, spki: str) -> None:
@@ -42,17 +44,38 @@ def validate(uri: str, device_id: str, token: str, spki: str) -> None:
         raise ValueError("invalid Voice SPKI pin")
 
 
-def apply_profile(path: pathlib.Path, uri: str, device_id: str, token: str, spki: str) -> None:
+def apply_profile(
+    path: pathlib.Path,
+    uri: str,
+    device_id: str,
+    token: str,
+    spki: str,
+    profile: str = "validation",
+) -> None:
     validate(uri, device_id, token, spki)
+    if profile not in PROFILE_MODES:
+        raise ValueError("invalid Voice profile mode")
     if not path.is_file() or path.is_symlink():
         raise ValueError("Phase 5B sdkconfig must be a non-symlink regular file")
     original_mode = path.stat().st_mode & 0o777
     replacements = {
         "CONFIG_ESP_MAIN_TASK_STACK_SIZE": "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192",
         "CONFIG_P4HOME_SR_ENABLE": "CONFIG_P4HOME_SR_ENABLE=y",
-        "CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST": "CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST=y",
-        "CONFIG_P4HOME_PHASE5A_VALIDATION": "CONFIG_P4HOME_PHASE5A_VALIDATION=y",
-        "CONFIG_P4HOME_PHASE5B_VALIDATION": "CONFIG_P4HOME_PHASE5B_VALIDATION=y",
+        "CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST": (
+            "CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST=y"
+            if profile == "validation"
+            else "# CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST is not set"
+        ),
+        "CONFIG_P4HOME_PHASE5A_VALIDATION": (
+            "CONFIG_P4HOME_PHASE5A_VALIDATION=y"
+            if profile == "validation"
+            else "# CONFIG_P4HOME_PHASE5A_VALIDATION is not set"
+        ),
+        "CONFIG_P4HOME_PHASE5B_VALIDATION": (
+            "CONFIG_P4HOME_PHASE5B_VALIDATION=y"
+            if profile == "validation"
+            else "# CONFIG_P4HOME_PHASE5B_VALIDATION is not set"
+        ),
         "CONFIG_P4HOME_BACKGROUND_TASKS_EXTERNAL_STACK": "CONFIG_P4HOME_BACKGROUND_TASKS_EXTERNAL_STACK=y",
         "CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED": "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set",
         "CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC": "# CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC is not set",
@@ -70,12 +93,14 @@ def apply_profile(path: pathlib.Path, uri: str, device_id: str, token: str, spki
     lines = path.read_text(encoding="utf-8").splitlines()
     retained = [
         line for line in lines
-        if line != PROFILE_COMMENT
+        if line not in {VALIDATION_PROFILE_COMMENT, PRODUCT_PROFILE_COMMENT}
         and not any(line.startswith(f"{key}=") or line == f"# {key} is not set" for key in replacements)
     ]
     while retained and retained[-1] == "":
         retained.pop()
-    retained.extend(("", PROFILE_COMMENT))
+    retained.extend(("", (
+        VALIDATION_PROFILE_COMMENT if profile == "validation" else PRODUCT_PROFILE_COMMENT
+    )))
     retained.extend(replacements.values())
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = pathlib.Path(temporary_name)
@@ -95,6 +120,7 @@ def main() -> None:
     parser.add_argument("--device-id", required=True)
     parser.add_argument("--token-file", required=True, type=pathlib.Path)
     parser.add_argument("--spki-file", required=True, type=pathlib.Path)
+    parser.add_argument("--profile", choices=PROFILE_MODES, default="validation")
     args = parser.parse_args()
     apply_profile(
         args.sdkconfig,
@@ -102,6 +128,7 @@ def main() -> None:
         args.device_id,
         args.token_file.read_text(encoding="utf-8").strip(),
         args.spki_file.read_text(encoding="utf-8").strip(),
+        args.profile,
     )
 
 

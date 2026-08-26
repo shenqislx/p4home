@@ -22,6 +22,7 @@ export interface UnifiedVoiceRoleDispatcherOptions {
   readonly clock?: () => number;
   readonly robot_ha?: RobotHaReadRuntime | RobotHaWriteRuntime;
   readonly memory?: RoleMemoryRuntime;
+  readonly human_only?: boolean;
   readonly on_result?: (
     result: RunRoleInteractionResult,
     interaction: UserTextInteraction,
@@ -62,6 +63,9 @@ export class UnifiedVoiceRoleDispatcher {
       ...(this.#options.clock === undefined ? {} : { clock: this.#options.clock }),
       ...(this.#options.robot_ha === undefined ? {} : { robot_ha: this.#options.robot_ha }),
       ...(this.#options.memory === undefined ? {} : { memory: this.#options.memory }),
+      ...(this.#options.human_only === undefined
+        ? {}
+        : { human_only: this.#options.human_only }),
     });
     await this.#options.on_result?.(result, interaction);
     return result;

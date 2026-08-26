@@ -22,6 +22,7 @@ export * from "./phase4c-ha-gate-core.ts";
 export * from "./phase4c-ha-identity.ts";
 export * from "./role-aware-tts.ts";
 export * from "./model-config.ts";
+export * from "./product-voice-config.ts";
 export * from "./role-contracts.ts";
 export * from "./role-audit.ts";
 export * from "./role-orchestrator.ts";

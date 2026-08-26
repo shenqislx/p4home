@@ -30,6 +30,7 @@ Cat 作为事件驱动电子宠物使用最小 P4 World 能力。它们默认共
 - [当前工作计划与 Phase 状态](./docs/plans/README.md)
 - [当前里程碑](./docs/project-milestones.md)
 - [Harness Workflow](./docs/harness-workflow.md)
+- [Human-only 常驻语音聊天](./docs/product-human-voice.md)
 
 Phase 2 已完成并通过用户最终 review。Role Contract & Router、Cat Action Adapter、P4 World
 Service、真实传输与实机门禁四个纵切均满足退出条件；Agent/P4 真实 Device WebSocket 已通过实机

@@ -73,6 +73,13 @@ export interface RouteInteractionOptions {
   readonly timeout_ms?: number;
   readonly signal?: AbortSignal;
   readonly clock?: () => number;
+  /**
+   * Product safety mode for deployments that intentionally expose only the
+   * tool-free Human role. The Router still classifies the original text, but
+   * any Robot or mixed decision fails closed to one full-span Human
+   * clarification assignment.
+   */
+  readonly human_only?: boolean;
 }
 
 export interface RouteInteractionResult {
@@ -218,6 +225,12 @@ export async function routeInteraction(
     }
   } catch {
     return fallback(options, "invalid_model_output", "INVALID_ROUTE_PLAN");
+  }
+  if (
+    options.human_only === true
+    && plan.assignments.some((assignment) => assignment.role_id !== "human")
+  ) {
+    return fallback(options, "invalid_model_output", "ROBOT_ROLE_DISABLED");
   }
   return {
     plan,

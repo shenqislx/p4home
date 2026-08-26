@@ -43,6 +43,7 @@ export interface RunRoleInteractionOptions {
   readonly clock?: () => number;
   readonly robot_ha?: RobotHaReadRuntime | RobotHaWriteRuntime;
   readonly memory?: RoleMemoryRuntime;
+  readonly human_only?: boolean;
 }
 
 export interface RunRoleInteractionResult {
@@ -293,6 +294,7 @@ export async function runRoleInteraction(
     ...(options.timeout_ms === undefined ? {} : { timeout_ms: options.timeout_ms }),
     ...(executionSignal === undefined ? {} : { signal: executionSignal }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.human_only === undefined ? {} : { human_only: options.human_only }),
   });
   const auditTrackers: AssignmentAuditTracker[] = [];
   const scheduled = routing.plan.assignments.map(async (assignment, index): Promise<AssignmentRunResult> => {

@@ -142,6 +142,50 @@ test("human and clarify decisions can never create Cat or Robot fallback work", 
   assert.equal(clarify.plan.assignments[0].mode, "clarify");
 });
 
+test("Human-only product mode accepts Human but fails Robot and mixed routes closed", async () => {
+  const humanText = "陪我聊两句吧";
+  const human = await routeInteraction({
+    interaction: { ...INTERACTION, text: humanText },
+    route_plan_id: "route-human-only-chat",
+    provider: providerReturning(
+      `{"assignments":[{"role":"human","text":"${humanText}"}]}`,
+    ),
+    human_only: true,
+    clock: () => 1_004,
+  });
+  assert.equal(human.model_output_accepted, true);
+  assert.equal(human.plan.reason, "model_human");
+  assert.equal(human.plan.assignments[0].mode, "respond");
+
+  for (const [index, fixture] of [
+    {
+      text: "打开客厅灯",
+      output: '{"assignments":[{"role":"robot","text":"打开客厅灯"}]}',
+    },
+    {
+      text: "我有点累，关闭客厅灯",
+      output: '{"assignments":[{"role":"human","text":"我有点累，"},{"role":"robot","text":"关闭客厅灯"}]}',
+    },
+  ].entries()) {
+    const result = await routeInteraction({
+      interaction: { ...INTERACTION, text: fixture.text },
+      route_plan_id: `route-human-only-blocked-${index}`,
+      provider: providerReturning(fixture.output),
+      human_only: true,
+      clock: () => 1_005 + index,
+    });
+    assert.equal(result.model_output_accepted, false);
+    assert.equal(result.fallback_error_code, "ROBOT_ROLE_DISABLED");
+    assert.equal(result.plan.reason, "invalid_model_output");
+    assert.deepEqual(result.plan.assignments, [{
+      assignment_id: `route-human-only-blocked-${index}`,
+      role_id: "human",
+      source_span: { start: 0, end: fixture.text.length },
+      mode: "clarify",
+    }]);
+  }
+});
+
 test("invalid, tool-bearing, thinking and provider failures fail closed to Human clarification", async () => {
   const cases = [
     providerReturning("not-json"),

@@ -95,6 +95,16 @@ Mac 系统扬声器只生成固定的麦克风测试输入，依次覆盖 Robot 
 `VERIFY:phase5e:voice_ui_e2e:PASS` 与隐私审计 marker；不得出现 playback opened。P4 扬声器输出在
 该 profile 中明确记为 deferred，不作为失败，也不得被报告为通过。
 
+日常人工聊天使用 `product_human`，`monitor_seconds` 至少为 180 秒。它不是自动业务门禁：runner
+从本机 `0700` 的 `~/.config/p4home/product-voice` 读取 `0600` 的稳定 device identity、TLS identity
+与 SPKI pin，生成仅存在于 runner 临时目录的产品 sdkconfig。该 profile 启用 SR 与 Voice transport，
+关闭 startup selftest、Phase 5A/5B validation marker、Device Agent transport 和全部 Robot HA 装配；
+刷写前必须确认本机常驻 Voice 服务正在监听且呈现匹配的 SPKI。上传候选必须扫描稳定 token、TLS
+私钥、raw-audio 字段和二进制/长 Base64 材料，审计失败时不得上传 artifact。manifest 中的
+`product_human_*` 字段只证明配置、刷写、启动和隐私传输边界；真人 `Hi ESP`、中文 STT、Human
+回复与 UI 可见性仍需独立人工观察。常驻安装与日常使用见
+[Human-only 常驻语音聊天](./product-human-voice.md)。
+
 Phase 6H Cat + Memory 使用独立的 `phase6h_cat_memory`，`monitor_seconds` 至少为 120 秒，
 Device Protocol 固定为 v2。runner 在 `0700` 临时目录创建 `0600` SQLite，只写入一条 Cat-private、
 带随机 canary 且故意与实时 World 冲突的旧记录；Memory 以 `untrusted_memory` 数据进入 Cat 上下文，

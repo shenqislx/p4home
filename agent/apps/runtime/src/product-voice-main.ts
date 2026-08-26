@@ -14,6 +14,10 @@ import { RobotHaClient, loadRobotHaRuntimeConfig } from "@p4home/transport-ha";
 
 import { DEFAULT_OLLAMA_MODEL } from "./model-config.ts";
 import { productionMemoryStoreOptions } from "./memory-storage-policy.ts";
+import {
+  productVoiceAllowsRobot,
+  resolveProductVoiceRoleMode,
+} from "./product-voice-config.ts";
 import { createPrivateRoleMemoryRuntime } from "./role-memory.ts";
 import { RoleScheduler } from "./role-scheduler.ts";
 import { RoleSessionRegistry } from "./role-session.ts";
@@ -101,8 +105,9 @@ async function main(): Promise<void> {
   let haClient: RobotHaClient | null = null;
   let scheduler: RoleScheduler | null = null;
   try {
+    const roleMode = resolveProductVoiceRoleMode(process.env.P4HOME_PRODUCT_ROLE_MODE);
+    const robotEnabled = productVoiceAllowsRobot(roleMode);
     const databasePath = absolutePath("P4HOME_PRODUCT_AUDIT_DB");
-    const haUrl = requiredEnvironment("P4HOME_HA_URL");
     const model = process.env.OLLAMA_MODEL?.trim() || DEFAULT_OLLAMA_MODEL;
     const modelTimeoutMs = optionalInteger(
       "P4HOME_OLLAMA_TIMEOUT_MS", 120_000, 100, 600_000,
@@ -116,19 +121,21 @@ async function main(): Promise<void> {
     if (!capabilities.modelAvailable || !capabilities.toolCalling) {
       throw new Error("ollama_model_unavailable_or_missing_tool_calling");
     }
-    const haConfig = await loadRobotHaRuntimeConfig({
-      url: haUrl,
-      token_file: absolutePath("P4HOME_HA_TOKEN_FILE"),
-      policy_file: absolutePath("P4HOME_HA_POLICY_FILE"),
-      allow_insecure_ws: process.env.P4HOME_HA_ALLOW_INSECURE === "1",
-    });
-    haClient = new RobotHaClient({
-      config: haConfig,
-      handshake_timeout_ms: 10_000,
-      request_timeout_ms: 10_000,
-    });
+    if (robotEnabled) {
+      const haConfig = await loadRobotHaRuntimeConfig({
+        url: requiredEnvironment("P4HOME_HA_URL"),
+        token_file: absolutePath("P4HOME_HA_TOKEN_FILE"),
+        policy_file: absolutePath("P4HOME_HA_POLICY_FILE"),
+        allow_insecure_ws: process.env.P4HOME_HA_ALLOW_INSECURE === "1",
+      });
+      haClient = new RobotHaClient({
+        config: haConfig,
+        handshake_timeout_ms: 10_000,
+        request_timeout_ms: 10_000,
+      });
+      await haClient.connect();
+    }
     scheduler = new RoleScheduler(16);
-    await haClient.connect();
     store = new SqliteAuditStore(databasePath, {
       ...productionMemoryStoreOptions(),
     });
@@ -148,7 +155,9 @@ async function main(): Promise<void> {
       scheduler,
       timeout_ms: modelTimeoutMs,
       audit: { store },
-      robot_ha: { client: haClient, observation_timeout_ms: 10_000 },
+      ...(haClient === null
+        ? { human_only: true }
+        : { robot_ha: { client: haClient, observation_timeout_ms: 10_000 } }),
       memory,
       on_result: (result) => {
         process.stdout.write(`${JSON.stringify({
@@ -196,7 +205,8 @@ async function main(): Promise<void> {
       host: address.host,
       port: address.port,
       model,
-      ha_entities: haClient.capabilities.length,
+      role_mode: roleMode,
+      ha_entities: haClient?.capabilities.length ?? 0,
       ui_output: "required",
       audio_output: "deferred",
       raw_audio_retained: false,
