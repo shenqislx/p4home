@@ -9,6 +9,11 @@ import {
   STT_MODEL_REVISION,
   STT_PROVIDER_VERSION,
 } from "@p4home/provider-stt";
+import {
+  PythonTtsProvider,
+  TTS_MODEL_REVISION,
+  TTS_PROVIDER_VERSION,
+} from "@p4home/provider-tts";
 import { SqliteAuditStore } from "@p4home/storage-sqlite";
 import { RobotHaClient, loadRobotHaRuntimeConfig } from "@p4home/transport-ha";
 
@@ -19,6 +24,7 @@ import {
   resolveProductVoiceRoleMode,
 } from "./product-voice-config.ts";
 import { createPrivateRoleMemoryRuntime } from "./role-memory.ts";
+import { RoleAwareTtsPipeline } from "./role-aware-tts.ts";
 import { RoleScheduler } from "./role-scheduler.ts";
 import { RoleSessionRegistry } from "./role-session.ts";
 import { UnifiedVoiceRoleDispatcher } from "./voice-role-dispatcher.ts";
@@ -177,6 +183,15 @@ async function main(): Promise<void> {
       provider_version: STT_PROVIDER_VERSION,
       timeout_ms: optionalInteger("P4HOME_STT_TIMEOUT_MS", 120_000, 1_000, 120_000),
     });
+    const tts = new PythonTtsProvider({
+      python_executable: absolutePath("P4HOME_TTS_PYTHON"),
+      worker_script: absolutePath("P4HOME_TTS_WORKER"),
+      model_path: absolutePath("P4HOME_TTS_MODEL"),
+      model_revision: TTS_MODEL_REVISION,
+      provider_version: TTS_PROVIDER_VERSION,
+      timeout_ms: optionalInteger("P4HOME_TTS_TIMEOUT_MS", 120_000, 1_000, 120_000),
+    });
+    const ttsPipeline = new RoleAwareTtsPipeline(tts);
     runtime = new UnifiedVoiceRuntime({
       server: {
         host: process.env.P4HOME_AGENT_HOST?.trim() || "0.0.0.0",
@@ -195,8 +210,11 @@ async function main(): Promise<void> {
       },
       interaction: {
         dispatch_role: async (interaction, signal) => await dispatcher.dispatch(interaction, signal),
+        render_tts: async (interactionId, response, signal) => (
+          await ttsPipeline.render(interactionId, response, signal)
+        ),
         ui_output: "required",
-        audio_output: "disabled",
+        audio_output: "required",
       },
     });
     const address = await runtime.start();
@@ -208,7 +226,7 @@ async function main(): Promise<void> {
       role_mode: roleMode,
       ha_entities: haClient?.capabilities.length ?? 0,
       ui_output: "required",
-      audio_output: "deferred",
+      audio_output: "required",
       raw_audio_retained: false,
     })}\n`);
     await waitForShutdown(shutdown.signal);

@@ -102,7 +102,8 @@ Mac 系统扬声器只生成固定的麦克风测试输入，依次覆盖 Robot 
 刷写前必须确认本机常驻 Voice 服务正在监听且呈现匹配的 SPKI。上传候选必须扫描稳定 token、TLS
 私钥、raw-audio 字段和二进制/长 Base64 材料，审计失败时不得上传 artifact。manifest 中的
 `product_human_*` 字段只证明配置、刷写、启动和隐私传输边界；真人 `Hi ESP`、中文 STT、Human
-回复与 UI 可见性仍需独立人工观察。常驻安装与日常使用见
+回复、UI 可见性与 P4 扬声器听感仍需独立人工观察。常驻服务启用固定 Kokoro TTS，并要求 P4
+playback 完成；这些产品行为不由 product profile 的刷写 manifest 自动证明。常驻安装与日常使用见
 [Human-only 常驻语音聊天](./product-human-voice.md)。
 
 Phase 6H Cat + Memory 使用独立的 `phase6h_cat_memory`，`monitor_seconds` 至少为 120 秒，

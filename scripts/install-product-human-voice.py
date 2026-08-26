@@ -74,15 +74,33 @@ def spki_sha256(key: pathlib.Path) -> str:
     return hashlib.sha256(public_der).hexdigest()
 
 
-def resolve_stt_model(repo_root: pathlib.Path) -> pathlib.Path:
-    prepare_model = repo_root / "agent/packages/provider-stt/python/prepare_model.py"
+def resolve_model(
+    repo_root: pathlib.Path,
+    provider: str,
+    cache_directory: str,
+    cache_prefix: str,
+) -> pathlib.Path:
+    prepare_model = repo_root / f"agent/packages/{provider}/python/prepare_model.py"
     match = MODEL_REVISION_RE.search(prepare_model.read_text(encoding="utf-8"))
     if match is None:
-        raise RuntimeError("cannot resolve pinned STT model revision")
-    model = pathlib.Path.home() / "Library/Caches/p4home/stt" / f"whisper-small-{match.group(1)}"
+        raise RuntimeError(f"cannot resolve pinned {provider} model revision")
+    model = (
+        pathlib.Path.home()
+        / "Library/Caches/p4home"
+        / cache_directory
+        / f"{cache_prefix}{match.group(1)}"
+    )
     if not model.is_dir():
-        raise RuntimeError("pinned STT model is not installed")
+        raise RuntimeError(f"pinned {provider} model is not installed")
     return model
+
+
+def resolve_stt_model(repo_root: pathlib.Path) -> pathlib.Path:
+    return resolve_model(repo_root, "provider-stt", "stt", "whisper-small-")
+
+
+def resolve_tts_model(repo_root: pathlib.Path) -> pathlib.Path:
+    return resolve_model(repo_root, "provider-tts", "tts", "kokoro-")
 
 
 def install(args: argparse.Namespace) -> pathlib.Path:
@@ -108,11 +126,13 @@ def install(args: argparse.Namespace) -> pathlib.Path:
     os.chmod(log_dir, 0o700)
 
     generate_identity(config_dir)
-    model = resolve_stt_model(repo_root)
+    stt_model = resolve_stt_model(repo_root)
+    tts_model = resolve_tts_model(repo_root)
     atomic_write(config_dir / "device-id", f"{args.device_id}\n".encode())
     atomic_write(config_dir / "agent-host", f"{args.agent_host}\n".encode())
     atomic_write(config_dir / "agent-port", f"{args.agent_port}\n".encode())
-    atomic_write(config_dir / "stt-model-path", f"{model}\n".encode())
+    atomic_write(config_dir / "stt-model-path", f"{stt_model}\n".encode())
+    atomic_write(config_dir / "tts-model-path", f"{tts_model}\n".encode())
     atomic_write(config_dir / "spki-sha256", f"{spki_sha256(config_dir / 'agent-key.pem')}\n".encode())
 
     node = pathlib.Path(args.node_bin).expanduser().resolve()

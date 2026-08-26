@@ -18,7 +18,7 @@ static const char *TAG = "voice_playback";
 #define PLAYBACK_TASK_STACK 6144U
 #define PLAYBACK_TASK_INTERVAL_MS 5U
 #define PLAYBACK_SESSION_TIMEOUT_US 70000000LL
-#define PLAYBACK_VOLUME_PERCENT 55U
+#define PLAYBACK_VOLUME_PERCENT 83U
 #define PLAYBACK_MAX_FRAMES 3000U
 
 typedef enum {
@@ -527,7 +527,8 @@ esp_err_t voice_playback_receiver_open(const cJSON *root)
     }
     taskEXIT_CRITICAL(&s_playback.lock);
     if (prepared) {
-        ESP_LOGW(TAG, "playback opened epoch=%" PRIu32, epoch);
+        ESP_LOGW(TAG, "playback opened epoch=%" PRIu32 " volume=%u",
+                 epoch, (unsigned)PLAYBACK_VOLUME_PERCENT);
     } else {
         ESP_LOGW(TAG, "playback cancelled while preparing epoch=%" PRIu32, epoch);
     }

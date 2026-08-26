@@ -100,23 +100,24 @@ class Phase5EConversationUiContractTest(unittest.TestCase):
         self.assertNotIn("s_conversation_dialog", private_branch)
         self.assertNotIn("response_text", private_branch)
 
-    def test_product_entry_uses_real_dependencies_and_speakerless_truth(self) -> None:
+    def test_product_entry_uses_real_dependencies_and_required_audio(self) -> None:
         product = PRODUCT.read_text(encoding="utf-8")
         package = (ROOT / "agent/package.json").read_text(encoding="utf-8")
 
         for expected in (
             "new OllamaHttpProvider",
             "new PythonSttProvider",
+            "new PythonTtsProvider",
+            "new RoleAwareTtsPipeline",
             "new RobotHaClient",
             "new SqliteAuditStore",
             "createPrivateRoleMemoryRuntime",
             'ui_output: "required"',
-            'audio_output: "disabled"',
+            'audio_output: "required"',
             "productionMemoryStoreOptions",
         ):
             self.assertIn(expected, product)
         self.assertIn('"start:voice"', package)
-        self.assertNotIn("PythonTtsProvider", product)
         self.assertNotIn("response.text", product)
         self.assertIn("deviceTokenBytes.fill(0)", product)
         self.assertIn("key.fill(0)", product)

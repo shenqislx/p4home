@@ -119,6 +119,13 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         self.assertIn("xQueueReceive(s_playback.queue, &frame, interval_ticks)", playback)
         self.assertIn("vTaskDelay(interval_ticks);", playback)
 
+    def test_product_playback_uses_requested_bounded_volume(self) -> None:
+        playback = PLAYBACK_SOURCE.read_text(encoding="utf-8")
+
+        self.assertIn("#define PLAYBACK_VOLUME_PERCENT 83U", playback)
+        self.assertIn('"playback opened epoch=%" PRIu32 " volume=%u"', playback)
+        self.assertIn("PLAYBACK_VOLUME_PERCENT,", playback)
+
     def test_sr_capture_registration_precedes_runtime_start(self) -> None:
         board = BOARD_SOURCE.read_text(encoding="utf-8")
         sr = SR_SOURCE.read_text(encoding="utf-8")

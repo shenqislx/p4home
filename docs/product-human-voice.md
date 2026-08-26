@@ -10,7 +10,7 @@
 - Agent 不读取 HA URL、token 或 policy，也不构造 Robot HA 客户端；
 - Human 没有执行型 Tool，不能控制灯具；
 - `ui_output=required`，P4 必须确认 UI revision；
-- `audio_output=disabled`，扬声器缺失记为 deferred；
+- `audio_output=required`，回复经固定 Kokoro TTS 生成后由 P4 扬声器播放；
 - 原始 PCM 不落盘，审计与 private Memory 写入受现有生产策略约束。
 
 ## 一次性安装
@@ -43,9 +43,9 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.p4home.product-hum
 launchctl kickstart -k gui/$(id -u)/local.p4home.product-human-voice
 ```
 
-产品入口固定使用 Node `v24.19.0`，启动真实 Ollama、固定 STT、Human Runtime、private Memory 和
-Conversation UI。Human-only 是默认且由启动 wrapper 强制设置，不能从 launchd 环境意外扩大到
-Robot。
+产品入口固定使用 Node `v24.19.0`，启动真实 Ollama、固定 STT/TTS、Human Runtime、private Memory、
+Conversation UI 和 P4 playback。Human-only 是默认且由启动 wrapper 强制设置，不能从 launchd
+环境意外扩大到 Robot。STT/TTS 模型路径均由安装器绑定到固定 revision，启动时缺失即 fail closed。
 
 ## 刷写产品固件
 
@@ -70,9 +70,10 @@ Phase 5A/5B validation marker 和 Device Agent transport。工作流会在刷写
 1. 清楚地说 `Hi ESP`；
 2. 等待唤醒后直接说中文，例如“陪我聊两句吧”；
 3. P4 对话框显示 final transcript；
-4. Human 回复显示在同一对话框中。
+4. Human 回复显示在同一对话框中，并通过外接扬声器播放。
 
-当前没有外接扬声器，因此不期待可听回复。设备控制类语句会进入 Human 澄清，不会调用 HA。
+设备控制类语句会进入 Human 澄清，不会调用 HA。回复播放期间再次说 `Hi ESP` 会触发 barge-in，
+取消旧播放 epoch 并开启新一轮采集。
 
 ## 验收
 
@@ -80,7 +81,7 @@ Phase 5A/5B validation marker 和 Device Agent transport。工作流会在刷写
 
 1. launchd 进程启动后输出 `product_voice_ready`，其中 `role_mode=human-only`、`ha_entities=0`；
 2. P4 串口显示 SR/WakeNet 和 Voice transport ready/connected，且无 panic/watchdog/reset loop；
-3. 真人连续完成三轮 Human 对话，UI 中文 transcript 与回复完整可见；
+3. 真人连续完成三轮 Human 对话，UI 中文 transcript 与回复完整可见，扬声器回复清晰可听；
 4. 重启 P4 与 Agent 主机后自动恢复；
 5. 说一次设备控制语句，确认没有 HA 写入，UI 只显示安全澄清；
 6. SQLite/日志/artifact 不含 token、TLS 私钥或原始音频。

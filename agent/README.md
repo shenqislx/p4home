@@ -58,12 +58,12 @@ Phase 1 至 Phase 4 已按各自证据门禁关闭。Robot 只开放 alias 级
 仍为 `pending_real_environment`；该状态不因 Phase 6 本地门禁通过而改变。
 任何阶段都不得把 token 暴露给模型、协议 JSON、日志或 artifact。
 
-## 无扬声器 Voice 产品入口（Phase 5E）
+## Human Voice 产品入口
 
 `pnpm start:voice` 启动真实产品装配：P4 PCM → 固定版本 Python STT → 统一 Role Router →
-Human/Robot（含受限 HA 与 private Memory）→ P4 独立 Conversation UI。当前扬声器缺失，因此
-`audio_output=deferred`；成功标准是 P4 对话框渲染后返回 `ui.applied`，不能用 HA/模型成功替代
-UI 成功，也不会经 `character.say` 改写 Cat World。
+Human-only Runtime（含 private Memory）→ P4 独立 Conversation UI → 固定 Kokoro TTS → P4
+playback。`ui_output=required` 与 `audio_output=required` 必须分别完成；不能用模型成功替代 UI 或
+扬声器播放成功，也不会经 `character.say` 改写 Cat World。
 
 入口要求以下环境变量，所有路径必须为绝对路径；设备 token、TLS 私钥和 HA token 文件须在仓库外，
 其中设备 token/TLS 私钥及 HA token 必须为当前用户所有且权限不宽于 `0600`：
@@ -73,6 +73,8 @@ UI 成功，也不会经 `character.say` 改写 Cat World。
   `P4HOME_AGENT_HOST`（默认 `0.0.0.0`）、`P4HOME_AGENT_PORT`（默认 `8443`）；
 - STT：`P4HOME_STT_PYTHON`、`P4HOME_STT_WORKER`、`P4HOME_STT_MODEL`，以及可选
   `P4HOME_STT_TIMEOUT_MS`；
+- TTS：`P4HOME_TTS_PYTHON`、`P4HOME_TTS_WORKER`、`P4HOME_TTS_MODEL`，以及可选
+  `P4HOME_TTS_TIMEOUT_MS`；
 - Ollama：可选 `OLLAMA_MODEL`、`OLLAMA_BASE_URL`、`P4HOME_OLLAMA_TIMEOUT_MS`；
 - HA：`P4HOME_HA_URL`、`P4HOME_HA_TOKEN_FILE`、`P4HOME_HA_POLICY_FILE`；仅 LAN 明文
   `http/ws` 场景可显式设置 `P4HOME_HA_ALLOW_INSECURE=1`；

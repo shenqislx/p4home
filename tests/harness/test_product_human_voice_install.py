@@ -38,9 +38,12 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
         ):
             self.assertIn(expected, workflow)
         self.assertIn('P4HOME_PRODUCT_ROLE_MODE="human-only"', wrapper)
+        self.assertIn("P4HOME_TTS_MODEL", wrapper)
         self.assertNotIn("P4HOME_HA_TOKEN_FILE", wrapper)
         self.assertIn("resolveProductVoiceRoleMode", product)
         self.assertIn("human_only: true", product)
+        self.assertIn("new PythonTtsProvider", product)
+        self.assertIn('audio_output: "required"', product)
 
     def test_identity_is_private_stable_and_has_matching_spki(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -100,6 +103,7 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
             completed = types.SimpleNamespace(stdout="v24.19.0\n")
             with (
                 mock.patch.object(MODULE, "resolve_stt_model", return_value=model),
+                mock.patch.object(MODULE, "resolve_tts_model", return_value=model),
                 mock.patch.object(MODULE.subprocess, "run", return_value=completed),
                 mock.patch.object(MODULE, "spki_sha256", return_value="ab" * 32),
             ):
@@ -112,6 +116,7 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
             self.assertNotIn("P4HOME_HA_TOKEN", str(payload))
             self.assertEqual((config / "device-token").stat().st_mode & 0o077, 0)
             self.assertEqual((config / "agent-host").read_text().strip(), "192.0.2.30")
+            self.assertEqual((config / "tts-model-path").read_text().strip(), str(model))
 
     def test_rejects_invalid_endpoint_without_writing_identity(self):
         with tempfile.TemporaryDirectory() as directory:
