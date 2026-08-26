@@ -33,6 +33,7 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
             '"product_human_validation_disabled"',
             "Audit persistent Human Voice upload candidates",
             '"product_human_artifact_audit_status"',
+            '! grep -qx "CONFIG_P4HOME_PHASE5A_VALIDATION=y"',
         ):
             self.assertIn(expected, workflow)
         self.assertIn('P4HOME_PRODUCT_ROLE_MODE="human-only"', wrapper)

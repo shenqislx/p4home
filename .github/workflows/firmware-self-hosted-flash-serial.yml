@@ -444,7 +444,10 @@ jobs:
           if [[ "${{ inputs.validation_profile }}" == "product_human" ]]; then
             grep -qx "CONFIG_P4HOME_SR_ENABLE=y" "$HARDWARE_SDKCONFIG"
             grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED=y" "$HARDWARE_SDKCONFIG"
-            grep -qx "# CONFIG_P4HOME_PHASE5A_VALIDATION is not set" "$HARDWARE_SDKCONFIG"
+            # Kconfig omits this dependent symbol entirely once the product
+            # profile disables AUDIO_STARTUP_SELFTEST. Assert the effective
+            # value instead of requiring a particular serialized n form.
+            ! grep -qx "CONFIG_P4HOME_PHASE5A_VALIDATION=y" "$HARDWARE_SDKCONFIG"
             grep -qx "# CONFIG_P4HOME_PHASE5B_VALIDATION is not set" "$HARDWARE_SDKCONFIG"
             grep -qx "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set" "$HARDWARE_SDKCONFIG"
           fi
