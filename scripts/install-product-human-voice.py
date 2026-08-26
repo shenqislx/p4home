@@ -52,8 +52,7 @@ def generate_identity(config_dir: pathlib.Path) -> None:
     atomic_write(token, (secrets.token_hex(32) + "\n").encode())
     subprocess.run(
         [
-            "/usr/bin/openssl", "req", "-x509", "-newkey", "ec",
-            "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
+            "/usr/bin/openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
             "-keyout", str(key), "-out", str(cert), "-days", "3650",
             "-subj", "/CN=p4home-product-human",
         ],

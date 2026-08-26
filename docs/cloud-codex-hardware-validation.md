@@ -96,7 +96,7 @@ Mac 系统扬声器只生成固定的麦克风测试输入，依次覆盖 Robot 
 该 profile 中明确记为 deferred，不作为失败，也不得被报告为通过。
 
 日常人工聊天使用 `product_human`，`monitor_seconds` 至少为 180 秒。它不是自动业务门禁：runner
-从本机 `0700` 的 `~/.config/p4home/product-voice` 读取 `0600` 的稳定 device identity、TLS identity
+从本机 `0700` 的 `~/.config/p4home/product-voice` 读取 `0600` 的稳定 device identity、RSA-2048 TLS identity
 与 SPKI pin，生成仅存在于 runner 临时目录的产品 sdkconfig。该 profile 启用 SR 与 Voice transport，
 关闭 startup selftest、Phase 5A/5B validation marker、Device Agent transport 和全部 Robot HA 装配；
 刷写前必须确认本机常驻 Voice 服务正在监听且呈现匹配的 SPKI。上传候选必须扫描稳定 token、TLS

@@ -19,7 +19,6 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "mbedtls/pk.h"
 #include "mbedtls/sha256.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
@@ -226,15 +225,20 @@ static int voice_verify_spki(void *context, mbedtls_x509_crt *certificate,
         *flags = 0U;
         return 0;
     }
-    unsigned char der[1024];
-    int length = mbedtls_pk_write_pubkey_der(&certificate->pk, der, sizeof(der));
-    if (length <= 0 || (size_t)length > sizeof(der)) return MBEDTLS_ERR_X509_CERT_VERIFY_FAILED;
-    unsigned char digest[VOICE_TRANSPORT_SPKI_SHA256_BYTES];
-    const unsigned char *spki = der + sizeof(der) - (size_t)length;
-    if (mbedtls_sha256(spki, (size_t)length, digest, 0) != 0 ||
-        !voice_constant_time_equal(digest, s_voice.spki_sha256, sizeof(digest))) {
+    if (certificate->pk_raw.p == NULL || certificate->pk_raw.len == 0U) {
+        ESP_LOGE(TAG, "Voice TLS SPKI verification failed reason=missing_raw_spki");
         return MBEDTLS_ERR_X509_CERT_VERIFY_FAILED;
     }
+    unsigned char digest[VOICE_TRANSPORT_SPKI_SHA256_BYTES];
+    if (mbedtls_sha256(certificate->pk_raw.p, certificate->pk_raw.len, digest, 0) != 0) {
+        ESP_LOGE(TAG, "Voice TLS SPKI verification failed reason=sha256");
+        return MBEDTLS_ERR_X509_CERT_VERIFY_FAILED;
+    }
+    if (!voice_constant_time_equal(digest, s_voice.spki_sha256, sizeof(digest))) {
+        ESP_LOGE(TAG, "Voice TLS SPKI verification failed reason=pin_mismatch");
+        return MBEDTLS_ERR_X509_CERT_VERIFY_FAILED;
+    }
+    ESP_LOGI(TAG, "Voice TLS SPKI verified");
     *flags = 0U;
     return 0;
 }

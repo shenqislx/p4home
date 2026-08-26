@@ -236,6 +236,8 @@ jobs:
             file_mode="$(stat -f '%Lp' "$PRODUCT_CONFIG_DIR/$private_file")"
             [[ "$file_mode" == "600" || "$file_mode" == "400" ]]
           done
+          openssl x509 -in "$PRODUCT_CONFIG_DIR/agent-cert.pem" -noout -text \
+            | grep -q "Public Key Algorithm: rsaEncryption"
           PRODUCT_DEVICE_ID="$(head -n 1 "$PRODUCT_CONFIG_DIR/device-id")"
           PRODUCT_AGENT_HOST="$(head -n 1 "$PRODUCT_CONFIG_DIR/agent-host")"
           PRODUCT_AGENT_PORT="$(head -n 1 "$PRODUCT_CONFIG_DIR/agent-port")"

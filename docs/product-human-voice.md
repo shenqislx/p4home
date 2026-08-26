@@ -24,13 +24,17 @@ python3 scripts/install-product-human-voice.py --agent-host <AGENT_LAN_IP>
 安装器以幂等方式创建：
 
 - `~/.config/p4home/product-voice/`：`0700`；
-- 稳定 device id、随机 token、长期自签 TLS identity 与 SPKI pin：`0600`；
+- 稳定 device id、随机 token、长期自签 RSA-2048 TLS identity 与 SPKI pin：`0600`；
 - `~/Library/Application Support/p4home/product-voice/`：SQLite 状态目录；
 - `~/Library/LaunchAgents/local.p4home.product-human-voice.plist`：无密钥的 launchd 描述；
 - `~/Library/Logs/p4home/`：常驻进程日志目录。
 
 安装器不会覆盖或轮换一套完整的既有 identity；如果 identity 只有部分文件，会 fail closed，要求人工
 检查后处理。
+
+产品身份固定使用 RSA-2048。ESP32-P4 当前的 MbedTLS/PSA 组合在解析部分 EC 证书公钥时可能在
+SPKI verifier 执行前失败，因此 `product_human` 工作流会拒绝 EC 产品证书；临时验证 profile 的
+一次性凭据边界保持不变。
 
 加载服务：
 

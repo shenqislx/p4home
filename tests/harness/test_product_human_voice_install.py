@@ -34,6 +34,7 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
             "Audit persistent Human Voice upload candidates",
             '"product_human_artifact_audit_status"',
             '! grep -qx "CONFIG_P4HOME_PHASE5A_VALIDATION=y"',
+            'grep -q "Public Key Algorithm: rsaEncryption"',
         ):
             self.assertIn(expected, workflow)
         self.assertIn('P4HOME_PRODUCT_ROLE_MODE="human-only"', wrapper)
@@ -54,6 +55,15 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
                 self.assertEqual((config / name).stat().st_mode & 0o077, 0)
             pin = MODULE.spki_sha256(config / "agent-key.pem")
             self.assertRegex(pin, r"^[0-9a-f]{64}$")
+            MODULE.subprocess.run(
+                [
+                    "/usr/bin/openssl", "rsa", "-in", str(config / "agent-key.pem"),
+                    "-check", "-noout",
+                ],
+                check=True,
+                stdout=MODULE.subprocess.DEVNULL,
+                stderr=MODULE.subprocess.DEVNULL,
+            )
             MODULE.generate_identity(config)
             self.assertEqual(
                 first,

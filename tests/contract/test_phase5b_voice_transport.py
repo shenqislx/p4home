@@ -39,6 +39,17 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         self.assertNotIn("agent_transport.h", firmware)
         self.assertNotIn("ha_client.h", firmware)
 
+    def test_spki_pin_hashes_the_certificate_subject_public_key_info(self) -> None:
+        firmware = VOICE_SOURCE.read_text(encoding="utf-8")
+        verifier = firmware[firmware.index("static int voice_verify_spki("):
+                            firmware.index("static esp_err_t voice_attach_spki_verifier(")]
+
+        self.assertIn("certificate->pk_raw.p", verifier)
+        self.assertIn("certificate->pk_raw.len", verifier)
+        self.assertIn("Voice TLS SPKI verification failed reason=pin_mismatch", verifier)
+        self.assertIn("Voice TLS SPKI verified", verifier)
+        self.assertNotIn("mbedtls_pk_write_pubkey_der", verifier)
+
     def test_capture_lifecycle_has_explicit_eos_timeout_and_epoch_fencing(self) -> None:
         firmware = VOICE_SOURCE.read_text(encoding="utf-8")
         runtime = RUNTIME_SOURCE.read_text(encoding="utf-8")
