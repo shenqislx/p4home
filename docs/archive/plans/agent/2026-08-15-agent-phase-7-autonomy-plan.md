@@ -1,12 +1,16 @@
 # Agent Phase 7 — Cat Autonomy Plan
 
-> Status: `in_progress`
-> Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
+> Status: `completed`
+> Started: 2026-08-26
+> Completed: 2026-08-27
+> Reviewed: 2026-08-27
+> Closure: 7A–7C 编码、本地/实机门禁和逐段 bugs review 均通过；用户最终 review 通过
+> Architecture: [P4 Local Agent Architecture](../../../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4、6 complete; 安全与稳定性门禁通过
 
 2026-08-26，用户明确授权启动 Phase 7，并要求先完成 feature 编码。2026-08-27，7A/7B/7C
-编码、本地门禁、逐段独立 bugs review 与真实 P4/HA/模型门禁均已完成；Phase 7 仍等待用户最终
-review，不因技术门禁通过而自动归档。
+编码、本地门禁、逐段独立 bugs review 与真实 P4/HA/模型门禁均已完成；同日用户最终 review
+通过，Phase 7 随后关闭并归档。
 
 ## 1. 目标
 
@@ -52,7 +56,7 @@ pnpm test:phase7
 - [x] 建立无持续模型轮询的 7 天虚拟时钟长跑；
 - [x] 量化按来源与全局模型调用频率、预算耗尽、跨日恢复和误触发；
 - [x] 压测用户/Robot 抢占、暂停/关闭、队列满、重启不补跑与审计容量；
-- [x] 增加独立 `pnpm gate:phase7` 与 [Phase 7B evidence](../../evidence/agent-phase-7/phase-7b-local-gate.md)。
+- [x] 增加独立 `pnpm gate:phase7` 与 [Phase 7B evidence](../../../../evidence/agent-phase-7/phase-7b-local-gate.md)。
 
 2026-08-26 本地 gate 在 Node `v24.19.0` 下通过：7 天 10,080 个有界 Timer 输入产生 168 次
 model admission（每日严格 24 次），无 trigger 的模型调用为 0；1,000 条 HA storm 仅 admission 1 次；
@@ -70,14 +74,14 @@ model admission（每日严格 24 次），无 trigger 的模型调用为 0；1,
     `e8de907` 对应 run `33061620203` 已按 manifest-first 协议通过，分别证明 Phase 7 Agent
     `RobotHaClient` 与 P4 内置 HA client 零 `call_service` dispatch；
 - [x] 提供 loopback bearer 控制面、policy decision 与 execution terminal 的有界查询，并通过独立 review；
-- [x] 完成 [真实环境证据](../../evidence/agent-phase-7/phase-7c-real-environment-gate.md)；
-- [ ] 完成最终用户 review。
+- [x] 完成 [真实环境证据](../../../../evidence/agent-phase-7/phase-7c-real-environment-gate.md)；
+- [x] 2026-08-27 用户最终 review 通过。
 
 ## 4. 完成定义
 
 - [x] 不存在持续 `while true ask_llm`；
-- [x] 本地 7 天虚拟长跑调用频率/预算稳定；真实模型/P4 与 120 秒资源采样门禁通过；
+- [x] 本地 7 天虚拟长跑调用频率/预算稳定；真实模型/P4 与 120 秒、1 秒粒度资源采样稳定门禁通过；
 - [x] 本地抢占、关停和重连测试证明不抢占用户动作；
 - [x] Cat 不接收原始用户输入、不调用 HA 写 Tool，Timer/HA 触发均可追溯；
 - [x] 用户可查看、暂停和关闭 autonomy；
-- [ ] 用户 review 通过后归档整个 Agent 主计划并更新架构状态。
+- [x] 用户 review 通过，Phase 7 计划已归档并更新架构状态。

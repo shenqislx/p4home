@@ -807,7 +807,7 @@ SSD 物理页不在该保证内。具体边界见
 
 ### Phase 7 — Cat Autonomy
 
-执行计划：[Phase 7 — Autonomy](./plans/2026-08-15-agent-phase-7-autonomy-plan.md)
+执行计划：[Phase 7 — Autonomy 归档](./archive/plans/agent/2026-08-15-agent-phase-7-autonomy-plan.md)
 
 交付：Cat 的 Timer/HA/World/task-complete 低频 trigger、Event Policy、quiet hours、budget、用户总
 开关、审计和取消。Cat 不直接接收用户输入、不写 HA，并永远低于 Robot/Human 用户 Run 优先级。
@@ -824,8 +824,8 @@ trigger、低频 Event Policy、独立 Cat `role-profile/v6`、用户抢占、�
 分别记录零 `call_service` dispatch，pause/disabled 各 60 秒零新增调用，120 秒资源采样稳定；
 artifact 审计覆盖 36 个 entity value、脱敏 43 处且确认凭据/entity 零残留。HA 零 dispatch 结论不
 覆盖其他客户端或 HA 服务端全局写入；该 run 也不声称真实家庭 HA 状态发生变化或代表
-unrestricted production deployment。Phase 7 当前仍为 `in_progress`，等待用户最终 review 后再
-关闭并归档。
+unrestricted production deployment。2026-08-27 用户最终 review 通过，Phase 7 已完成并归档；
+上述边界继续有效，未验证项不会因归档而变成通过。
 
 ## 19. MVP 验收清单
 

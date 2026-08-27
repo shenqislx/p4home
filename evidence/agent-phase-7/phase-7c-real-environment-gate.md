@@ -1,7 +1,8 @@
 # Phase 7C Real Environment Gate
 
-> Status: `technical_gate_passed_pending_user_review`
+> Status: `completed`
 > Date: 2026-08-27
+> Final review: passed 2026-08-27
 > Commit: `e8de907e0c776791835799826ea4d1b4c619f637`
 > Workflow run: `33061620203`
 
@@ -92,7 +93,8 @@ This run closes the Phase 7 technical real-environment gate. It proves bounded C
 model, a real read-only HA allowlist snapshot and real P4 transport. The two zero dispatch counters cover the
 Phase 7 Agent `RobotHaClient` and the built-in P4 HA client respectively; they do not prove zero writes by
 other HA clients or globally at the HA server. The run does not prove a real household HA state change or
-unrestricted production deployment. Phase 7 remains `in_progress` until explicit user review authorizes
-closure and archival. The public repository also tracks a 36-entry panel entity catalog; whether those names
-are acceptable public configuration or require history remediation is a separate governance decision. This
-gate neither rewrites repository history nor treats that classification question as an artifact PASS claim.
+unrestricted production deployment. The user passed the final review on 2026-08-27, and Phase 7 is closed
+and archived; the technical boundaries above remain unchanged. The public repository also tracks a 36-entry
+panel entity catalog; whether those names are acceptable public configuration or require history remediation
+is a separate governance decision. This gate neither rewrites repository history nor treats that
+classification question as an artifact PASS claim.

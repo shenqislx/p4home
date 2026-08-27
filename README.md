@@ -68,10 +68,10 @@ retention revision 1 已获批并实现。代表性家庭数据、Voice + Memory
 review 通过、接受这些延期并关闭 Phase 6；Phase 6 计划已归档。
 Vector DB 仍不立项。Phase 5 仍为 `pending_real_environment`。2026-08-26 用户已明确授权启动
 Phase 7；7A feature runtime 已实现四类低频 trigger、Event Policy、quiet hours/budget/总开关、
-用户抢占和审计查询，7B 本地长跑/频率/误触发/抢占 gate 也已通过。当前 Phase 7 仍为
-`in_progress`；修复提交 `e8de907` 对应的 7C run `33061620203` 已通过产品接线、真实只读 HA
-快照/P4/模型、终态后 P4 心跳、artifact 隐私与 120 秒、1 秒粒度资源采样稳定门禁（非瞬时硬上限），
-等待用户最终 review。Agent
+用户抢占和审计查询，7B 本地长跑/频率/误触发/抢占 gate 也已通过。随后，修复提交 `e8de907`
+对应的 7C run `33061620203` 已通过产品接线、真实只读 HA
+快照/P4/模型、终态后 P4 心跳、artifact 隐私与 120 秒、1 秒粒度资源采样稳定门禁（非瞬时硬上限）。
+2026-08-27 用户最终 review 通过，Phase 7 已完成并归档。Agent
 与 P4 的零 `call_service` dispatch 计数不等同于 HA 服务端全局零写入。Phase 6 完整
 清单和复现入口见
 [Phase 6 real-environment gate evidence](./evidence/agent-phase-6/phase-6-real-environment-gates.md)。
@@ -89,7 +89,7 @@ Timer/HA/World/task-complete；本机 bearer 控制与审计说明见
 1. [AGENT.md](./AGENT.md)；
 2. [当前架构](./docs/p4-local-agent-architecture.md)；
 3. [当前计划索引](./docs/plans/README.md)；
-4. 当前 `in_progress` Phase plan。
+4. 如存在，再读取当前 `in_progress` Phase plan。
 
 `docs/plans/` 只保存当前计划；过去的架构、计划和实施记录统一位于 [docs/archive](./docs/archive/README.md)。
 

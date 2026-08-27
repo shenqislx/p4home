@@ -27,7 +27,7 @@
 | M7.4 Robot HA & Multi-role | `completed` | 4A–4E 技术/真实环境门禁及用户最终 review 已通过 |
 | M7.5 Role-aware Voice | `pending_real_environment` | 5A–5D 技术主体完成；5E 实机总门禁与 P4 可听观察待补 |
 | M7.6 Role-aware Memory | `completed` | 最终 review 通过；6F/6G/6H Cat 与 6I 已通过，其余真实门禁由用户接受延期 |
-| M7.7 Cat Autonomy | `in_progress` | 7A–7C 技术/实机门禁通过；等待用户最终 review |
+| M7.7 Cat Autonomy | `completed` | 7A–7C 技术/实机门禁及用户最终 review 已通过 |
 
 M7.6 的稳定本地结论是：Memory contract/SQLite、确定性写入/冲突/删除、private 产品召回、三种
 visibility evaluator 和 `pnpm gate:phase6` 已通过；2026-08-24 用户已批准 matrix v1 保持
@@ -43,7 +43,7 @@ Object snapshot 保持 World 真值，artifact 隐私审计通过。6I APFS 权�
 授权并推进，当前状态见上表。旧 run `33056257943` 的隐私 artifact 已因 entity 残留删除并作废；
 修复提交 `e8de907` 对应 run `33061620203` 已通过真实模型、只读 HA 快照、P4 动作/重连、Agent 与
 P4 各自零 `call_service` dispatch、终态后心跳和 artifact 隐私门禁。该零计数不覆盖其他 HA 客户端
-或 HA 服务端全局写入，最终用户 review 仍未完成。
+或 HA 服务端全局写入。2026-08-27 用户最终 review 通过，M7.7 / Phase 7 已完成并归档。
 
 2026-08-24 补充门禁：真实 `qwen3.6:35b-mlx` 在脱敏合成 Memory 上的 grounded
 recall/prompt-injection/private 隔离已通过；真实 HA 只读门禁也证明 Memory 不覆盖

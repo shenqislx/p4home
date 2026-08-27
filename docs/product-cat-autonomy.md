@@ -64,4 +64,5 @@ event/run/action identity、状态和有界错误码，不包含用户正文、H
 （非瞬时硬上限）。Agent
 `RobotHaClient` 与 P4 内置 HA client 分别记录到零 `call_service` dispatch；该结论不覆盖其他 HA
 客户端或 HA 服务端全局写入。profile 的 HA action 使用真实 allowlist 快照的隔离投影，不等同于
-家庭现场实体真的发生了状态变化；Phase 7 仍需用户最终 review 才能关闭。
+家庭现场实体真的发生了状态变化。2026-08-27 用户最终 review 通过，Phase 7 已关闭并归档；上述
+产品与验证边界保持不变。
