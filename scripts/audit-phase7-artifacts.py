@@ -58,7 +58,15 @@ def fail(message: str) -> None:
 
 
 def encoded_variants(value: bytes) -> set[bytes]:
-    variants = {value, base64.b64encode(value), base64.urlsafe_b64encode(value)}
+    base64_value = base64.b64encode(value)
+    urlsafe_base64_value = base64.urlsafe_b64encode(value)
+    variants = {
+        value,
+        base64_value,
+        base64_value.rstrip(b"="),
+        urlsafe_base64_value,
+        urlsafe_base64_value.rstrip(b"="),
+    }
     try:
         text = value.decode("utf-8")
     except UnicodeDecodeError:
@@ -68,23 +76,45 @@ def encoded_variants(value: bytes) -> set[bytes]:
     return {variant for variant in variants if variant}
 
 
-def contains_private_fragment(candidates: bytes, value: bytes) -> bool:
-    for variant in encoded_variants(value):
-        if len(variant) <= 16:
-            if variant in candidates:
-                return True
+def private_representations(value: bytes) -> set[bytes]:
+    """Enumerate complete and truncation-safe raw/encoded private material."""
+    raw_values = {value}
+    for width in (16, 17, 18):
+        if len(value) < width:
             continue
-        if any(
-            variant[offset : offset + 16] in candidates
-            for offset in range(0, len(variant) - 15)
-        ):
-            return True
-    return False
+        raw_values.update(
+            value[offset : offset + width]
+            for offset in range(0, len(value) - width + 1)
+        )
+    variants: set[bytes] = set()
+    for raw in raw_values:
+        variants.update(encoded_variants(raw))
+    return variants
+
+
+def contains_private_fragment(candidates: bytes, value: bytes) -> bool:
+    return any(
+        variant in candidates for variant in private_representations(value)
+    )
+
+
+def redact_private_value(candidates: bytes, value: bytes) -> tuple[bytes, int]:
+    """Redact complete, encoded, and >=16-byte truncated representations."""
+    redacted = candidates
+    replacements = 0
+    for variant in sorted(private_representations(value), key=len, reverse=True):
+        count = redacted.count(variant)
+        if count == 0:
+            continue
+        redacted = redacted.replace(variant, b"[REDACTED_HA_ENTITY]")
+        replacements += count
+    return redacted, replacements
 
 
 def write_private_text(path: pathlib.Path, value: str) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
+        os.fchmod(descriptor, 0o600)
         os.write(descriptor, value.encode("utf-8"))
         os.fsync(descriptor)
     finally:
@@ -128,42 +158,7 @@ def policy_entity_ids(path: pathlib.Path) -> list[bytes]:
     return entity_ids
 
 
-def main() -> None:
-    args = parse_args()
-    args.output.unlink(missing_ok=True)
-    write_private_text(args.status_file, "fail\n")
-    monitor = args.monitor.read_bytes()
-    result_bytes = (
-        args.result.read_bytes()
-        if args.result is not None and args.result.is_file()
-        else b""
-    )
-    upload_candidates = monitor + b"\n" + result_bytes
-    if result_bytes:
-        result = json.loads(result_bytes)
-        if not isinstance(result, dict) or set(result) != ALLOWED_RESULT_KEYS:
-            fail("Phase 7 result uses an unexpected schema")
-        if (
-            result.get("schema_version") != 1
-            or result.get("profile") != "phase7_autonomy"
-            or result.get("protocol_version") != 2
-            or result.get("ha_projection_origin")
-            != "isolated_transition_from_real_allowlist_snapshot"
-            or result.get("request_contains_ha_token") is not False
-            or result.get("request_contains_entity_id") is not False
-        ):
-            fail("Phase 7 result privacy metadata is invalid")
-        if args.result.stat().st_mode & 0o077:
-            fail("Phase 7 result permissions are too broad")
-    for secret_file in args.secret_file:
-        secret = secret_file.read_bytes().strip()
-        if not secret:
-            fail(f"empty secret file: {secret_file}")
-        if contains_private_fragment(upload_candidates, secret):
-            fail(f"secret leaked into Phase 7 upload candidate: {secret_file.name}")
-    for entity_id in policy_entity_ids(args.ha_policy):
-        if contains_private_fragment(upload_candidates, entity_id):
-            fail("HA entity id leaked into Phase 7 upload candidate")
+def assert_monitor_health(monitor: bytes) -> None:
     lowered = monitor.lower()
     for marker in (
         b"guru meditation",
@@ -177,11 +172,80 @@ def main() -> None:
             fail(f"crash marker present in Phase 7 monitor: {marker.decode()}")
     if monitor.count(b"rst:0x") > 1:
         fail("reset loop present in Phase 7 monitor")
+
+
+def sanitize_monitor_entities(
+    monitor: bytes, entity_ids: list[bytes]
+) -> tuple[bytes, int]:
+    sanitized_lines: list[bytes] = []
+    replacements = 0
+    for line in monitor.splitlines(keepends=True):
+        if b"VERIFY:" in line:
+            if any(contains_private_fragment(line, entity_id) for entity_id in entity_ids):
+                fail("HA entity id collides with protected Phase 7 verification evidence")
+            sanitized_lines.append(line)
+            continue
+        sanitized = line
+        for entity_id in entity_ids:
+            sanitized, count = redact_private_value(sanitized, entity_id)
+            replacements += count
+        sanitized_lines.append(sanitized)
+    sanitized_monitor = b"".join(sanitized_lines)
+    for entity_id in entity_ids:
+        if contains_private_fragment(sanitized_monitor, entity_id):
+            fail("HA entity id remained after Phase 7 monitor sanitization")
+    return sanitized_monitor, replacements
+
+
+def main() -> None:
+    args = parse_args()
+    args.output.unlink(missing_ok=True)
+    write_private_text(args.status_file, "fail\n")
+    monitor = args.monitor.read_bytes()
+    assert_monitor_health(monitor)
+    result_bytes = (
+        args.result.read_bytes()
+        if args.result is not None and args.result.is_file()
+        else b""
+    )
+    if result_bytes:
+        result = json.loads(result_bytes)
+        if not isinstance(result, dict) or set(result) != ALLOWED_RESULT_KEYS:
+            fail("Phase 7 result uses an unexpected schema")
+        if (
+            result.get("schema_version") != 1
+            or result.get("profile") != "phase7_autonomy"
+            or result.get("model") != "qwen3.6:35b-mlx"
+            or result.get("protocol_version") != 2
+            or result.get("ha_projection_origin")
+            != "isolated_transition_from_real_allowlist_snapshot"
+            or result.get("request_contains_ha_token") is not False
+            or result.get("request_contains_entity_id") is not False
+        ):
+            fail("Phase 7 result privacy metadata is invalid")
+        if args.result.stat().st_mode & 0o077:
+            fail("Phase 7 result permissions are too broad")
+    upload_candidates = monitor + b"\n" + result_bytes
+    for secret_file in args.secret_file:
+        secret = secret_file.read_bytes().strip()
+        if not secret:
+            fail(f"empty secret file: {secret_file}")
+        if contains_private_fragment(upload_candidates, secret):
+            fail(f"secret leaked into Phase 7 upload candidate: {secret_file.name}")
+    entity_ids = policy_entity_ids(args.ha_policy)
+    for entity_id in entity_ids:
+        if contains_private_fragment(result_bytes, entity_id):
+            fail("HA entity id leaked into Phase 7 result")
+    sanitized_monitor, entity_redactions = sanitize_monitor_entities(
+        monitor, entity_ids
+    )
+    assert_monitor_health(sanitized_monitor)
     marker = (
         b"VERIFY:phase7:artifact_audit:PASS "
-        b"credentials=false entity_ids=false\n"
+        b"credentials=false entity_ids=false "
+        + f"entity_redactions={entity_redactions}\n".encode("ascii")
     )
-    publish_monitor(args.output, monitor, marker)
+    publish_monitor(args.output, sanitized_monitor, marker)
     write_private_text(args.status_file, "pass\n")
     print(marker.decode("ascii"), end="")
 
