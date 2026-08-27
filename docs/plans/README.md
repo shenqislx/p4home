@@ -1,7 +1,7 @@
 # P4 Home 当前工作计划
 
 > Current Focus: [P4 Home 本地 LLM Agent 化架构](../p4-local-agent-architecture.md)
-> Updated: 2026-08-26
+> Updated: 2026-08-27
 > Working Branch: `feature/agent-harness`
 
 ## 工作规则
@@ -26,7 +26,7 @@
 | 4 | Robot HA & Multi-role | `completed` | Robot 受限 HA 工具、Human/Robot 语义分割 | [Phase 4 归档](../archive/plans/agent/2026-08-15-agent-phase-4-ha-tool-plan.md) |
 | 5 | Role-aware Voice | `pending_real_environment` | 5A–5D 技术主体完成；5E 实机总门禁待具备硬件条件后补 | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
 | 6 | Role-aware Memory | `completed` | 最终 review 通过；已通过门禁关闭，其余真实项由用户接受延期 | [Phase 6 归档](../archive/plans/agent/2026-08-15-agent-phase-6-memory-plan.md) |
-| 7 | Cat Autonomy | `in_progress` | 7A/7B + 7C1 产品接线/review 已完成；7C 实机门禁待完成 | [Phase 7](./2026-08-15-agent-phase-7-autonomy-plan.md) |
+| 7 | Cat Autonomy | `in_progress` | 7A–7C 技术/实机门禁已通过；等待用户最终 review | [Phase 7](./2026-08-15-agent-phase-7-autonomy-plan.md) |
 
 ## 下一步
 
@@ -89,7 +89,13 @@ feature 编码；7A Runtime 已实现四类 trigger、Event Policy、quiet hours
 抢占和审计查询。7B 的 7 天 10,080 trigger 长跑、跨日预算、HA storm、误触发、抢占和审计容量
 本地 gate 已通过。7C1 产品启动装配、控制/审计入口和两轮独立 bugs review 已完成；7C2 专用
 实机 profile、真实模型/P4 harness、HA 只读计数、隐私审计编码及两路 bugs review 也已完成。
-真实 workflow artifact 和 final review 尚未通过，Phase 7 保持 `in_progress`。
+2026-08-27，旧 run `33056257943` 的 artifact 因独立复核发现 entity 残留已删除并作废；修复提交
+`e8de907` 对应的新 run `33061620203` 通过 manifest-first 判定：真实固定模型仅调用 2 次，
+Timer/隔离 HA 投影各完成一个 P4 action，重连 snapshot 通过；Phase 7 Agent `RobotHaClient` 与
+P4 内置 HA client 分别记录零 `call_service` dispatch，pause/disabled 各 60 秒无新增调用，120 秒
+资源采样稳定；隐私审计覆盖 36 个 entity value、脱敏 43 处且凭据/entity 零残留。零 dispatch
+不覆盖其他 HA 客户端或服务端全局写入。Phase 7 技术与真实环境门禁已完成，但最终用户 review
+尚未通过，因此仍保持 `in_progress`，不归档。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 已在 Phase 2 完成并通过实机证据验证。

@@ -69,14 +69,18 @@ review 通过、接受这些延期并关闭 Phase 6；Phase 6 计划已归档。
 Vector DB 仍不立项。Phase 5 仍为 `pending_real_environment`。2026-08-26 用户已明确授权启动
 Phase 7；7A feature runtime 已实现四类低频 trigger、Event Policy、quiet hours/budget/总开关、
 用户抢占和审计查询，7B 本地长跑/频率/误触发/抢占 gate 也已通过。当前 Phase 7 仍为
-`in_progress`；7C1 产品启动装配/review 已完成，真实 HA/P4/模型环境和最终 review 仍待独立门禁。Phase 6 完整
+`in_progress`；修复提交 `e8de907` 对应的 7C run `33061620203` 已通过产品接线、真实只读 HA
+快照/P4/模型、终态后 P4 心跳、artifact 隐私与 120 秒、1 秒粒度资源采样稳定门禁（非瞬时硬上限），
+等待用户最终 review。Agent
+与 P4 的零 `call_service` dispatch 计数不等同于 HA 服务端全局零写入。Phase 6 完整
 清单和复现入口见
 [Phase 6 real-environment gate evidence](./evidence/agent-phase-6/phase-6-real-environment-gates.md)。
 
 7C1 产品接线已通过独立 bugs review：默认关闭，显式启用后等待 P4 Device Protocol v2 ready，再挂载
 Timer/HA/World/task-complete；本机 bearer 控制与审计说明见
 [Cat Autonomy 产品接线](docs/product-cat-autonomy.md)，本地复核见
-[7C1 evidence](evidence/agent-phase-7/phase-7c1-product-wiring-review.md)。真实环境门禁仍未通过。
+[7C1 evidence](evidence/agent-phase-7/phase-7c1-product-wiring-review.md)，真实环境技术门禁见
+[7C evidence](evidence/agent-phase-7/phase-7c-real-environment-gate.md)。
 
 ## 工作规则
 

@@ -797,8 +797,8 @@ grounded/prompt-injection 门禁已通过；6G 真实 HA 只读门禁证明 Memo
 `899b746`。6H P4 Cat run `32819132030` 已证明 P4 snapshot 保持 World 真值且 artifact 隐私
 审计通过；DB/WAL/index quota 与分类 retention revision 1 已获批并实现。代表性家庭数据、Voice +
 Memory、家庭身份模型、SQLite 真实断电、加密/secure-delete 经用户决定延期；Phase 5 仍为
-`pending_real_environment`，Phase 7
-等待另行明确授权且未启动。延期项仍未验证。确定性 FTS 已满足当前冻结场景，因此 Vector DB 当前不立项，但真实
+`pending_real_environment`。Phase 7 已于 2026-08-26 获得授权并推进，当前状态见下节；Phase 6
+延期项仍未验证。确定性 FTS 已满足当前冻结场景，因此 Vector DB 当前不立项，但真实
 数据证据不足，后续仍可在独立计划中重新评估。
 
 SQLite 删除保证仅覆盖产品查询和数据库逻辑对象；删除前备份、旧 WAL 帧、APFS snapshot 与
@@ -817,8 +817,15 @@ SSD 物理页不在该保证内。具体边界见
 2026-08-26 用户明确授权启动 Phase 7，并要求先完成 feature 编码。7A Runtime 已建立四类严格
 trigger、低频 Event Policy、独立 Cat `role-profile/v6`、用户抢占、暂停/关闭和审计查询；7B 本地
 7 天长跑、频率/误触发/抢占 gate 已通过。7C1 产品启动装配、离线/重连门禁、loopback 控制面和
-独立 bugs review 已完成。Phase 7 当前为 `in_progress`，7C 真实
-HA/P4/模型环境和最终 review 尚未通过。
+独立 bugs review 已完成。旧 run `33056257943` 的上传产物后经复核发现 entity 残留并已删除，不能
+作为通过证据。2026-08-27，修复提交 `e8de907` 对应的 7C 专用 `phase7_autonomy` run
+`33061620203` 通过 manifest-first 技术门禁：真实固定模型仅调用 2 次，Timer 与隔离 HA allowlist
+投影各完成一个 P4 action，重连 snapshot 不回退；Agent `RobotHaClient` 与 P4 内置 HA client
+分别记录零 `call_service` dispatch，pause/disabled 各 60 秒零新增调用，120 秒资源采样稳定；
+artifact 审计覆盖 36 个 entity value、脱敏 43 处且确认凭据/entity 零残留。HA 零 dispatch 结论不
+覆盖其他客户端或 HA 服务端全局写入；该 run 也不声称真实家庭 HA 状态发生变化或代表
+unrestricted production deployment。Phase 7 当前仍为 `in_progress`，等待用户最终 review 后再
+关闭并归档。
 
 ## 19. MVP 验收清单
 

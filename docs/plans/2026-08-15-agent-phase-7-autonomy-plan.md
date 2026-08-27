@@ -4,9 +4,9 @@
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4、6 complete; 安全与稳定性门禁通过
 
-2026-08-26，用户明确授权启动 Phase 7，并要求先完成 feature 编码。当前只完成本地 feature
-实现范围；长跑/频率评测、真实 HA/World/Timer 接线与最终 review 仍是独立门禁，不因编码完成而
-自动通过。
+2026-08-26，用户明确授权启动 Phase 7，并要求先完成 feature 编码。2026-08-27，7A/7B/7C
+编码、本地门禁、逐段独立 bugs review 与真实 P4/HA/模型门禁均已完成；Phase 7 仍等待用户最终
+review，不因技术门禁通过而自动归档。
 
 ## 1. 目标
 
@@ -63,17 +63,20 @@ model admission（每日严格 24 次），无 trigger 的模型调用为 0；1,
 
 - [x] 产品启动装配挂载 Timer、真实 HA allowlist client、P4 device adapter 和 task-complete ingress，
   并通过独立 bugs review 与修复复核；
-- [ ] 验证真实 P4 action、HA/P4 原链不回归、资源与长稳；
+- [x] 验证真实 P4 action、HA/P4 原链不回归与 120 秒、1 秒粒度资源采样稳定门禁（非瞬时硬上限）；
   - [x] 完成专用 `phase7_autonomy` profile、真实模型/P4 harness、HA 只读 frame 计数、隐私审计编码，
     并完成两路独立 bugs review 与修复复核；
-  - [ ] 推送待测 commit，执行实机 workflow 并按 manifest-first 协议判定；
+  - [x] 旧 run `33056257943` 的 artifact 因复核发现 entity 残留已删除并作废；修复提交
+    `e8de907` 对应 run `33061620203` 已按 manifest-first 协议通过，分别证明 Phase 7 Agent
+    `RobotHaClient` 与 P4 内置 HA client 零 `call_service` dispatch；
 - [x] 提供 loopback bearer 控制面、policy decision 与 execution terminal 的有界查询，并通过独立 review；
-- [ ] 完成真实环境证据与最终用户 review。
+- [x] 完成 [真实环境证据](../../evidence/agent-phase-7/phase-7c-real-environment-gate.md)；
+- [ ] 完成最终用户 review。
 
 ## 4. 完成定义
 
 - [x] 不存在持续 `while true ask_llm`；
-- [ ] 本地长跑调用频率/预算已稳定；真实模型与硬件资源长稳待 7C 实机门禁；
+- [x] 本地 7 天虚拟长跑调用频率/预算稳定；真实模型/P4 与 120 秒资源采样门禁通过；
 - [x] 本地抢占、关停和重连测试证明不抢占用户动作；
 - [x] Cat 不接收原始用户输入、不调用 HA 写 Tool，Timer/HA 触发均可追溯；
 - [x] 用户可查看、暂停和关闭 autonomy；

@@ -58,6 +58,10 @@ event/run/action identity、状态和有界错误码，不包含用户正文、H
 
 本地测试已覆盖配置 fail-closed、等待 P4 ready、四来源装配、动作到 SQLite、autonomy World 尾部
 反馈阻断、控制鉴权与 pause/disable。专用 `phase7_autonomy` 实机 profile 和上传前隐私审计已完成
-编码并通过两路独立 bugs review；真实 workflow 尚未产生 commit-bound artifact。真实 P4、真实 HA 只读连接、真实模型和
-资源稳定性必须按 manifest-first 协议通过后才能关闭 Phase 7。该 profile 的 HA action 使用真实
-allowlist 快照的隔离投影，不等同于家庭现场实体真的发生了状态变化。
+编码并完成逐轮独立 bugs review。旧 run `33056257943` 的 artifact 因复核发现 entity 残留已删除，
+不得作为通过证据；修复提交 `e8de907` 对应的新 run `33061620203` 已通过真实 P4、真实 HA 只读
+连接、真实模型、终态后 P4 心跳和 120 秒、1 秒粒度资源采样稳定的 manifest-first 技术门禁
+（非瞬时硬上限）。Agent
+`RobotHaClient` 与 P4 内置 HA client 分别记录到零 `call_service` dispatch；该结论不覆盖其他 HA
+客户端或 HA 服务端全局写入。profile 的 HA action 使用真实 allowlist 快照的隔离投影，不等同于
+家庭现场实体真的发生了状态变化；Phase 7 仍需用户最终 review 才能关闭。
