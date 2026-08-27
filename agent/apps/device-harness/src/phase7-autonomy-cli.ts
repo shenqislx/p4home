@@ -53,8 +53,8 @@ interface Phase7AutonomyResult {
   readonly p4_state_version: number;
   readonly ha_client_ready: boolean;
   readonly ha_policy_aliases: number;
-  readonly ha_service_calls_dispatched: number;
-  readonly ha_invalid_outbound_frames: number;
+  readonly agent_ha_service_calls_dispatched: number;
+  readonly agent_ha_invalid_outbound_frames: number;
   readonly robot_non_admin: boolean;
   readonly robot_non_owner: boolean;
   readonly pause_blocked_model_calls: boolean;
@@ -451,8 +451,8 @@ async function main(): Promise<number> {
       p4_state_version: reconnectVersion,
       ha_client_ready: haClient.state === "ready",
       ha_policy_aliases: realHaStates.length,
-      ha_service_calls_dispatched: frames.service_calls,
-      ha_invalid_outbound_frames: frames.invalid,
+      agent_ha_service_calls_dispatched: frames.service_calls,
+      agent_ha_invalid_outbound_frames: frames.invalid,
       robot_non_admin: identity.is_admin === false,
       robot_non_owner: identity.is_owner === false,
       pause_blocked_model_calls: pauseBlocked,
@@ -474,7 +474,7 @@ async function main(): Promise<number> {
     );
     process.stdout.write(
       `VERIFY:phase7:ha_read_only:${frames.service_calls === 0 ? "PASS" : "FAIL"} `
-      + `service_calls=${frames.service_calls} invalid_frames=${frames.invalid}\n`,
+      + `agent_service_calls=${frames.service_calls} agent_invalid_frames=${frames.invalid}\n`,
     );
     await close();
     process.stdout.write("HARNESS:phase7:agent_offline:STARTED\n");

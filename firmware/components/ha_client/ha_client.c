@@ -120,6 +120,7 @@ typedef struct {
     bool last_request_success;
     uint32_t initial_state_count;
     uint32_t total_event_count;
+    uint32_t service_calls_dispatched;
     uint32_t reconnect_count;
     uint32_t bucket_a;
     uint32_t bucket_b;
@@ -1519,6 +1520,7 @@ esp_err_t ha_client_get_metrics(ha_client_metrics_t *metrics)
     metrics->reconnect_count = s_ctx.reconnect_count;
     metrics->initial_state_count = s_ctx.initial_state_count;
     metrics->total_event_count = s_ctx.total_event_count;
+    metrics->service_calls_dispatched = s_ctx.service_calls_dispatched;
     metrics->events_per_minute = s_ctx.bucket_a + s_ctx.bucket_b;
     metrics->connected_duration_ms = s_ctx.connected_duration_ms;
     if (s_ctx.state == HA_CLIENT_STATE_READY && s_ctx.last_connected_at_ms != 0U) {
@@ -1634,6 +1636,9 @@ esp_err_t ha_client_call_service(const ha_client_call_service_request_t *request
         xSemaphoreGive(s_ctx.call_mutex);
         return ESP_FAIL;
     }
+    taskENTER_CRITICAL(&s_ctx.lock);
+    s_ctx.service_calls_dispatched++;
+    taskEXIT_CRITICAL(&s_ctx.lock);
 
     EventBits_t bits = xEventGroupWaitBits(s_ctx.event_group, HA_CLIENT_CALL_DONE_BIT,
                                            pdTRUE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
@@ -1691,6 +1696,8 @@ esp_err_t ha_client_request_json(const char *type, const char *fields_json,
                         ESP_ERR_INVALID_STATE, TAG, "ha client not initialized");
     ESP_RETURN_ON_FALSE(ha_client_validate_request_type(type), ESP_ERR_INVALID_ARG, TAG,
                         "invalid HA request type");
+    ESP_RETURN_ON_FALSE(strcmp(type, "call_service") != 0, ESP_ERR_INVALID_ARG, TAG,
+                        "call_service must use the audited service API");
     ESP_RETURN_ON_FALSE(result_json != NULL, ESP_ERR_INVALID_ARG, TAG,
                         "result_json is required");
     ESP_RETURN_ON_FALSE(ha_client_ready() && s_ctx.ws != NULL, ESP_ERR_INVALID_STATE, TAG,

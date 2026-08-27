@@ -147,9 +147,12 @@ jobs:
           echo "AGENT_TMP_DIR=$RUNNER_TEMP/p4home-agent-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
           if [[ "$VALIDATION_PROFILE" == "phase2d_agent" ]]; then
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 300))" >> "$GITHUB_ENV"
+          elif [[ "$VALIDATION_PROFILE" == "phase7_autonomy" ]]; then
+            # The Phase 7 harness has a 20-minute hard deadline. Capture may
+            # finish early only after 35 seconds of post-terminal P4 metrics.
+            echo "CAPTURE_SECONDS=1235" >> "$GITHUB_ENV"
           elif [[ "$VALIDATION_PROFILE" == "phase3d_object" || \
-                  "$VALIDATION_PROFILE" == "phase6h_cat_memory" || \
-                  "$VALIDATION_PROFILE" == "phase7_autonomy" ]]; then
+                  "$VALIDATION_PROFILE" == "phase6h_cat_memory" ]]; then
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 120))" >> "$GITHUB_ENV"
           elif [[ "$VALIDATION_PROFILE" == "phase4c_ha" ]]; then
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 180))" >> "$GITHUB_ENV"
@@ -359,14 +362,19 @@ jobs:
           esac
           FROZEN_PHASE7_TOKEN_FILE="$AGENT_TMP_DIR/phase7-robot-ha.token"
           FROZEN_PHASE7_POLICY_FILE="$AGENT_TMP_DIR/phase7-robot-ha-policy.json"
+          FROZEN_PHASE7_URL_FILE="$AGENT_TMP_DIR/phase7-robot-ha.url"
           cp "$ROBOT_TOKEN_FILE" "$FROZEN_PHASE7_TOKEN_FILE"
           cp "$ROBOT_POLICY_FILE" "$FROZEN_PHASE7_POLICY_FILE"
-          chmod 400 "$FROZEN_PHASE7_TOKEN_FILE" "$FROZEN_PHASE7_POLICY_FILE"
+          cp "$ROBOT_URL_FILE" "$FROZEN_PHASE7_URL_FILE"
+          chmod 400 "$FROZEN_PHASE7_TOKEN_FILE" "$FROZEN_PHASE7_POLICY_FILE" "$FROZEN_PHASE7_URL_FILE"
+          P4HOME_PHASE7_HA_URL="$(head -n 1 "$FROZEN_PHASE7_URL_FILE")"
           echo "P4HOME_PHASE7_HA_URL=$P4HOME_PHASE7_HA_URL" >> "$GITHUB_ENV"
           echo "P4HOME_PHASE7_TOKEN_FILE=$FROZEN_PHASE7_TOKEN_FILE" >> "$GITHUB_ENV"
           echo "P4HOME_PHASE7_POLICY_FILE=$FROZEN_PHASE7_POLICY_FILE" >> "$GITHUB_ENV"
+          echo "P4HOME_PHASE7_URL_FILE=$FROZEN_PHASE7_URL_FILE" >> "$GITHUB_ENV"
           echo "P4HOME_PHASE7_AUDIT_STATUS_FILE=$AGENT_TMP_DIR/phase7-artifact-audit-status" >> "$GITHUB_ENV"
           echo "P4HOME_PHASE7_RAW_MONITOR_LOG=$AGENT_TMP_DIR/phase7-raw-monitor.log" >> "$GITHUB_ENV"
+          echo "P4HOME_PHASE7_CAPTURE_DURATION_FILE=$AGENT_TMP_DIR/phase7-capture-seconds" >> "$GITHUB_ENV"
           echo "OLLAMA_MODEL=qwen3.6:35b-mlx" >> "$GITHUB_ENV"
 
       - name: Prepare Phase 4C HA profile
@@ -920,6 +928,18 @@ jobs:
             wc -c < "$monitor_log" > "$PHASE4C_POST_ROBOT_OFFSET_FILE"
             wait "$capture_pid"
             test "$((SECONDS - post_robot_started_at))" -ge 60
+          elif [[ "$VALIDATION_PROFILE" == "phase7_autonomy" ]]; then
+            python scripts/capture-esp-serial.py \
+              --port "$SERIAL_PORT" \
+              --seconds "$CAPTURE_SECONDS" \
+              --output "$monitor_log" \
+              --append \
+              --reset \
+              --stop-file "$AGENT_HARNESS_STATUS_FILE" \
+              --post-stop-seconds 35 \
+              --duration-file "$P4HOME_PHASE7_CAPTURE_DURATION_FILE"
+            test -s "$AGENT_HARNESS_STATUS_FILE"
+            test -s "$P4HOME_PHASE7_CAPTURE_DURATION_FILE"
           else
             python scripts/capture-esp-serial.py \
               --port "$SERIAL_PORT" \
@@ -938,10 +958,9 @@ jobs:
           fi
           harness_wait_attempts=1200
           if [[ "$VALIDATION_PROFILE" == "phase7_autonomy" ]]; then
-            # The harness has a 20-minute hard deadline. Combined with the
-            # minimum 420-second serial capture, 900 seconds covers its
-            # bounded terminalization and status-file write.
-            harness_wait_attempts=9000
+            # The capture step already requires terminal status with at least
+            # 35 seconds left for a post-terminal P4 HA heartbeat sample.
+            harness_wait_attempts=1
           fi
           if [[ "$VALIDATION_PROFILE" == "phase5b_voice" || \
                 "$VALIDATION_PROFILE" == "phase5c_stt" || \
@@ -1040,9 +1059,12 @@ jobs:
             --output firmware/monitor.log \
             "${audit_args[@]}" \
             --ha-policy "$P4HOME_PHASE7_POLICY_FILE" \
+            --entity-catalog firmware/components/panel_data_store/panel_entities.json \
+            --sdkconfig "$HARDWARE_SDKCONFIG" \
             --secret-file "$AGENT_TMP_DIR/device-token" \
             --secret-file "$AGENT_TMP_DIR/agent-key.pem" \
             --secret-file "$P4HOME_PHASE7_TOKEN_FILE" \
+            --secret-file "$P4HOME_PHASE7_URL_FILE" \
             --status-file "$P4HOME_PHASE7_AUDIT_STATUS_FILE"
           grep -qx "pass" "$P4HOME_PHASE7_AUDIT_STATUS_FILE"
 
@@ -1396,6 +1418,12 @@ jobs:
               ),
               "agent_hardware_result": (
                   read_json(harness_result_path)
+              ),
+              "capture_actual_seconds": (
+                  int(pathlib.Path(os.environ["P4HOME_PHASE7_CAPTURE_DURATION_FILE"])
+                      .read_text(encoding="utf-8").strip())
+                  if profile == "phase7_autonomy"
+                  else None
               ),
           }
           pathlib.Path("firmware/hardware-validation-manifest.json").write_text(

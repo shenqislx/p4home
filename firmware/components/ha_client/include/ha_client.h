@@ -32,6 +32,7 @@ typedef struct {
     uint32_t reconnect_count;
     uint32_t initial_state_count;
     uint32_t total_event_count;
+    uint32_t service_calls_dispatched;
     uint32_t events_per_minute;
     uint64_t connected_duration_ms;
     uint64_t last_connected_at_ms;

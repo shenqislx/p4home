@@ -229,7 +229,8 @@ void diagnostics_service_log_ha_summary(void)
     panel_data_store_iterate(diagnostics_count_panel_sensor, &panel);
 
     ESP_LOGW(TAG,
-             "ha_summary state=%s reconnect=%" PRIu32 " initial=%" PRIu32 " events=%" PRIu32 " epm=%" PRIu32
+             "ha_summary state=%s reconnect=%" PRIu32 " initial=%" PRIu32 " events=%" PRIu32
+             " service_calls=%" PRIu32 " epm=%" PRIu32
              " connected_ms=%" PRIu64 " last_ready_ms=%" PRIu64 " last_event_ms=%" PRIu64
              " entities=%" PRIu32 " stale=%" PRIu32 " unknown=%" PRIu32 " offline=%" PRIu32
              " rejected=%u ignored_untracked=%u worker_stack_high_water=%" PRIu32 " bytes error=%s",
@@ -237,6 +238,7 @@ void diagnostics_service_log_ha_summary(void)
              metrics.reconnect_count,
              metrics.initial_state_count,
              metrics.total_event_count,
+             metrics.service_calls_dispatched,
              metrics.events_per_minute,
              metrics.connected_duration_ms,
              metrics.last_ready_at_ms,

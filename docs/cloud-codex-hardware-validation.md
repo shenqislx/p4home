@@ -120,15 +120,20 @@ harness 业务退出码和 `VERIFY:*:FAIL` 本身不改变 transport job 状态�
 
 Phase 7 Cat Autonomy 真实环境门禁使用 `phase7_autonomy`，`monitor_seconds` 至少为 300 秒，
 Device Protocol 固定为 v2。runner 使用一次性 P4 TLS/device token，并从仓库外权限为 `0600` 的
-Robot HA URL/token/policy 建立真实非管理员只读连接；固件不会装配 HA client，也不会执行家庭设备
-写入。harness 先用真实 `qwen3.6:35b-mlx` 处理一次 60 秒 Timer，再把真实 HA allowlist 快照转换为
+Robot HA URL/token/policy 建立真实非管理员只读连接；Cat autonomy 不获得 HA 写 Tool。P4 固件
+保留独立 HA client，但门禁要求其周期指标中 `service_calls=0`。harness 先用真实
+`qwen3.6:35b-mlx` 处理一次 60 秒 Timer，再把真实 HA allowlist 快照转换为
 隔离的 in-process 状态变化，验证 HA source bridge 的第二次 Cat action。后者不是家庭现场实体真的
 变化，证据必须保留 `origin=isolated_transition_from_real_allowlist_snapshot`，不得写成“真实 HA
 实体事件已发生”。随后门禁验证 P4 断线重连 snapshot、pause/disable 各 60 秒零模型调用、覆盖
-两次 action 和两段控制观察的 Agent RSS 1 秒采样峰值、HA client 仍 ready 且 outbound
-`call_service=0`；该采样不是瞬时内存硬上限。
+两次 action 和两段控制观察的 Agent RSS 1 秒采样峰值、Agent RobotHaClient 仍 ready 且 outbound
+`call_service=0`，并校验 P4 内置 HA client 的独立 `service_calls=0` 指标；这些计数不代表 HA
+服务端全局写入计数。串口捕获最长 1,235 秒；harness terminal 后仍继续至少 35 秒，以覆盖下一次
+30 秒 P4 HA heartbeat，auditor 只接受 terminal sentinel 之后仍有 READY/零写样本，实际采集秒数
+写入 manifest。该采样不是瞬时内存硬上限。
 原始串口和 harness 日志只在 runner 私有
-临时目录合并；上传前扫描一次性 P4 凭据、Robot HA token、所有真实 HA entity id、崩溃和 reset-loop
+临时目录合并；上传前基于 Robot policy、固件 panel catalog 和最终 sdkconfig 的并集扫描一次性 P4
+凭据、Robot HA token、所有在册真实 HA entity id、崩溃和 reset-loop
 标记，审计通过后才原子发布。功能判定要求 manifest 身份一致，并同时核对
 `VERIFY:phase7:product_ready:PASS`、`timer_action:PASS`、`ha_projection_action:PASS`、
 `p4_reconnect:PASS`、`pause_disable:PASS`、峰值 RSS `resource_stability:PASS`、
@@ -186,7 +191,8 @@ manifest 推断。
 渲染/ACK marker、真实模型调用、HA 读写恢复和 Agent 汇总判定。harness 或 input driver 的业务
 失败不会阻断已通过隐私审计的证据上传；隐私审计失败仍会 fail closed 并跳过 Phase 5E artifact。
 `phase7_autonomy` 还记录 `phase7_artifact_audit_status=pass` 与结构化
-`agent_hardware_result`；结构化结果中的 HA 字段只有 alias 数量、只读 frame 计数和上述隔离投影
+`agent_hardware_result`，并以 `capture_actual_seconds` 记录动态提前结束后的实际串口采集时长；
+结构化结果中的 HA 字段只有 alias 数量、只读 frame 计数和上述隔离投影
 来源，不得包含 token、entity id 或模型请求正文。harness 业务退出码与结果的 `passed` 仍由
 Cloud Codex 按原始 marker 复核，不能由 transport job 代判。
 
