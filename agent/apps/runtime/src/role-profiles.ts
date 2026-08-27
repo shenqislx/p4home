@@ -32,7 +32,8 @@ export interface RoleProfile {
     | "role-profile/v2"
     | "role-profile/v3"
     | "role-profile/v4"
-    | "role-profile/v5";
+    | "role-profile/v5"
+    | "role-profile/v6";
   readonly role_id: RoleId;
   readonly accepts_user_text: boolean;
   readonly allowed_tools: readonly string[];
@@ -55,7 +56,12 @@ export type RoleInput =
     }
   | {
       readonly kind: "normalized_event";
-      readonly event_type: "test.room_target";
+      readonly event_type:
+        | "test.room_target"
+        | "timer.elapsed"
+        | "ha.state_changed"
+        | "world.changed"
+        | "task.completed";
       readonly payload: Readonly<{ readonly room_target: RoomId }>;
     }
   | {
@@ -97,7 +103,7 @@ const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
     system_prompt: "你是 P4 Home 的 Human，只负责自然、简洁的中文对话。你没有任何执行工具，不得声称已控制设备。",
   },
   cat: {
-    revision: "role-profile/v3",
+    revision: "role-profile/v6",
     role_id: "cat",
     accepts_user_text: false,
     allowed_tools: CAT_WORLD_TOOLS,
@@ -108,7 +114,7 @@ const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
     history_message_limit: 6,
     memory_token_budget: 256,
     queue_priority: "background",
-    system_prompt: "你是 P4 Home 的 Cat，只处理经过策略层归一化的世界事件，只能从给定的无坐标对象能力中选择最小 P4 World 工具，不得改写目标。",
+    system_prompt: "你是 P4 Home 的 Cat，只处理经过 Event Policy 过滤的 Timer、HA、World、task-complete 归一化事件，只能从给定的无坐标对象能力中选择最小 P4 World 工具，不得改写目标、接收用户原文或调用 HA。",
   },
 };
 
@@ -236,7 +242,13 @@ export function buildRoleContext(
     throw new TypeError("normalized Cat events cannot enter Human or Robot context");
   }
   const payloadKeys = Object.keys(input.payload).sort();
-  if (input.event_type === "test.room_target") {
+  if (
+    input.event_type === "test.room_target"
+    || input.event_type === "timer.elapsed"
+    || input.event_type === "ha.state_changed"
+    || input.event_type === "world.changed"
+    || input.event_type === "task.completed"
+  ) {
     if (
       payloadKeys.length !== 1
       || payloadKeys[0] !== "room_target"

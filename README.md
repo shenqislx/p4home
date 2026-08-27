@@ -66,9 +66,17 @@ World 仍以 P4 snapshot 为真值且 artifact 隐私审计通过；DB/WAL/index
 retention revision 1 已获批并实现。代表性家庭数据、Voice + Memory、家庭身份、真实断电、
 加密与介质级 secure-delete 于 2026-08-25 经用户决定延期，均保持未验证而非通过。同日用户最终
 review 通过、接受这些延期并关闭 Phase 6；Phase 6 计划已归档。
-Vector DB 仍不立项。Phase 5 仍为 `pending_real_environment`；Phase 7 仍为 `pending`，需另行明确
-授权且尚未启动。完整清单和复现入口见
+Vector DB 仍不立项。Phase 5 仍为 `pending_real_environment`。2026-08-26 用户已明确授权启动
+Phase 7；7A feature runtime 已实现四类低频 trigger、Event Policy、quiet hours/budget/总开关、
+用户抢占和审计查询，7B 本地长跑/频率/误触发/抢占 gate 也已通过。当前 Phase 7 仍为
+`in_progress`；7C1 产品启动装配/review 已完成，真实 HA/P4/模型环境和最终 review 仍待独立门禁。Phase 6 完整
+清单和复现入口见
 [Phase 6 real-environment gate evidence](./evidence/agent-phase-6/phase-6-real-environment-gates.md)。
+
+7C1 产品接线已通过独立 bugs review：默认关闭，显式启用后等待 P4 Device Protocol v2 ready，再挂载
+Timer/HA/World/task-complete；本机 bearer 控制与审计说明见
+[Cat Autonomy 产品接线](docs/product-cat-autonomy.md)，本地复核见
+[7C1 evidence](evidence/agent-phase-7/phase-7c1-product-wiring-review.md)。真实环境门禁仍未通过。
 
 ## 工作规则
 

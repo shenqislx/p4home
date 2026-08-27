@@ -72,8 +72,19 @@ class AcceptedDeviceWebSocketConnection implements DeviceWebSocketConnection {
   readonly #closeListeners = new Set<() => void>();
 
   public attach(socket: WebSocket): void {
-    if (this.#socket !== null && this.#socket.readyState !== WebSocket.CLOSED) {
-      this.#socket.terminate();
+    const previous = this.#socket;
+    if (previous !== null && previous.readyState !== WebSocket.CLOSED) {
+      // Reset every adapter bound to this stable channel before a replacement
+      // socket can deliver a new device.hello session.
+      this.#socket = null;
+      for (const listener of this.#closeListeners) {
+        try {
+          listener();
+        } catch {
+          // A local lifecycle observer cannot block authenticated replacement.
+        }
+      }
+      previous.terminate();
     }
     this.#socket = socket;
     socket.on("message", (data, isBinary) => {
@@ -341,6 +352,10 @@ export interface DeviceRuntimeHubOptions {
 export class DeviceRuntimeHub {
   public readonly server: DeviceWebSocketServer;
   readonly #adapters = new Map<string, DeviceWebSocketActionAdapter>();
+  readonly #adapterReadyListeners = new Set<(
+    deviceId: string,
+    adapter: DeviceWebSocketActionAdapter,
+  ) => void>();
   readonly #handshakeCleanups = new Map<string, () => void>();
   readonly #handshakeTimeoutMs: number;
 
@@ -382,6 +397,13 @@ export class DeviceRuntimeHub {
       };
       removeFrameListener = connection.onFrame(() => {
         if (adapter?.is_ready === true) {
+          for (const listener of this.#adapterReadyListeners) {
+            try {
+              listener(deviceId, adapter);
+            } catch {
+              // Product observers cannot interfere with the device handshake.
+            }
+          }
           cleanup();
         }
       });
@@ -396,6 +418,18 @@ export class DeviceRuntimeHub {
 
   public getAdapter(deviceId: string): DeviceWebSocketActionAdapter | undefined {
     return this.#adapters.get(deviceId);
+  }
+
+  public onAdapterReady(
+    listener: (deviceId: string, adapter: DeviceWebSocketActionAdapter) => void,
+  ): () => void {
+    this.#adapterReadyListeners.add(listener);
+    for (const [deviceId, adapter] of this.#adapters) {
+      if (adapter.is_ready) {
+        listener(deviceId, adapter);
+      }
+    }
+    return () => this.#adapterReadyListeners.delete(listener);
   }
 
   public async start(): Promise<DeviceWebSocketServerAddress> {

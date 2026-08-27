@@ -65,6 +65,13 @@ export interface DeviceActionReconciliation {
   readonly observed_at_ms: number;
 }
 
+export interface DeviceWorldChangedObservation {
+  readonly state_version: number;
+  readonly observed_at_ms: number;
+  readonly character: WorldSnapshotPayload["character"];
+  readonly previous_active_action_id: string | null;
+}
+
 export interface DeviceActionSpec {
   readonly action_id: string;
   readonly tool: DeviceToolName;
@@ -179,6 +186,9 @@ export class DeviceWebSocketActionAdapter {
   readonly #records = new Map<string, MutableActionRecord>();
   readonly #waiters = new Map<string, ActionWaiter>();
   readonly #reconciliationWaiters = new Map<string, ReconciliationWaiter>();
+  readonly #worldChangedListeners = new Set<(
+    observation: DeviceWorldChangedObservation,
+  ) => void>();
   #sessionId: string | null = null;
   #nextOutgoingSeq = 0;
   #nextIncomingSeq: number | null = null;
@@ -244,6 +254,13 @@ export class DeviceWebSocketActionAdapter {
 
   public get last_protocol_error(): Error | null {
     return this.#lastProtocolError;
+  }
+
+  public onWorldChanged(
+    listener: (observation: DeviceWorldChangedObservation) => void,
+  ): () => void {
+    this.#worldChangedListeners.add(listener);
+    return () => this.#worldChangedListeners.delete(listener);
   }
 
   public getAction(actionId: string): DeviceAdapterActionRecord | undefined {
@@ -619,6 +636,7 @@ export class DeviceWebSocketActionAdapter {
         && typeof changed.state_version === "number"
         && changed.state_version === this.#lastSnapshot.state_version + 1
       ) {
+        const previousActiveActionId = this.#lastSnapshot.character.active_action_id;
         this.#lastSnapshot = {
           snapshot_id: this.#lastSnapshot.snapshot_id,
           reason: this.#lastSnapshot.reason,
@@ -633,6 +651,19 @@ export class DeviceWebSocketActionAdapter {
               }
             : {}),
         };
+        const observation: DeviceWorldChangedObservation = {
+          state_version: changed.state_version,
+          observed_at_ms: Number(changed.observed_at_ms),
+          character: structuredClone(changed.character as WorldSnapshotPayload["character"]),
+          previous_active_action_id: previousActiveActionId,
+        };
+        for (const listener of this.#worldChangedListeners) {
+          try {
+            listener(structuredClone(observation));
+          } catch {
+            // A local autonomy observer cannot alter protocol or snapshot state.
+          }
+        }
       } else {
         this.#beginResync("state_version_gap");
       }

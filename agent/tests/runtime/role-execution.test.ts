@@ -12,8 +12,10 @@ import {
   ROBOT_CAPABILITY_UNAVAILABLE_TEXT,
   RoleScheduler,
   RoleSessionRegistry,
+  LowPriorityCatRunRegistry,
   runAssignedRole,
   runRoleInteraction,
+  type RoleTaskCompletionNotice,
   type RoutePlan,
   type UserTextInteraction,
 } from "@p4home/runtime";
@@ -137,6 +139,42 @@ test("product role entrypoint composes routing, bounded scheduling and the assig
   assert.equal(sessions.get("human").history().length, 2);
   assert.deepEqual(sessions.get("robot").history(), []);
   scheduler.close();
+});
+
+test("a new user interaction cancels Cat first and emits only body-free task completion metadata", async () => {
+  const catRegistry = new LowPriorityCatRunRegistry();
+  const catLease = catRegistry.begin("cat-active-before-user");
+  const notices: RoleTaskCompletionNotice[] = [];
+  const value = interaction("interaction:cat-preemption", "今天好累");
+  const result = await runRoleInteraction({
+    interaction: value,
+    route_plan_id: "route:cat-preemption",
+    run_id: "run:cat-preemption",
+    sessions: registry(),
+    scheduler: new RoleScheduler(),
+    cat_run_registry: catRegistry,
+    on_task_complete: (notice) => { notices.push(notice); },
+    provider: {
+      async chat(request): Promise<OllamaChatResult> {
+        const router = request.messages[0]?.content.includes("Role Router") === true;
+        return router
+          ? { model: "fake", message: { role: "assistant", content: '{"assignments":[{"role":"human","text":"今天好累"}]}' } }
+          : { model: "fake", message: { role: "assistant", content: "先休息一下吧。" } };
+      },
+    },
+    clock: () => 2_000,
+  });
+  assert.equal(catLease.signal.aborted, true);
+  assert.equal(result.run.status, "completed");
+  assert.deepEqual(notices, [{
+    run_id: "run:cat-preemption",
+    role_id: "human",
+    outcome: "completed",
+    occurred_at_ms: 2_000,
+  }]);
+  assert.equal(JSON.stringify(notices).includes(value.text), false);
+  catLease.release();
+  catRegistry.close();
 });
 
 test("product role entrypoint rejects invalid timeout before routing", async () => {

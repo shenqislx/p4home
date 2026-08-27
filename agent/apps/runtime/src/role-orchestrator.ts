@@ -28,6 +28,17 @@ import { RoleSessionRegistry } from "./role-session.ts";
 import type { RobotHaReadRuntime } from "./robot-ha-read-runner.ts";
 import type { RobotHaWriteRuntime } from "./robot-ha-write-runner.ts";
 import type { RoleMemoryRuntime } from "./role-memory.ts";
+import {
+  defaultLowPriorityCatRunRegistry,
+  type LowPriorityCatRunRegistry,
+} from "./low-priority-cat-run-registry.ts";
+
+export interface RoleTaskCompletionNotice {
+  readonly run_id: string;
+  readonly role_id: "human" | "robot";
+  readonly outcome: "completed" | "failed" | "cancelled" | "timed_out";
+  readonly occurred_at_ms: number;
+}
 
 export interface RunRoleInteractionOptions {
   readonly interaction: UserTextInteraction;
@@ -44,6 +55,8 @@ export interface RunRoleInteractionOptions {
   readonly robot_ha?: RobotHaReadRuntime | RobotHaWriteRuntime;
   readonly memory?: RoleMemoryRuntime;
   readonly human_only?: boolean;
+  readonly cat_run_registry?: LowPriorityCatRunRegistry;
+  readonly on_task_complete?: (notice: RoleTaskCompletionNotice) => void;
 }
 
 export interface RunRoleInteractionResult {
@@ -259,6 +272,7 @@ export async function runRoleInteraction(
   options: RunRoleInteractionOptions,
 ): Promise<RunRoleInteractionResult> {
   assertContractId(options.run_id, "run_id");
+  (options.cat_run_registry ?? defaultLowPriorityCatRunRegistry).cancelAll("user_interaction");
   if (
     options.timeout_ms !== undefined
     && (!Number.isInteger(options.timeout_ms) || options.timeout_ms < 100 || options.timeout_ms > 600_000)
@@ -661,6 +675,21 @@ export async function runRoleInteraction(
         throw error;
       }
       compositionAuditStatus = "deferred";
+    }
+  }
+  if (options.on_task_complete !== undefined) {
+    const occurredAtMs = (options.clock ?? Date.now)();
+    for (const item of runs) {
+      try {
+        options.on_task_complete({
+          run_id: item.run.run_id,
+          role_id: item.assignment.role_id,
+          outcome: item.run.status,
+          occurred_at_ms: occurredAtMs,
+        });
+      } catch {
+        // A low-priority autonomy observer cannot fail or delay the user response.
+      }
     }
   }
   return {

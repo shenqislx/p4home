@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "initial_mode": "paused",
+  "timer": {
+    "schedule_id": "ambient_wander",
+    "interval_ms": 3600000,
+    "room_target": "living_room"
+  },
+  "ha_room_targets": {
+    "study_light": {
+      "domain": "light",
+      "room_target": "study"
+    }
+  },
+  "task_room_targets": {
+    "human": "living_room",
+    "robot": "entry"
+  },
+  "quiet_hours": {
+    "start_minute": 1380,
+    "end_minute": 420,
+    "utc_offset_minutes": 480
+  },
+  "daily_model_call_budget": 24,
+  "global_minimum_interval_ms": 900000,
+  "source_minimum_interval_ms": {
+    "timer": 3600000,
+    "home_assistant": 1800000,
+    "p4_world": 900000,
+    "runtime": 1800000
+  }
+}

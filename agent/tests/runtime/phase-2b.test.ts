@@ -6,6 +6,9 @@ import { SqliteAuditStore } from "@p4home/storage-sqlite";
 import {
   CatEventPolicy,
   CatEventPolicyError,
+  CatAutonomyPolicy,
+  CatAutonomyRuntime,
+  createCatTimerElapsedEvent,
   DeterministicFakeDevice,
   DeterministicFakeDeviceSocket,
   DeviceActionAdapterError,
@@ -592,6 +595,55 @@ test("approved Cat event creates an audited Cat Run; rejected event sends no act
   assert.equal(device.received_action_requests, requestsBeforeRejection);
   assert.equal(await store.getRunTrace("cat-run-2"), null);
   assert.equal(catModel.requests.length, 1);
+});
+
+test("Phase 7 runtime executes an admitted Timer trigger and pause cancels active Cat leases", async () => {
+  const now = 60_000;
+  const { adapter } = connectedHarness({ now: () => now });
+  const worldVersions: number[] = [];
+  const detachWorld = adapter.onWorldChanged((observation) => {
+    worldVersions.push(observation.state_version);
+  });
+  const policy = new CatAutonomyPolicy({
+    now: () => now,
+    monotonic_now: () => now,
+    runtime_started_at_ms: now,
+    quiet_hours: null,
+    global_minimum_interval_ms: 0,
+    source_minimum_interval_ms: { timer: 0 },
+    timer_room_targets: { ambient_wander: "primary_bedroom" },
+  });
+  const catRuns = new LowPriorityCatRunRegistry();
+  using store = new SqliteAuditStore(":memory:");
+  const runtime = new CatAutonomyRuntime({
+    policy,
+    scheduler: new RoleScheduler(),
+    adapter,
+    provider: catToolProvider("primary_bedroom").provider,
+    cat_run_registry: catRuns,
+    clock: () => now,
+    audit_store: store,
+  });
+  const result = await runtime.handle(createCatTimerElapsedEvent({
+    event_id: "phase7-timer-1",
+    occurred_at_ms: now,
+    schedule_id: "ambient_wander",
+  }));
+  assert.equal(result.status, "completed");
+  const trace = await store.getRunTrace(result.run_id);
+  assert.equal(trace?.events[0]?.payload.event_type, "timer.elapsed");
+  assert.equal(trace?.events[0]?.payload.event_source, "timer");
+  assert.equal(runtime.getStatus().admitted_model_calls_today, 1);
+  assert.equal(worldVersions.length > 0, true);
+
+  const active = catRuns.begin("phase7-active-before-pause");
+  runtime.setMode("paused");
+  assert.equal(active.signal.aborted, true);
+  assert.equal(runtime.getStatus().mode, "paused");
+  assert.equal(runtime.listAudit(1)[0]?.decision, "control");
+  active.release();
+  detachWorld();
+  catRuns.close();
 });
 
 test("an approved event terminalizes its audit Run when the device is not ready", async () => {

@@ -46,6 +46,46 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 1_000): Promise<v
   }
 }
 
+function sendV1Handshake(socket: WebSocket, sessionId: string, suffix: string): void {
+  socket.send(deviceFrame(sessionId, 0, "device.hello", {
+    boot_id: `phase-2d-reconnect-boot-${suffix}`,
+    firmware_version: "phase-2d-test",
+    protocol_versions: [1],
+    connection_reason: "reconnect",
+  }));
+  socket.send(deviceFrame(sessionId, 1, "device.capabilities", {
+    selected_protocol_version: 1,
+    rooms: ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"],
+    actions: [
+      "character.get_state",
+      "character.go_to_room",
+      "character.set_activity",
+      "character.say",
+      "world.get_snapshot",
+    ],
+    limits: {
+      max_json_frame_bytes: 16_384,
+      action_queue_capacity: 8,
+      say_text_max_chars: 256,
+      action_timeout_min_ms: 100,
+      action_timeout_max_ms: 120_000,
+      idempotency_retention_ms: 600_000,
+    },
+  }));
+  socket.send(deviceFrame(sessionId, 2, "world.snapshot", {
+    snapshot_id: `phase-2d-reconnect-snapshot-${suffix}`,
+    reason: "connect",
+    state_version: 1,
+    observed_at_ms: 1_787_000_000_002,
+    character: {
+      room_id: "living_room",
+      activity: "idle",
+      speaking: false,
+      active_action_id: null,
+    },
+  }));
+}
+
 test("real WebSocket transport authenticates before upgrade and completes an action", async (t) => {
   const hub = new DeviceRuntimeHub({
     server: {
@@ -376,6 +416,52 @@ test("authenticated same-device reconnect replaces a half-open socket", async (t
   assert.equal(replacement.readyState, WebSocket.OPEN);
   assert.equal(hub.server.connection_count, 1);
   assert.equal(hub.adapter_count, 1);
+});
+
+test("same-device replacement resets a ready adapter before the new hello", async (t) => {
+  const hub = new DeviceRuntimeHub({
+    server: {
+      host: "127.0.0.1",
+      port: 0,
+      device_tokens: { [DEVICE_ID]: DEVICE_TOKEN },
+      allow_insecure_loopback_test: true,
+      max_connections: 1,
+    },
+    handshake_timeout_ms: 1_000,
+  });
+  const address = await hub.start();
+  t.after(async () => hub.close());
+  const connect = async (): Promise<WebSocket> => {
+    const socket = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, {
+      headers: {
+        Authorization: `Bearer ${DEVICE_TOKEN}`,
+        "X-P4-Device-ID": DEVICE_ID,
+      },
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", resolve);
+      socket.once("error", reject);
+    });
+    return socket;
+  };
+
+  const first = await connect();
+  t.after(() => first.terminate());
+  sendV1Handshake(first, "phase-2d-ready-reconnect-1", "1");
+  await waitUntil(() => hub.getAdapter(DEVICE_ID)?.is_ready === true);
+  const adapter = hub.getAdapter(DEVICE_ID);
+  assert.notEqual(adapter, undefined);
+
+  const replacement = await connect();
+  t.after(() => replacement.terminate());
+  await waitUntil(() => first.readyState === WebSocket.CLOSED);
+  assert.equal(adapter?.is_ready, false);
+  sendV1Handshake(replacement, "phase-2d-ready-reconnect-2", "2");
+  await waitUntil(() => adapter?.is_ready === true);
+
+  assert.equal(replacement.readyState, WebSocket.OPEN);
+  assert.equal(adapter?.last_protocol_error, null);
+  assert.equal(hub.server.connection_count, 1);
 });
 
 test("real transport refuses plaintext binding outside loopback", () => {

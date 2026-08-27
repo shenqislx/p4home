@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "evaluator": "phase7-cat-autonomy/deterministic-v1",
+  "long_run": {
+    "schema_version": 1,
+    "duration_days": 7,
+    "bounded_input_events": 10080,
+    "admitted_model_calls": 168,
+    "admitted_calls_by_day": [
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24
+    ],
+    "maximum_calls_in_one_day": 24,
+    "daily_call_budget": 24,
+    "model_calls_without_trigger": 0,
+    "maximum_output_token_ceiling": 21504,
+    "rejection_counts": {
+      "DAILY_BUDGET_EXHAUSTED": 4200,
+      "GLOBAL_RATE_LIMITED": 672,
+      "QUIET_HOURS": 3360,
+      "SOURCE_RATE_LIMITED": 1680
+    }
+  },
+  "ha_storm": {
+    "input_events": 1000,
+    "admitted_model_calls": 1,
+    "rejected_events": 999
+  },
+  "safety_misfires": {
+    "cases": 4,
+    "admitted_model_calls": 0,
+    "rejection_codes": [
+      "INVALID_EVENT",
+      "SOURCE_MAPPING_MISSING",
+      "FEEDBACK_LOOP_BLOCKED",
+      "BEFORE_RUNTIME_START"
+    ]
+  },
+  "static_runtime": {
+    "inspected_files": [
+      "apps/runtime/src/cat-autonomy-policy.ts",
+      "apps/runtime/src/cat-autonomy-runtime.ts",
+      "apps/runtime/src/product-cat-autonomy.ts",
+      "apps/runtime/src/cat-action-runner.ts",
+      "apps/runtime/src/role-scheduler.ts"
+    ],
+    "while_true_count": 0,
+    "set_interval_count": 0,
+    "ask_llm_loop_count": 0
+  },
+  "gate": {
+    "passed": true,
+    "failures": []
+  }
+}

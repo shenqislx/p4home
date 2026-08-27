@@ -1,7 +1,7 @@
 # P4 Home 当前工作计划
 
 > Current Focus: [P4 Home 本地 LLM Agent 化架构](../p4-local-agent-architecture.md)
-> Updated: 2026-08-25
+> Updated: 2026-08-26
 > Working Branch: `feature/agent-harness`
 
 ## 工作规则
@@ -26,7 +26,7 @@
 | 4 | Robot HA & Multi-role | `completed` | Robot 受限 HA 工具、Human/Robot 语义分割 | [Phase 4 归档](../archive/plans/agent/2026-08-15-agent-phase-4-ha-tool-plan.md) |
 | 5 | Role-aware Voice | `pending_real_environment` | 5A–5D 技术主体完成；5E 实机总门禁待具备硬件条件后补 | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
 | 6 | Role-aware Memory | `completed` | 最终 review 通过；已通过门禁关闭，其余真实项由用户接受延期 | [Phase 6 归档](../archive/plans/agent/2026-08-15-agent-phase-6-memory-plan.md) |
-| 7 | Cat Autonomy | `pending` | Timer/HA 事件驱动、低频、可审计 Cat 行为 | [Phase 7](./2026-08-15-agent-phase-7-autonomy-plan.md) |
+| 7 | Cat Autonomy | `in_progress` | 7A/7B + 7C1 产品接线/review 已完成；7C 实机门禁待完成 | [Phase 7](./2026-08-15-agent-phase-7-autonomy-plan.md) |
 
 ## 下一步
 
@@ -84,7 +84,11 @@ quota/retention revision 1 已获批并实现。代表性家庭数据、Voice + 
 [Phase 6 真实环境门禁归档](../archive/plans/agent/2026-08-24-agent-phase-6-real-environment-gates-plan.md)。
 确定性 FTS 已满足冻结场景，当前不立项 Vector DB；真实家庭数据证据不足，不能外推为长期结论。
 2026-08-25 用户最终 review 通过、接受上述延期并关闭 Phase 6；计划已归档，延期项仍未验证。
-Phase 5 仍为 `pending_real_environment`。Phase 7 保持 `pending`，需另行明确授权且不得启动。
+Phase 5 仍为 `pending_real_environment`。2026-08-26 用户已明确授权启动 Phase 7，并要求先完成
+feature 编码；7A Runtime 已实现四类 trigger、Event Policy、quiet hours/budget/开关、低优先级
+抢占和审计查询。7B 的 7 天 10,080 trigger 长跑、跨日预算、HA storm、误触发、抢占和审计容量
+本地 gate 已通过。7C1 产品启动装配、控制/审计入口和两轮独立 bugs review 已完成；真实
+HA/P4/模型资源门禁和 final review 尚未通过，Phase 7 保持 `in_progress`。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 已在 Phase 2 完成并通过实机证据验证。

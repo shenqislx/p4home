@@ -12,7 +12,8 @@ P4。6F 真实 35B 门禁已通过；6G 真实 HA 只读门禁已从干净工作
 quota/retention revision 1 已获批并实现；Voice、真实家庭数据、真实断电、加密/介质删除与身份验证
 经用户接受延期，仍未验证。
 Vector DB 仍不立项；
-Phase 7 需另行明确授权且尚未启动。
+Phase 7 已于 2026-08-26 获用户明确授权并进入 `in_progress`；7A feature runtime、7B 本地长跑
+门禁和 7C1 产品启动装配/控制面独立 review 已完成，真实 HA/P4/模型环境和最终 review 仍待完成。
 
 ## 环境
 
@@ -83,6 +84,10 @@ playback。`ui_output=required` 与 `audio_output=required` 必须分别完成�
 启动日志只输出聚合状态，不输出语音文本、回复正文或凭证。该入口和本地测试通过仍不等于 5E
 实机门禁通过；必须另有真实 P4 串口中的 `VERIFY:phase5e:ui_conversation:PASS` 与
 `VERIFY:phase5e:ui_applied:PASS` 证据。
+
+Phase 7 Cat Autonomy 的产品接线默认关闭。显式启用时会增加独立 Device Protocol v2 入口和仅本机
+控制面，并要求真实 Robot HA allowlist 已连接；配置、环境变量和 pause/disable/audit 调用方式见
+[Cat Autonomy 产品接线](../docs/product-cat-autonomy.md)。
 
 ## Phase 6 本地门禁
 

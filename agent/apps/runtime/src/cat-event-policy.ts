@@ -4,11 +4,18 @@ import { CAT_WORLD_TOOLS } from "./role-profiles.ts";
 
 export const CAT_EVENT_SOURCES = ["test_harness"] as const;
 export type CatEventSource = (typeof CAT_EVENT_SOURCES)[number];
+export type CatAutonomyEventSource = "timer" | "home_assistant" | "p4_world" | "runtime";
+export type CatRoomTargetEventType =
+  | "test.room_target"
+  | "timer.elapsed"
+  | "ha.state_changed"
+  | "world.changed"
+  | "task.completed";
 
 export interface CatRoomTargetEvent {
   readonly event_id: string;
-  readonly event_type: "test.room_target";
-  readonly source: CatEventSource;
+  readonly event_type: CatRoomTargetEventType;
+  readonly source: CatEventSource | CatAutonomyEventSource;
   readonly occurred_at_ms: number;
   readonly payload: Readonly<{ readonly room_target: RoomId }>;
 }
@@ -28,7 +35,16 @@ export type CatEventPolicyErrorCode =
   | "DUPLICATE_EVENT"
   | "DEDUPE_CAPACITY_EXCEEDED"
   | "TARGET_NOT_ALLOWED"
-  | "TOOL_NOT_ALLOWED";
+  | "TOOL_NOT_ALLOWED"
+  | "AUTONOMY_DISABLED"
+  | "AUTONOMY_PAUSED"
+  | "BEFORE_RUNTIME_START"
+  | "QUIET_HOURS"
+  | "DAILY_BUDGET_EXHAUSTED"
+  | "GLOBAL_RATE_LIMITED"
+  | "SOURCE_RATE_LIMITED"
+  | "SOURCE_MAPPING_MISSING"
+  | "FEEDBACK_LOOP_BLOCKED";
 
 export class CatEventPolicyError extends Error {
   public readonly code: CatEventPolicyErrorCode;

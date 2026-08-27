@@ -735,8 +735,8 @@ test("Cat audit keeps historical profile sessions immutable across revision upgr
     from_session_id: "session-audit-migration",
     from_agent_profile_id: "role-profile/v2:cat",
     to_session_id: trace.run.session_id,
-    to_agent_profile_id: "role-profile/v3:cat",
-    role_profile_revision: "role-profile/v3",
+    to_agent_profile_id: "role-profile/v6:cat",
+    role_profile_revision: "role-profile/v6",
   });
   assert.equal(
     (await store.getSessionAgentProfile("session-audit-migration"))?.agent_profile_id,
@@ -744,7 +744,7 @@ test("Cat audit keeps historical profile sessions immutable across revision upgr
   );
   assert.equal(
     (await store.getSessionAgentProfile(trace.run.session_id))?.agent_profile_id,
-    "role-profile/v3:cat",
+    "role-profile/v6:cat",
   );
 });
 

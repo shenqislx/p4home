@@ -11,6 +11,8 @@ import { RoleSessionRegistry } from "./role-session.ts";
 import type { RobotHaReadRuntime } from "./robot-ha-read-runner.ts";
 import type { RobotHaWriteRuntime } from "./robot-ha-write-runner.ts";
 import type { RoleMemoryRuntime } from "./role-memory.ts";
+import type { LowPriorityCatRunRegistry } from "./low-priority-cat-run-registry.ts";
+import type { RoleTaskCompletionNotice } from "./role-orchestrator.ts";
 
 export interface UnifiedVoiceRoleDispatcherOptions {
   readonly provider: Pick<OllamaProvider, "chat">;
@@ -23,6 +25,8 @@ export interface UnifiedVoiceRoleDispatcherOptions {
   readonly robot_ha?: RobotHaReadRuntime | RobotHaWriteRuntime;
   readonly memory?: RoleMemoryRuntime;
   readonly human_only?: boolean;
+  readonly cat_run_registry?: LowPriorityCatRunRegistry;
+  readonly on_task_complete?: (notice: RoleTaskCompletionNotice) => void;
   readonly on_result?: (
     result: RunRoleInteractionResult,
     interaction: UserTextInteraction,
@@ -66,6 +70,12 @@ export class UnifiedVoiceRoleDispatcher {
       ...(this.#options.human_only === undefined
         ? {}
         : { human_only: this.#options.human_only }),
+      ...(this.#options.cat_run_registry === undefined
+        ? {}
+        : { cat_run_registry: this.#options.cat_run_registry }),
+      ...(this.#options.on_task_complete === undefined
+        ? {}
+        : { on_task_complete: this.#options.on_task_complete }),
     });
     await this.#options.on_result?.(result, interaction);
     return result;

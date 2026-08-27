@@ -53,7 +53,9 @@ export class LowPriorityCatRunRegistry {
     };
   }
 
-  public cancelAll(reason: "barge_in" | "shutdown"): number {
+  public cancelAll(
+    reason: "barge_in" | "user_interaction" | "autonomy_paused" | "autonomy_disabled" | "shutdown",
+  ): number {
     let cancelled = 0;
     for (const entry of this.#active.values()) {
       if (entry.controller.signal.aborted) continue;

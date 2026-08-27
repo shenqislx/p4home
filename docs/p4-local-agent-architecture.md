@@ -814,6 +814,12 @@ SSD 物理页不在该保证内。具体边界见
 
 退出条件：长跑不频繁唤醒模型，不抢占用户动作，不在重启后补执行过期任务。
 
+2026-08-26 用户明确授权启动 Phase 7，并要求先完成 feature 编码。7A Runtime 已建立四类严格
+trigger、低频 Event Policy、独立 Cat `role-profile/v6`、用户抢占、暂停/关闭和审计查询；7B 本地
+7 天长跑、频率/误触发/抢占 gate 已通过。7C1 产品启动装配、离线/重连门禁、loopback 控制面和
+独立 bugs review 已完成。Phase 7 当前为 `in_progress`，7C 真实
+HA/P4/模型环境和最终 review 尚未通过。
+
 ## 19. MVP 验收清单
 
 房间级 MVP 至少满足：

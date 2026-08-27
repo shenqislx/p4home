@@ -2,6 +2,10 @@ import { validateFrozenContracts } from "@p4home/contracts";
 
 export * from "./text-agent.ts";
 export * from "./cat-event-policy.ts";
+export * from "./cat-autonomy-policy.ts";
+export * from "./cat-autonomy-runtime.ts";
+export * from "./product-cat-autonomy.ts";
+export * from "./cat-autonomy-control-server.ts";
 export * from "./cat-action-runner.ts";
 export * from "./cat-object-event-policy.ts";
 export * from "./cat-object-action-runner.ts";
