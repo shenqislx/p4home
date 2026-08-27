@@ -85,6 +85,7 @@ static bool s_cursor_visible;
 static uint32_t s_speech_revision;
 static uint32_t s_conversation_epoch;
 static uint32_t s_conversation_revision;
+static uint32_t s_local_conversation_revision;
 static bool s_dialog_is_conversation;
 static char s_conversation_dialog[CONVERSATION_UI_DIALOG_TEXT_MAX_BYTES + 1U];
 
@@ -617,9 +618,27 @@ void ui_home_actor_apply_snapshot(const world_service_snapshot_t *snapshot)
 
 void ui_home_actor_apply_conversation(const conversation_snapshot_t *snapshot)
 {
-    if (snapshot == NULL || !snapshot->available) {
+    if (snapshot == NULL) {
         return;
     }
+    if (snapshot->local_stage != CONVERSATION_LOCAL_STAGE_IDLE) {
+        if (snapshot->local_revision == s_local_conversation_revision) return;
+        const char *text = "请说话…";
+        if (snapshot->local_stage == CONVERSATION_LOCAL_STAGE_CONNECTING) {
+            text = "正在连接，请稍后…";
+        } else if (snapshot->local_stage == CONVERSATION_LOCAL_STAGE_PROMPTING) {
+            text = "在呢，请说话…";
+        } else if (snapshot->local_stage == CONVERSATION_LOCAL_STAGE_TRANSCRIBING) {
+            text = "正在识别…";
+        }
+        ui_home_actor_say(text, UI_PAL_ACCENT_VIOLET, false);
+        s_dialog_is_conversation = true;
+        s_local_conversation_revision = snapshot->local_revision;
+        ESP_LOGW(TAG, "VERIFY:voice:ui_local:PASS stage=%s",
+                 conversation_service_local_stage_text(snapshot->local_stage));
+        return;
+    }
+    if (!snapshot->available) return;
     const conversation_update_t *update = &snapshot->update;
     if (s_dialog_is_conversation && update->epoch == s_conversation_epoch &&
         update->revision == s_conversation_revision) {

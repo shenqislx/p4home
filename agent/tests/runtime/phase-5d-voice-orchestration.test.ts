@@ -261,19 +261,34 @@ test("speakerless product mode completes only after role execution and Conversat
   assert.equal(result.audio_delivery, "deferred");
   assert.equal(result.tts_pcm_bytes, 0);
   assert.equal(result.playback_segments.length, 0);
-  assert.deepEqual(updates, [{
-    ui_protocol_version: 1,
-    type: "ui.update",
-    session_id: context(22).session_id,
-    stream_id: 22,
-    epoch: 22,
-    revision: 1,
-    stage: "completed",
-    user_text: interaction(22).text,
-    response_text: mixedResponse().text,
-    response_role: "mixed",
-    execution_status: "completed",
-  }]);
+  assert.deepEqual(updates, [
+    {
+      ui_protocol_version: 1,
+      type: "ui.update",
+      session_id: context(22).session_id,
+      stream_id: 22,
+      epoch: 22,
+      revision: 1,
+      stage: "thinking",
+      user_text: interaction(22).text,
+      response_text: "",
+      response_role: "none",
+      execution_status: "pending",
+    },
+    {
+      ui_protocol_version: 1,
+      type: "ui.update",
+      session_id: context(22).session_id,
+      stream_id: 22,
+      epoch: 22,
+      revision: 2,
+      stage: "completed",
+      user_text: interaction(22).text,
+      response_text: mixedResponse().text,
+      response_role: "mixed",
+      execution_status: "completed",
+    },
+  ]);
 });
 
 test("Conversation UI delivery failure does not rewrite a completed Robot result", async () => {

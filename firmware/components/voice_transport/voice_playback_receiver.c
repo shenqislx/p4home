@@ -5,11 +5,13 @@
 #include <string.h>
 
 #include "audio_service.h"
+#include "conversation_service.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "sr_service.h"
 #include "voice_protocol.h"
 
 static const char *TAG = "voice_playback";
@@ -19,7 +21,18 @@ static const char *TAG = "voice_playback";
 #define PLAYBACK_TASK_INTERVAL_MS 5U
 #define PLAYBACK_SESSION_TIMEOUT_US 70000000LL
 #define PLAYBACK_VOLUME_PERCENT 83U
+#define WAKE_PROMPT_VOLUME_PERCENT 75U
+#define WAKE_PROMPT_CAPTURE_GUARD_US 800000LL
 #define PLAYBACK_MAX_FRAMES 3000U
+
+extern const uint8_t wake_ack_pcm_start[]
+    asm("_binary_wake_ack_zh_zai_ne_pcm_start");
+extern const uint8_t wake_ack_pcm_end[]
+    asm("_binary_wake_ack_zh_zai_ne_pcm_end");
+extern const uint8_t wake_connecting_pcm_start[]
+    asm("_binary_wake_connecting_zh_pcm_start");
+extern const uint8_t wake_connecting_pcm_end[]
+    asm("_binary_wake_connecting_zh_pcm_end");
 
 typedef enum {
     PLAYBACK_IDLE = 0,
@@ -58,6 +71,14 @@ typedef struct {
     bool barge_in_gate_required;
     bool barge_in_gate_ready;
     bool capture_fenced;
+    bool wake_prompt_requested;
+    bool wake_prompt_connecting;
+    bool wake_prompt_active;
+    bool wake_prompt_gate_required;
+    bool wake_prompt_gate_ready;
+    int64_t wake_prompt_capture_ready_us;
+    bool local_stage_pending;
+    conversation_local_stage_t pending_local_stage;
     bool suppress_terminal;
     bool eos_control_received;
     bool eos_played;
@@ -304,6 +325,66 @@ static void fail_session(void)
     finish_session("failed", !suppress, NULL);
 }
 
+static void play_wake_prompt(bool connecting)
+{
+    audio_service_lease_t lease = {0};
+    bool played = false;
+    const uint8_t *pcm_start = connecting ? wake_connecting_pcm_start : wake_ack_pcm_start;
+    const uint8_t *pcm_end = connecting ? wake_connecting_pcm_end : wake_ack_pcm_end;
+    const size_t bytes = (size_t)(pcm_end - pcm_start);
+    const size_t samples = bytes / sizeof(int16_t);
+    int16_t frame[VOICE_PROTOCOL_FRAME_SAMPLES];
+
+    if (bytes > 0U && (bytes % sizeof(int16_t)) == 0U &&
+        audio_service_begin_speaker_stream(AUDIO_SERVICE_OWNER_VOICE_PLAYBACK,
+                                           WAKE_PROMPT_VOLUME_PERCENT, &lease) == ESP_OK) {
+        size_t offset = 0U;
+        played = true;
+        while (offset < samples) {
+            size_t count = samples - offset;
+            if (count > VOICE_PROTOCOL_FRAME_SAMPLES) count = VOICE_PROTOCOL_FRAME_SAMPLES;
+            memcpy(frame, pcm_start + offset * sizeof(int16_t),
+                   count * sizeof(int16_t));
+            if (audio_service_write_speaker_samples(&lease, frame, count, NULL) != ESP_OK) {
+                played = false;
+                break;
+            }
+            offset += count;
+        }
+        if (audio_service_end_speaker_stream(&lease) != ESP_OK) played = false;
+    }
+
+    taskENTER_CRITICAL(&s_playback.lock);
+    s_playback.wake_prompt_active = false;
+    s_playback.wake_prompt_gate_ready = true;
+    s_playback.wake_prompt_capture_ready_us = connecting
+                                                  ? esp_timer_get_time()
+                                                  : esp_timer_get_time() +
+                                                        WAKE_PROMPT_CAPTURE_GUARD_US;
+    if (played) s_playback.metrics.wake_prompts_played++;
+    else s_playback.metrics.wake_prompt_failures++;
+    taskEXIT_CRITICAL(&s_playback.lock);
+    if (!connecting) {
+        sr_service_rearm_preroll_after_wake_prompt();
+        (void)conversation_service_set_local_stage(CONVERSATION_LOCAL_STAGE_LISTENING);
+    }
+    if (played) {
+        if (connecting) {
+            ESP_LOGW(TAG,
+                     "VERIFY:voice:ha_gate_prompt:PASS phrase=zheng_zai_lian_jie_qing_shao_hou volume=%u samples=%u",
+                     (unsigned)WAKE_PROMPT_VOLUME_PERCENT, (unsigned)samples);
+        } else {
+            ESP_LOGW(TAG,
+                     "VERIFY:voice:wake_prompt:PASS phrase=zai_ne volume=%u samples=%u guard_ms=%u",
+                     (unsigned)WAKE_PROMPT_VOLUME_PERCENT, (unsigned)samples,
+                     (unsigned)(WAKE_PROMPT_CAPTURE_GUARD_US / 1000LL));
+        }
+    } else {
+        ESP_LOGW(TAG, "VERIFY:voice:%s:FAIL reason=local_playback_failed",
+                 connecting ? "ha_gate_prompt" : "wake_prompt");
+    }
+}
+
 static void playback_task(void *argument)
 {
     (void)argument;
@@ -321,6 +402,34 @@ static void playback_task(void *argument)
         state = s_playback.state;
         deadline = s_playback.deadline_us;
         taskEXIT_CRITICAL(&s_playback.lock);
+
+        taskENTER_CRITICAL(&s_playback.lock);
+        const bool prompt_can_start = s_playback.wake_prompt_requested &&
+                                      s_playback.state == PLAYBACK_IDLE &&
+                                      !s_playback.wake_prompt_active;
+        const bool prompt_connecting = s_playback.wake_prompt_connecting;
+        if (prompt_can_start) {
+            s_playback.wake_prompt_requested = false;
+            s_playback.wake_prompt_active = true;
+        }
+        taskEXIT_CRITICAL(&s_playback.lock);
+        if (prompt_can_start) {
+            (void)conversation_service_set_local_stage(
+                prompt_connecting ? CONVERSATION_LOCAL_STAGE_CONNECTING
+                                  : CONVERSATION_LOCAL_STAGE_PROMPTING);
+            play_wake_prompt(prompt_connecting);
+            continue;
+        }
+
+        taskENTER_CRITICAL(&s_playback.lock);
+        const bool local_stage_pending = s_playback.local_stage_pending;
+        const conversation_local_stage_t pending_local_stage =
+            s_playback.pending_local_stage;
+        s_playback.local_stage_pending = false;
+        taskEXIT_CRITICAL(&s_playback.lock);
+        if (local_stage_pending) {
+            (void)conversation_service_set_local_stage(pending_local_stage);
+        }
 
         if (open_requested && state == PLAYBACK_OPENING) {
             if (audio_service_begin_speaker_stream(AUDIO_SERVICE_OWNER_VOICE_PLAYBACK,
@@ -491,6 +600,8 @@ esp_err_t voice_playback_receiver_open(const cJSON *root)
     taskENTER_CRITICAL(&s_playback.lock);
     const bool accepted = s_playback.running && s_playback.state == PLAYBACK_IDLE &&
                           !s_playback.barge_in_gate_required && !s_playback.capture_fenced &&
+                          !s_playback.wake_prompt_requested && !s_playback.wake_prompt_active &&
+                          !s_playback.wake_prompt_gate_required &&
                           !s_playback.metrics.output_quarantined;
     if (accepted) {
         memcpy(s_playback.session_id, session_id, sizeof(session_id));
@@ -663,13 +774,60 @@ void voice_playback_receiver_barge_in(void)
     taskEXIT_CRITICAL(&s_playback.lock);
 }
 
-bool voice_playback_receiver_allow_capture(void)
+void voice_playback_receiver_request_wake_prompt(void)
 {
     taskENTER_CRITICAL(&s_playback.lock);
-    const bool allowed = !s_playback.barge_in_gate_required || s_playback.barge_in_gate_ready;
+    s_playback.wake_prompt_requested = true;
+    s_playback.wake_prompt_connecting = false;
+    s_playback.wake_prompt_gate_required = true;
+    s_playback.wake_prompt_gate_ready = false;
+    s_playback.wake_prompt_capture_ready_us = 0;
+    taskEXIT_CRITICAL(&s_playback.lock);
+}
+
+void voice_playback_receiver_request_connecting_prompt(void)
+{
+    taskENTER_CRITICAL(&s_playback.lock);
+    s_playback.wake_prompt_requested = true;
+    s_playback.wake_prompt_connecting = true;
+    s_playback.wake_prompt_gate_required = true;
+    s_playback.wake_prompt_gate_ready = false;
+    s_playback.wake_prompt_capture_ready_us = 0;
+    taskEXIT_CRITICAL(&s_playback.lock);
+}
+
+void voice_playback_receiver_capture_failed(void)
+{
+    taskENTER_CRITICAL(&s_playback.lock);
+    s_playback.pending_local_stage = CONVERSATION_LOCAL_STAGE_IDLE;
+    s_playback.local_stage_pending = true;
+    taskEXIT_CRITICAL(&s_playback.lock);
+}
+
+void voice_playback_receiver_capture_ended(void)
+{
+    taskENTER_CRITICAL(&s_playback.lock);
+    s_playback.pending_local_stage = CONVERSATION_LOCAL_STAGE_TRANSCRIBING;
+    s_playback.local_stage_pending = true;
+    taskEXIT_CRITICAL(&s_playback.lock);
+}
+
+bool voice_playback_receiver_allow_capture(void)
+{
+    const int64_t now_us = esp_timer_get_time();
+    taskENTER_CRITICAL(&s_playback.lock);
+    const bool barge_in_ready = !s_playback.barge_in_gate_required ||
+                                s_playback.barge_in_gate_ready;
+    const bool prompt_ready = !s_playback.wake_prompt_gate_required ||
+                              (s_playback.wake_prompt_gate_ready &&
+                               now_us >= s_playback.wake_prompt_capture_ready_us);
+    const bool allowed = barge_in_ready && prompt_ready;
     if (allowed) {
         s_playback.barge_in_gate_required = false;
         s_playback.barge_in_gate_ready = false;
+        s_playback.wake_prompt_gate_required = false;
+        s_playback.wake_prompt_gate_ready = false;
+        s_playback.wake_prompt_capture_ready_us = 0;
         s_playback.capture_fenced = true;
     }
     taskEXIT_CRITICAL(&s_playback.lock);
@@ -701,7 +859,13 @@ void voice_playback_receiver_disconnect(void)
         s_playback.cancel_requested = true;
         s_playback.suppress_terminal = true;
     }
+    s_playback.wake_prompt_requested = false;
+    s_playback.wake_prompt_connecting = false;
+    s_playback.wake_prompt_gate_required = false;
+    s_playback.wake_prompt_gate_ready = false;
+    s_playback.wake_prompt_capture_ready_us = 0;
     taskEXIT_CRITICAL(&s_playback.lock);
+    (void)conversation_service_set_local_stage(CONVERSATION_LOCAL_STAGE_IDLE);
 }
 
 void voice_playback_receiver_get_snapshot(voice_playback_snapshot_t *snapshot)

@@ -1,3 +1,5 @@
 idf_component_register(SRCS "voice_transport.c" "voice_playback_receiver.c"
-                       REQUIRES audio_service conversation_service esp_websocket_client json mbedtls nvs_flash sr_service voice_protocol esp_timer
-                       INCLUDE_DIRS "include")
+                       REQUIRES audio_service conversation_service esp_websocket_client ha_client json mbedtls nvs_flash sr_service voice_protocol esp_timer
+                       INCLUDE_DIRS "include"
+                       EMBED_FILES "assets/wake_ack_zh_zai_ne.pcm"
+                                   "assets/wake_connecting_zh.pcm")

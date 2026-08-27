@@ -1420,6 +1420,16 @@ bool ha_client_ready(void)
     return ready;
 }
 
+bool ha_client_initial_sync_ready(void)
+{
+    taskENTER_CRITICAL(&s_ctx.lock);
+    const bool connected = s_ctx.state == HA_CLIENT_STATE_READY &&
+                           s_ctx.subscription_ready;
+    taskEXIT_CRITICAL(&s_ctx.lock);
+    if (!connected || s_ctx.event_group == NULL) return false;
+    return (xEventGroupGetBits(s_ctx.event_group) & HA_CLIENT_INITIAL_DONE_BIT) != 0U;
+}
+
 ha_client_state_t ha_client_state(void)
 {
     taskENTER_CRITICAL(&s_ctx.lock);

@@ -193,6 +193,28 @@ function completedConversationUiUpdate(
   });
 }
 
+function thinkingConversationUiUpdate(
+  interaction: UserTextInteraction,
+  context: VoiceDispatchContext,
+  revision: number,
+): ConversationUiUpdate {
+  return validateConversationUiUpdate({
+    ui_protocol_version: 1,
+    type: "ui.update",
+    session_id: context.session_id,
+    stream_id: context.stream_id,
+    epoch: context.epoch,
+    revision,
+    stage: "thinking",
+    user_text: boundedUiText(
+      interaction.text, CONVERSATION_UI_MAX_USER_CHARS, CONVERSATION_UI_MAX_USER_BYTES,
+    ),
+    response_text: "",
+    response_role: "none",
+    execution_status: "pending",
+  });
+}
+
 function roleExecutionStatus(
   outcome: VoiceInteractionOutcome,
   response: ComposedRoleResponse | null,
@@ -405,18 +427,42 @@ export class VoiceInteractionCoordinator {
           interaction.interaction_id, context, "cancelled", null, null, [], 0, 0, startedAtMs,
         ));
       }
-      roleResult = await this.#options.dispatch_role(interaction, controller.signal);
+      stage = "role";
+      const pendingRole = this.#options.dispatch_role(interaction, controller.signal).then(
+        (result) => ({ status: "fulfilled" as const, result }),
+        (error: unknown) => ({ status: "rejected" as const, error }),
+      );
+      if (this.#uiOutput === "required") {
+        stage = "ui";
+        const presenter = this.#options.present_ui;
+        if (presenter === undefined) throw new TypeError("conversation UI presenter is unavailable");
+        try {
+          await presenter(
+            context.device_id,
+            thinkingConversationUiUpdate(interaction, context, 1),
+            controller.signal,
+          );
+        } catch {
+          /* Transient progress is best-effort. The final, revision-2 update
+           * remains required and is allowed to establish the first revision. */
+          if (controller.signal.aborted) uiDelivery = "cancelled";
+        }
+      }
+      stage = "role";
+      const settledRole = await pendingRole;
+      if (settledRole.status === "rejected") throw settledRole.error;
+      roleResult = settledRole.result;
       if (controller.signal.aborted) {
         return this.#record(this.#result(
           interaction.interaction_id, context, "cancelled", roleResult.response,
-          roleResult.composition_audit_status, [], 0, 0, startedAtMs,
+          roleResult.composition_audit_status, [], 0, 0, startedAtMs, uiDelivery,
         ));
       }
       if (this.#uiOutput === "required") {
         stage = "ui";
         const presenter = this.#options.present_ui;
         if (presenter === undefined) throw new TypeError("conversation UI presenter is unavailable");
-        const update = completedConversationUiUpdate(interaction, roleResult.response, context, 1);
+        const update = completedConversationUiUpdate(interaction, roleResult.response, context, 2);
         const delivery = await presenter(context.device_id, update, controller.signal);
         if (delivery.schema_version !== 1 || delivery.status !== "completed"
             || delivery.device_id !== context.device_id

@@ -11,6 +11,7 @@
 #include "esp_afe_sr_iface.h"
 #include "esp_afe_sr_models.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -30,6 +31,10 @@ static const char *TAG = "sr_service";
 #define SR_SERVICE_AWAKE_HOLD_MS 5000
 #define SR_SERVICE_CAPTURE_GATE_RETRY_MS 20
 #define SR_SERVICE_CAPTURE_GATE_MAX_WAIT_MS 3500
+#define SR_SERVICE_PREROLL_MS 800U
+#define SR_SERVICE_SAMPLE_RATE_HZ 16000U
+#define SR_SERVICE_PREROLL_SAMPLES \
+    ((SR_SERVICE_SAMPLE_RATE_HZ * SR_SERVICE_PREROLL_MS) / 1000U)
 
 typedef enum {
     SR_SERVICE_COMMAND_ID_NONE = 0,
@@ -69,8 +74,18 @@ static TickType_t s_capture_gate_deadline;
 static TickType_t s_awake_deadline;
 static sr_service_capture_listener_t s_capture_listener;
 static bool s_capture_active;
+static int16_t *s_preroll;
+static size_t s_preroll_start;
+static size_t s_preroll_count;
+static bool s_preroll_armed;
+static bool s_preroll_draining;
+static size_t s_preroll_flush_target;
+static size_t s_preroll_flushed_current;
+static uint64_t s_preroll_started_at_us;
+static bool s_preroll_rearm_requested;
 
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_preroll_signal_lock = portMUX_INITIALIZER_UNLOCKED;
 
 /** Short critical sections only; do not call blocking APIs while holding the lock. */
 #define SR_STATUS_MUTATE(code)          \
@@ -121,6 +136,141 @@ static bool sr_service_deadline_reached(TickType_t now, TickType_t deadline);
 static void sr_service_finish_command_window(const char *outcome,
                                              const char *status_text,
                                              const char *reason);
+static void sr_service_preroll_reset(void);
+static void sr_service_preroll_append(const int16_t *samples, size_t sample_count);
+static void sr_service_preroll_start_drain(uint64_t captured_at_us);
+static void sr_service_preroll_drain_with_live(const int16_t *samples,
+                                               size_t sample_count,
+                                               uint64_t captured_at_us);
+
+void sr_service_rearm_preroll_after_wake_prompt(void)
+{
+    taskENTER_CRITICAL(&s_preroll_signal_lock);
+    s_preroll_rearm_requested = true;
+    taskEXIT_CRITICAL(&s_preroll_signal_lock);
+}
+
+static void sr_service_preroll_reset(void)
+{
+    if (s_preroll != NULL) {
+        memset(s_preroll, 0, SR_SERVICE_PREROLL_SAMPLES * sizeof(*s_preroll));
+    }
+    s_preroll_start = 0U;
+    s_preroll_count = 0U;
+    s_preroll_armed = false;
+    s_preroll_draining = false;
+    s_preroll_flush_target = 0U;
+    s_preroll_flushed_current = 0U;
+    s_preroll_started_at_us = 0U;
+    SR_STATUS_MUTATE(s_status.preroll_buffered_samples = 0U;);
+}
+
+static void sr_service_preroll_append(const int16_t *samples, size_t sample_count)
+{
+    if (s_preroll == NULL || !s_preroll_armed || samples == NULL || sample_count == 0U) return;
+    if (sample_count >= SR_SERVICE_PREROLL_SAMPLES) {
+        samples += sample_count - SR_SERVICE_PREROLL_SAMPLES;
+        sample_count = SR_SERVICE_PREROLL_SAMPLES;
+        memcpy(s_preroll, samples, SR_SERVICE_PREROLL_SAMPLES * sizeof(*s_preroll));
+        s_preroll_start = 0U;
+        s_preroll_count = SR_SERVICE_PREROLL_SAMPLES;
+    } else {
+        for (size_t index = 0U; index < sample_count; ++index) {
+            if (s_preroll_count < SR_SERVICE_PREROLL_SAMPLES) {
+                size_t write = (s_preroll_start + s_preroll_count) %
+                               SR_SERVICE_PREROLL_SAMPLES;
+                s_preroll[write] = samples[index];
+                s_preroll_count++;
+            } else {
+                s_preroll[s_preroll_start] = samples[index];
+                s_preroll_start = (s_preroll_start + 1U) % SR_SERVICE_PREROLL_SAMPLES;
+            }
+        }
+    }
+    SR_STATUS_MUTATE(s_status.preroll_buffered_samples = (uint32_t)s_preroll_count;);
+}
+
+static void sr_service_preroll_start_drain(uint64_t captured_at_us)
+{
+    const size_t count = s_preroll_count;
+    if (count == 0U || s_capture_listener.offer_pcm == NULL) {
+        sr_service_preroll_reset();
+        return;
+    }
+    const uint64_t duration_us = (uint64_t)count * 1000000ULL /
+                                 SR_SERVICE_SAMPLE_RATE_HZ;
+    s_preroll_armed = false;
+    s_preroll_draining = true;
+    s_preroll_flush_target = count;
+    s_preroll_flushed_current = 0U;
+    s_preroll_started_at_us = captured_at_us > duration_us
+                                  ? captured_at_us - duration_us : 0U;
+}
+
+static void sr_service_preroll_drain_with_live(const int16_t *samples,
+                                               size_t sample_count,
+                                               uint64_t captured_at_us)
+{
+    if (!s_preroll_draining || samples == NULL || sample_count == 0U ||
+        s_capture_listener.offer_pcm == NULL) {
+        if (samples != NULL && sample_count > 0U &&
+            s_capture_listener.offer_pcm != NULL) {
+            s_capture_listener.offer_pcm(s_capture_listener.context, samples,
+                                         sample_count, captured_at_us);
+        }
+        return;
+    }
+
+    size_t drain_remaining = sample_count * 2U;
+    if (drain_remaining > s_preroll_count) drain_remaining = s_preroll_count;
+    while (drain_remaining > 0U) {
+        size_t contiguous = SR_SERVICE_PREROLL_SAMPLES - s_preroll_start;
+        if (contiguous > drain_remaining) contiguous = drain_remaining;
+        const uint64_t chunk_at_us = s_preroll_started_at_us +
+            (uint64_t)s_preroll_flushed_current * 1000000ULL /
+                SR_SERVICE_SAMPLE_RATE_HZ;
+        s_capture_listener.offer_pcm(s_capture_listener.context,
+                                     s_preroll + s_preroll_start,
+                                     contiguous, chunk_at_us);
+        s_preroll_start = (s_preroll_start + contiguous) % SR_SERVICE_PREROLL_SAMPLES;
+        s_preroll_count -= contiguous;
+        s_preroll_flushed_current += contiguous;
+        drain_remaining -= contiguous;
+    }
+
+    if (s_preroll_count == 0U) {
+        const size_t flushed = s_preroll_flushed_current;
+        const size_t target = s_preroll_flush_target;
+        s_preroll_draining = false;
+        SR_STATUS_MUTATE({
+            s_status.preroll_buffered_samples = 0U;
+            s_status.preroll_flushed_samples += (uint32_t)target;
+            s_status.preroll_flush_count++;
+        });
+        ESP_LOGW(TAG,
+                 "VERIFY:voice:preroll:PASS buffered_ms=%u flushed_samples=%u catchup_samples=%u mode=paced",
+                 (unsigned)((target * 1000U) / SR_SERVICE_SAMPLE_RATE_HZ),
+                 (unsigned)target, (unsigned)flushed);
+        s_capture_listener.offer_pcm(s_capture_listener.context, samples,
+                                     sample_count, captured_at_us);
+        memset(s_preroll, 0, SR_SERVICE_PREROLL_SAMPLES * sizeof(*s_preroll));
+        s_preroll_start = 0U;
+        s_preroll_flush_target = 0U;
+        s_preroll_flushed_current = 0U;
+        s_preroll_started_at_us = 0U;
+        return;
+    }
+
+    /* Two old samples are released for every new sample. The freed half keeps
+     * live audio in chronological order until the backlog catches up. */
+    for (size_t index = 0U; index < sample_count; ++index) {
+        const size_t write = (s_preroll_start + s_preroll_count) %
+                             SR_SERVICE_PREROLL_SAMPLES;
+        s_preroll[write] = samples[index];
+        s_preroll_count++;
+    }
+    SR_STATUS_MUTATE(s_status.preroll_buffered_samples = (uint32_t)s_preroll_count;);
+}
 
 static uint32_t sr_service_pcm_peak(const int16_t *samples, size_t sample_count)
 {
@@ -177,6 +327,7 @@ static void sr_service_finish_command_window(const char *outcome,
                                              const char *status_text,
                                              const char *reason)
 {
+    sr_service_preroll_reset();
     if (s_capture_active) {
         s_capture_active = false;
         if (s_capture_listener.end_capture != NULL) {
@@ -565,7 +716,9 @@ static void sr_service_runtime_task(void *parameter)
 
     mic_frame = calloc((size_t)feed_chunksize, sizeof(int16_t));
     afe_input = calloc((size_t)feed_chunksize * (size_t)feed_channels, sizeof(int16_t));
-    if (mic_frame == NULL || afe_input == NULL) {
+    s_preroll = heap_caps_calloc(SR_SERVICE_PREROLL_SAMPLES, sizeof(*s_preroll),
+                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (mic_frame == NULL || afe_input == NULL || s_preroll == NULL) {
         SR_STATUS_MUTATE(s_status.status_text = "ESP-SR runtime loop buffer allocation failed";);
         goto cleanup;
     }
@@ -614,6 +767,16 @@ static void sr_service_runtime_task(void *parameter)
         SR_STATUS_MUTATE(s_status.runtime_loop_iteration_count++;);
         const TickType_t state_now = xTaskGetTickCount();
 
+        taskENTER_CRITICAL(&s_preroll_signal_lock);
+        const bool rearm_preroll = s_preroll_rearm_requested;
+        s_preroll_rearm_requested = false;
+        taskEXIT_CRITICAL(&s_preroll_signal_lock);
+        if (rearm_preroll &&
+            sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_WAKE_DETECTED) {
+            sr_service_preroll_reset();
+            s_preroll_armed = true;
+        }
+
         /*
          * Advance timed states before inspecting the fetched frame. This keeps
          * NULL fetches from trapping WAKE_DETECTED and prevents an expired
@@ -624,39 +787,58 @@ static void sr_service_runtime_task(void *parameter)
             const bool capture_ready = s_capture_listener.ready_for_capture == NULL ||
                                        s_capture_listener.ready_for_capture(
                                            s_capture_listener.context);
-            if (!capture_ready &&
-                !sr_service_deadline_reached(state_now, s_capture_gate_deadline)) {
+            if (!capture_ready) {
+                if (sr_service_deadline_reached(state_now, s_capture_gate_deadline)) {
+                    sr_service_preroll_reset();
+                    sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_LISTENING,
+                                               "barge-in capture gate timeout");
+                    sr_service_set_wakenet_enabled(true, "barge-in capture gate timeout");
+                    SR_STATUS_MUTATE(s_status.status_text =
+                                         "Playback did not stop; capture suppressed";);
+                    continue;
+                }
                 s_wake_detected_deadline = state_now +
                                            pdMS_TO_TICKS(SR_SERVICE_CAPTURE_GATE_RETRY_MS);
-                continue;
-            }
-            if (!capture_ready) {
-                sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_LISTENING,
-                                           "barge-in capture gate timeout");
-                sr_service_set_wakenet_enabled(true, "barge-in capture gate timeout");
-                SR_STATUS_MUTATE(s_status.status_text =
-                                     "Playback did not stop; capture suppressed";);
-                continue;
-            }
-            s_awake_deadline = state_now + pdMS_TO_TICKS(SR_SERVICE_AWAKE_HOLD_MS);
-            SR_STATUS_MUTATE({
-                s_status.awake_session_count++;
-                s_status.command_window_frame_count = 0;
-                s_status.command_window_vad_speech_count = 0;
-                s_status.command_window_detect_call_count = 0;
-                s_status.command_window_raw_peak = 0;
-                s_status.command_window_afe_peak = 0;
-            });
-            sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_AWAKE, "wake detected hold elapsed");
-            if (s_capture_listener.begin_capture != NULL) {
-                s_capture_active = s_capture_listener.begin_capture(
-                    s_capture_listener.context, (uint64_t)esp_timer_get_time());
-            }
-            if (s_command_iface != NULL && s_command_model_data != NULL &&
-                sr_status_command_set_ready_get()) {
-                s_command_iface->clean(s_command_model_data);
-                SR_STATUS_MUTATE(s_status.status_text = "Wake acknowledged; awaiting fixed voice command";);
-                sr_service_publish_voice_status("Voice awake: waiting for fixed command.");
+            } else {
+                const bool suppress_wake =
+                    s_capture_listener.suppress_wake_session != NULL &&
+                    s_capture_listener.suppress_wake_session(
+                        s_capture_listener.context);
+                if (suppress_wake) {
+                    sr_service_preroll_reset();
+                    sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_LISTENING,
+                                               "wake suppressed by readiness gate");
+                    sr_service_set_wakenet_enabled(true, "wake readiness gate complete");
+                    SR_STATUS_MUTATE(s_status.status_text =
+                                         "Voice unavailable until Home Assistant is ready";);
+                    sr_service_publish_voice_status(
+                        "Voice waiting for Home Assistant connection.");
+                    continue;
+                }
+                s_awake_deadline = state_now + pdMS_TO_TICKS(SR_SERVICE_AWAKE_HOLD_MS);
+                SR_STATUS_MUTATE({
+                    s_status.awake_session_count++;
+                    s_status.command_window_frame_count = 0;
+                    s_status.command_window_vad_speech_count = 0;
+                    s_status.command_window_detect_call_count = 0;
+                    s_status.command_window_raw_peak = 0;
+                    s_status.command_window_afe_peak = 0;
+                });
+                sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_AWAKE,
+                                           "wake detected hold elapsed");
+                const uint64_t capture_started_at_us = (uint64_t)esp_timer_get_time();
+                if (s_capture_listener.begin_capture != NULL) {
+                    s_capture_active = s_capture_listener.begin_capture(
+                        s_capture_listener.context, capture_started_at_us);
+                }
+                if (s_capture_active) sr_service_preroll_start_drain(capture_started_at_us);
+                else sr_service_preroll_reset();
+                if (s_command_iface != NULL && s_command_model_data != NULL &&
+                    sr_status_command_set_ready_get()) {
+                    s_command_iface->clean(s_command_model_data);
+                    SR_STATUS_MUTATE(s_status.status_text = "Wake acknowledged; awaiting fixed voice command";);
+                    sr_service_publish_voice_status("Voice awake: waiting for fixed command.");
+                }
             }
         }
 
@@ -690,8 +872,12 @@ static void sr_service_runtime_task(void *parameter)
         if (fetch_result->vad_state == VAD_SPEECH) {
             SR_STATUS_MUTATE(s_status.runtime_vad_speech_count++;);
         }
+        bool wake_just_detected = false;
         if (fetch_result->wakeup_state == WAKENET_DETECTED &&
             sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_LISTENING) {
+            sr_service_preroll_reset();
+            s_preroll_armed = true;
+            wake_just_detected = true;
             SR_STATUS_MUTATE(s_status.runtime_wake_event_count++;);
             if (s_capture_listener.wake_detected != NULL) {
                 s_capture_listener.wake_detected(s_capture_listener.context,
@@ -710,13 +896,20 @@ static void sr_service_runtime_task(void *parameter)
                      fetch_result->trigger_channel_id);
         }
 
+        if (!wake_just_detected &&
+            sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_WAKE_DETECTED &&
+            fetch_result->data != NULL && fetch_result->data_size > 0) {
+            sr_service_preroll_append(fetch_result->data,
+                                      (size_t)fetch_result->data_size / sizeof(int16_t));
+        }
+
         if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE && s_capture_active &&
             s_capture_listener.offer_pcm != NULL && fetch_result->data != NULL &&
             fetch_result->data_size > 0) {
-            s_capture_listener.offer_pcm(s_capture_listener.context,
-                                         fetch_result->data,
-                                         (size_t)fetch_result->data_size / sizeof(int16_t),
-                                         (uint64_t)esp_timer_get_time());
+            sr_service_preroll_drain_with_live(
+                fetch_result->data,
+                (size_t)fetch_result->data_size / sizeof(int16_t),
+                (uint64_t)esp_timer_get_time());
         }
 
         if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE &&
@@ -855,6 +1048,8 @@ cleanup:
 
     free(mic_frame);
     free(afe_input);
+    heap_caps_free(s_preroll);
+    s_preroll = NULL;
 
     if (s_runtime_afe_data != NULL && s_runtime_afe_iface != NULL) {
         s_runtime_afe_iface->destroy(s_runtime_afe_data);
@@ -1086,6 +1281,7 @@ esp_err_t sr_service_register_capture_listener(const sr_service_capture_listener
 {
     if (listener == NULL || listener->wake_detected == NULL ||
         listener->ready_for_capture == NULL ||
+        listener->suppress_wake_session == NULL ||
         listener->begin_capture == NULL || listener->offer_pcm == NULL ||
         listener->end_capture == NULL) {
         return ESP_ERR_INVALID_ARG;

@@ -18,6 +18,8 @@ typedef struct {
     /* Callbacks run on the SR task and must never block. */
     void (*wake_detected)(void *context, uint64_t detected_at_us);
     bool (*ready_for_capture)(void *context);
+    /* Consumes a wake that must not open capture or the local command window. */
+    bool (*suppress_wake_session)(void *context);
     bool (*begin_capture)(void *context, uint64_t started_at_us);
     void (*offer_pcm)(void *context, const int16_t *samples, size_t sample_count,
                       uint64_t captured_at_us);
@@ -46,6 +48,9 @@ typedef struct {
     uint32_t runtime_fetch_count;
     uint32_t runtime_vad_speech_count;
     uint32_t runtime_wake_event_count;
+    uint32_t preroll_buffered_samples;
+    uint32_t preroll_flushed_samples;
+    uint32_t preroll_flush_count;
     uint32_t wake_state_transition_count;
     uint32_t awake_session_count;
     uint32_t command_window_frame_count;
@@ -70,6 +75,9 @@ typedef struct {
 
 esp_err_t sr_service_init(void);
 esp_err_t sr_service_register_capture_listener(const sr_service_capture_listener_t *listener);
+/* Non-blocking signal from the playback task; the SR task applies it on its
+ * next loop so prompt audio cannot enter the sentence-start buffer. */
+void sr_service_rearm_preroll_after_wake_prompt(void);
 bool sr_service_dependency_declared(void);
 bool sr_service_models_available(void);
 uint32_t sr_service_model_count(void);

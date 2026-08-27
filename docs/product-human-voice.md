@@ -5,12 +5,16 @@
 此模式用于日常人工聊天，不是 `phase5e_ui` 自动化门禁：
 
 - P4 本地以 `Hi ESP` 唤醒，上传一次有界语音会话；
+- 唤醒后本地播放固定 Human 人声“在呢”，并保留最近 800 ms 句首音频；
+- HA 尚未完成鉴权、事件订阅和初始白名单状态同步时，只播放固定 Human 人声“正在连接，请稍后”，
+  不开启采音、STT、LLM 或本地固定命令窗口；
 - 固定 STT 的 final transcript 仍进入统一 Role Router；
 - Human 决策正常执行；Robot 或混合决策 fail-closed 为 Human 澄清；
 - Agent 不读取 HA URL、token 或 policy，也不构造 Robot HA 客户端；
 - Human 没有执行型 Tool，不能控制灯具；
 - `ui_output=required`，P4 必须确认 UI revision；
 - `audio_output=required`，回复经固定 Kokoro TTS 生成后由 P4 扬声器播放；
+- Role Router 与 Human 的每次 Qwen API 请求都显式携带 `think: false`，不依赖模型默认值；
 - 原始 PCM 不落盘，审计与 private Memory 写入受现有生产策略约束。
 
 ## 一次性安装
@@ -67,10 +71,16 @@ Phase 5A/5B validation marker 和 Device Agent transport。工作流会在刷写
 
 ## 日常使用
 
-1. 清楚地说 `Hi ESP`；
-2. 等待唤醒后直接说中文，例如“陪我聊两句吧”；
-3. P4 对话框显示 final transcript；
-4. Human 回复显示在同一对话框中，并通过外接扬声器播放。
+1. 等待顶部 HA 状态完成连接；如果提前唤醒，设备会说“正在连接，请稍后”并在对话框显示同样提示，
+   这一轮不会排队，连接完成后需重新说唤醒词；
+2. 清楚地说 `Hi ESP`；
+3. 听到 Human 人声“在呢”或看到“请说话…”后开始说中文，例如“陪我聊两句吧”；
+4. P4 对话框依次显示“请说话… → 正在识别… → 正在思考…”；
+5. Human final transcript 与回复显示在同一对话框中，并通过外接扬声器播放。
+
+“在呢”结束到远端 capture 打开之间使用 800 ms 的 PSRAM 环形预卷；预卷按时间顺序以 2×
+实时速率追赶，避免一次性灌满 Voice 帧队列。它用于保护稍早开口的句首，但不鼓励在提示人声播放时
+抢话。
 
 设备控制类语句会进入 Human 澄清，不会调用 HA。回复播放期间再次说 `Hi ESP` 会触发 barge-in，
 取消旧播放 epoch 并开启新一轮采集。

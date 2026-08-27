@@ -19,6 +19,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "ha_client.h"
 #include "mbedtls/sha256.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
@@ -130,6 +131,7 @@ typedef struct {
     size_t rx_received;
     bool rx_binary;
     bool ui_ack_pending;
+    bool suppress_wake_session;
     voice_ui_ack_t pending_ui_ack;
     voice_transport_snapshot_t metrics;
 } voice_transport_state_t;
@@ -146,6 +148,7 @@ static void voice_offer_pcm(void *context, const int16_t *samples, size_t sample
 static void voice_end_capture(void *context, const char *reason, uint64_t ended_at_us);
 static void voice_wake_detected(void *context, uint64_t detected_at_us);
 static bool voice_ready_for_capture(void *context);
+static bool voice_suppress_wake_session(void *context);
 
 static bool voice_valid_uri(const char *uri)
 {
@@ -277,6 +280,9 @@ static void voice_abort_session(const char *reason)
     }
     taskEXIT_CRITICAL(&s_voice.lock);
     voice_playback_receiver_capture_finished();
+    if (was_active) {
+        (void)conversation_service_set_local_stage(CONVERSATION_LOCAL_STAGE_IDLE);
+    }
     if (was_active) ESP_LOGW(TAG, "voice capture aborted: %s", reason);
 }
 
@@ -884,6 +890,7 @@ static bool voice_begin_capture(void *context, uint64_t started_at_us)
     taskEXIT_CRITICAL(&s_voice.lock);
     if (!candidate) {
         voice_playback_receiver_capture_finished();
+        voice_playback_receiver_capture_failed();
         return false;
     }
 
@@ -946,6 +953,7 @@ static bool voice_begin_capture(void *context, uint64_t started_at_us)
         ESP_LOGW(TAG, "capture opened epoch=%" PRIu32, accepted_epoch);
     } else {
         voice_playback_receiver_capture_finished();
+        voice_playback_receiver_capture_failed();
     }
     return accepted;
 }
@@ -954,13 +962,37 @@ static void voice_wake_detected(void *context, uint64_t detected_at_us)
 {
     (void)context;
     (void)detected_at_us;
+    const bool ha_ready = ha_client_initial_sync_ready();
+    taskENTER_CRITICAL(&s_voice.lock);
+    s_voice.suppress_wake_session = !ha_ready;
+    taskEXIT_CRITICAL(&s_voice.lock);
     voice_playback_receiver_barge_in();
+    if (ha_ready) voice_playback_receiver_request_wake_prompt();
+    else voice_playback_receiver_request_connecting_prompt();
 }
 
 static bool voice_ready_for_capture(void *context)
 {
     (void)context;
     return voice_playback_receiver_allow_capture();
+}
+
+static bool voice_suppress_wake_session(void *context)
+{
+    (void)context;
+    taskENTER_CRITICAL(&s_voice.lock);
+    const bool requested = s_voice.suppress_wake_session;
+    s_voice.suppress_wake_session = false;
+    taskEXIT_CRITICAL(&s_voice.lock);
+    const bool suppress = requested || !ha_client_initial_sync_ready();
+    if (suppress) {
+        voice_playback_receiver_capture_finished();
+        voice_playback_receiver_capture_failed();
+        ESP_LOGW(TAG,
+                 "VERIFY:voice:ha_gate:PASS action=suppressed_capture ha_ready=%s",
+                 ha_client_initial_sync_ready() ? "yes" : "no");
+    }
+    return suppress;
 }
 
 static void voice_offer_pcm(void *context, const int16_t *samples, size_t sample_count,
@@ -995,6 +1027,7 @@ static void voice_end_capture(void *context, const char *reason, uint64_t ended_
     const bool active = s_voice.session_state != VOICE_SESSION_IDLE && !s_voice.end_requested;
     taskEXIT_CRITICAL(&s_voice.lock);
     if (!active) return;
+    voice_playback_receiver_capture_ended();
     if (reason != NULL && strstr(reason, "timeout") != NULL) {
         snprintf(s_voice.end_reason, sizeof(s_voice.end_reason), "%s", "max_duration");
     } else {
@@ -1247,6 +1280,7 @@ esp_err_t voice_transport_init(const voice_transport_config_t *config)
         .context = NULL,
         .wake_detected = voice_wake_detected,
         .ready_for_capture = voice_ready_for_capture,
+        .suppress_wake_session = voice_suppress_wake_session,
         .begin_capture = voice_begin_capture,
         .offer_pcm = voice_offer_pcm,
         .end_capture = voice_end_capture,

@@ -151,7 +151,32 @@ esp_err_t conversation_service_apply(const conversation_update_t *update)
     memset(&s_conversation.snapshot.update, 0, sizeof(s_conversation.snapshot.update));
     memcpy(&s_conversation.snapshot.update, update, sizeof(*update));
     s_conversation.snapshot.available = true;
+    s_conversation.snapshot.local_stage = CONVERSATION_LOCAL_STAGE_IDLE;
+    s_conversation.snapshot.local_revision++;
     s_conversation.snapshot.updates_applied++;
+    conversation_observer_fn observer = s_conversation.observer;
+    void *observer_context = s_conversation.observer_context;
+    xSemaphoreGive(s_conversation.mutex);
+    if (observer != NULL) observer(observer_context);
+    return ESP_OK;
+}
+
+esp_err_t conversation_service_set_local_stage(conversation_local_stage_t stage)
+{
+    if (s_conversation.mutex == NULL) return ESP_ERR_INVALID_STATE;
+    if (stage < CONVERSATION_LOCAL_STAGE_IDLE ||
+        stage > CONVERSATION_LOCAL_STAGE_TRANSCRIBING) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (xSemaphoreTake(s_conversation.mutex, pdMS_TO_TICKS(250)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    if (s_conversation.snapshot.local_stage == stage) {
+        xSemaphoreGive(s_conversation.mutex);
+        return ESP_OK;
+    }
+    s_conversation.snapshot.local_stage = stage;
+    s_conversation.snapshot.local_revision++;
     conversation_observer_fn observer = s_conversation.observer;
     void *observer_context = s_conversation.observer_context;
     xSemaphoreGive(s_conversation.mutex);
@@ -246,6 +271,17 @@ const char *conversation_service_stage_text(conversation_stage_t stage)
         "listening", "transcribing", "thinking", "completed", "failed", "cancelled",
     };
     return stage >= CONVERSATION_STAGE_LISTENING && stage <= CONVERSATION_STAGE_CANCELLED
+               ? values[stage]
+               : "invalid";
+}
+
+const char *conversation_service_local_stage_text(conversation_local_stage_t stage)
+{
+    static const char *const values[] = {
+        "idle", "connecting", "prompting", "listening", "transcribing",
+    };
+    return stage >= CONVERSATION_LOCAL_STAGE_IDLE &&
+                   stage <= CONVERSATION_LOCAL_STAGE_TRANSCRIBING
                ? values[stage]
                : "invalid";
 }

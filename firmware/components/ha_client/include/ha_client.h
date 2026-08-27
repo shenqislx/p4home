@@ -54,6 +54,9 @@ esp_err_t ha_client_stop(void);
 esp_err_t ha_client_restart(void);
 esp_err_t ha_client_wait_ready(uint32_t timeout_ms);
 bool ha_client_ready(void);
+/* True only after authentication, event subscription, and the initial
+ * whitelist-state fetch have all completed for the current connection. */
+bool ha_client_initial_sync_ready(void);
 ha_client_state_t ha_client_state(void);
 const char *ha_client_state_text(void);
 const char *ha_client_last_error_text(void);

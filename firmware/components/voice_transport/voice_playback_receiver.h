@@ -23,6 +23,8 @@ typedef struct {
     uint32_t queue_high_water;
     uint32_t barge_in_count;
     uint32_t speaker_close_failures;
+    uint32_t wake_prompts_played;
+    uint32_t wake_prompt_failures;
     uint32_t stack_high_water_bytes;
 } voice_playback_snapshot_t;
 
@@ -34,6 +36,10 @@ esp_err_t voice_playback_receiver_open(const cJSON *root);
 esp_err_t voice_playback_receiver_control(const cJSON *root);
 esp_err_t voice_playback_receiver_frame(const uint8_t *bytes, size_t length);
 void voice_playback_receiver_barge_in(void);
+void voice_playback_receiver_request_wake_prompt(void);
+void voice_playback_receiver_request_connecting_prompt(void);
+void voice_playback_receiver_capture_failed(void);
+void voice_playback_receiver_capture_ended(void);
 bool voice_playback_receiver_allow_capture(void);
 void voice_playback_receiver_capture_finished(void);
 void voice_playback_receiver_fail(void);

@@ -23,6 +23,16 @@ typedef enum {
     CONVERSATION_STAGE_CANCELLED,
 } conversation_stage_t;
 
+/* Device-local, transient voice feedback. These states never participate in
+ * the Agent ui.update revision/ACK contract. */
+typedef enum {
+    CONVERSATION_LOCAL_STAGE_IDLE = 0,
+    CONVERSATION_LOCAL_STAGE_CONNECTING,
+    CONVERSATION_LOCAL_STAGE_PROMPTING,
+    CONVERSATION_LOCAL_STAGE_LISTENING,
+    CONVERSATION_LOCAL_STAGE_TRANSCRIBING,
+} conversation_local_stage_t;
+
 typedef enum {
     CONVERSATION_ROLE_NONE = 0,
     CONVERSATION_ROLE_HUMAN,
@@ -55,6 +65,8 @@ typedef struct {
     bool initialized;
     bool available;
     conversation_update_t update;
+    conversation_local_stage_t local_stage;
+    uint32_t local_revision;
     uint32_t updates_applied;
     uint32_t stale_updates_rejected;
 } conversation_snapshot_t;
@@ -64,11 +76,13 @@ typedef void (*conversation_rendered_fn)(const conversation_update_t *update, vo
 
 esp_err_t conversation_service_init(void);
 esp_err_t conversation_service_apply(const conversation_update_t *update);
+esp_err_t conversation_service_set_local_stage(conversation_local_stage_t stage);
 esp_err_t conversation_service_add_observer(conversation_observer_fn observer, void *context);
 esp_err_t conversation_service_set_rendered_observer(conversation_rendered_fn observer,
                                                      void *context);
 esp_err_t conversation_service_mark_rendered(const conversation_update_t *update);
 void conversation_service_get_snapshot(conversation_snapshot_t *snapshot);
 const char *conversation_service_stage_text(conversation_stage_t stage);
+const char *conversation_service_local_stage_text(conversation_local_stage_t stage);
 const char *conversation_service_role_text(conversation_response_role_t role);
 const char *conversation_service_execution_text(conversation_execution_status_t status);
