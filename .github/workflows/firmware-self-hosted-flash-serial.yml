@@ -18,6 +18,7 @@ on:
           - phase5e_e2e
           - phase5e_ui
           - phase6h_cat_memory
+          - phase7_autonomy
           - product_human
         default: generic
       serial_port:
@@ -104,12 +105,12 @@ jobs:
           if not 10 <= seconds <= 7200:
               raise SystemExit("monitor_seconds must be between 10 and 7200")
           profile = os.environ["VALIDATION_PROFILE"]
-          if profile not in {"generic", "phase2d_agent", "phase3d_object", "phase4c_ha", "phase5a_voice", "phase5b_voice", "phase5c_stt", "phase5e_e2e", "phase5e_ui", "phase6h_cat_memory", "product_human"}:
+          if profile not in {"generic", "phase2d_agent", "phase3d_object", "phase4c_ha", "phase5a_voice", "phase5b_voice", "phase5c_stt", "phase5e_e2e", "phase5e_ui", "phase6h_cat_memory", "phase7_autonomy", "product_human"}:
               raise SystemExit("unsupported validation_profile")
           port = int(os.environ["AGENT_PORT"])
           if not 1 <= port <= 65535:
               raise SystemExit("agent_port must be between 1 and 65535")
-          if profile in {"phase2d_agent", "phase3d_object", "phase5b_voice", "phase5c_stt", "phase5e_e2e", "phase5e_ui", "phase6h_cat_memory", "product_human"}:
+          if profile in {"phase2d_agent", "phase3d_object", "phase5b_voice", "phase5c_stt", "phase5e_e2e", "phase5e_ui", "phase6h_cat_memory", "phase7_autonomy", "product_human"}:
               host = os.environ["AGENT_HOST"]
               if not host or re.fullmatch(r"[A-Za-z0-9.-]+", host) is None:
                   raise SystemExit("Agent profiles require a safe runner LAN agent_host")
@@ -120,6 +121,8 @@ jobs:
               raise SystemExit("phase3d_object requires monitor_seconds>=120")
           if profile == "phase6h_cat_memory" and seconds < 120:
               raise SystemExit("phase6h_cat_memory requires monitor_seconds>=120")
+          if profile == "phase7_autonomy" and seconds < 300:
+              raise SystemExit("phase7_autonomy requires monitor_seconds>=300")
           if profile == "phase4c_ha" and seconds < 120:
               raise SystemExit("phase4c_ha requires monitor_seconds>=120")
           if profile == "phase5a_voice" and seconds < 180:
@@ -145,7 +148,8 @@ jobs:
           if [[ "$VALIDATION_PROFILE" == "phase2d_agent" ]]; then
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 300))" >> "$GITHUB_ENV"
           elif [[ "$VALIDATION_PROFILE" == "phase3d_object" || \
-                  "$VALIDATION_PROFILE" == "phase6h_cat_memory" ]]; then
+                  "$VALIDATION_PROFILE" == "phase6h_cat_memory" || \
+                  "$VALIDATION_PROFILE" == "phase7_autonomy" ]]; then
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 120))" >> "$GITHUB_ENV"
           elif [[ "$VALIDATION_PROFILE" == "phase4c_ha" ]]; then
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 180))" >> "$GITHUB_ENV"
@@ -158,7 +162,8 @@ jobs:
             echo "CAPTURE_SECONDS=$MONITOR_SECONDS" >> "$GITHUB_ENV"
           fi
           if [[ "$VALIDATION_PROFILE" == "phase3d_object" || \
-                "$VALIDATION_PROFILE" == "phase6h_cat_memory" ]]; then
+                "$VALIDATION_PROFILE" == "phase6h_cat_memory" || \
+                "$VALIDATION_PROFILE" == "phase7_autonomy" ]]; then
             echo "AGENT_PROTOCOL_VERSION=2" >> "$GITHUB_ENV"
           else
             echo "AGENT_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
@@ -262,7 +267,7 @@ jobs:
           echo "P4HOME_PRODUCT_HUMAN_AUDIT_STATUS_FILE=$RUNNER_TEMP/product-human-artifact-audit-status" >> "$GITHUB_ENV"
 
       - name: Prepare ephemeral Agent profile
-        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase5b_voice' || inputs.validation_profile == 'phase5c_stt' || inputs.validation_profile == 'phase5e_e2e' || inputs.validation_profile == 'phase5e_ui' || inputs.validation_profile == 'phase6h_cat_memory'
+        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase5b_voice' || inputs.validation_profile == 'phase5c_stt' || inputs.validation_profile == 'phase5e_e2e' || inputs.validation_profile == 'phase5e_ui' || inputs.validation_profile == 'phase6h_cat_memory' || inputs.validation_profile == 'phase7_autonomy'
         run: |
           set -euo pipefail
           mkdir -p "$AGENT_TMP_DIR"
@@ -332,6 +337,37 @@ jobs:
             echo "P4HOME_PHASE6H_MEMORY_CANARY_FILE=$AGENT_TMP_DIR/phase6h-memory-canary" >> "$GITHUB_ENV"
             echo "P4HOME_PHASE6H_RAW_MONITOR_LOG=$AGENT_TMP_DIR/phase6h-raw-monitor.log" >> "$GITHUB_ENV"
           fi
+
+      - name: Prepare Phase 7 real HA inputs
+        if: inputs.validation_profile == 'phase7_autonomy'
+        run: |
+          set -euo pipefail
+          ROBOT_CONFIG_DIR="$HOME/.config/p4home"
+          ROBOT_TOKEN_FILE="$ROBOT_CONFIG_DIR/robot-ha.token"
+          ROBOT_POLICY_FILE="$ROBOT_CONFIG_DIR/robot-ha-policy.json"
+          ROBOT_URL_FILE="$ROBOT_CONFIG_DIR/robot-ha.url"
+          test -s "$ROBOT_TOKEN_FILE"
+          test -s "$ROBOT_POLICY_FILE"
+          test -s "$ROBOT_URL_FILE"
+          test "$(stat -f '%Lp' "$ROBOT_TOKEN_FILE")" = "600"
+          test "$(stat -f '%Lp' "$ROBOT_POLICY_FILE")" = "600"
+          test "$(stat -f '%Lp' "$ROBOT_URL_FILE")" = "600"
+          P4HOME_PHASE7_HA_URL="$(head -n 1 "$ROBOT_URL_FILE")"
+          case "$P4HOME_PHASE7_HA_URL" in
+            http://*|https://*) ;;
+            *) echo "Robot HA URL must use http or https" >&2; exit 1 ;;
+          esac
+          FROZEN_PHASE7_TOKEN_FILE="$AGENT_TMP_DIR/phase7-robot-ha.token"
+          FROZEN_PHASE7_POLICY_FILE="$AGENT_TMP_DIR/phase7-robot-ha-policy.json"
+          cp "$ROBOT_TOKEN_FILE" "$FROZEN_PHASE7_TOKEN_FILE"
+          cp "$ROBOT_POLICY_FILE" "$FROZEN_PHASE7_POLICY_FILE"
+          chmod 400 "$FROZEN_PHASE7_TOKEN_FILE" "$FROZEN_PHASE7_POLICY_FILE"
+          echo "P4HOME_PHASE7_HA_URL=$P4HOME_PHASE7_HA_URL" >> "$GITHUB_ENV"
+          echo "P4HOME_PHASE7_TOKEN_FILE=$FROZEN_PHASE7_TOKEN_FILE" >> "$GITHUB_ENV"
+          echo "P4HOME_PHASE7_POLICY_FILE=$FROZEN_PHASE7_POLICY_FILE" >> "$GITHUB_ENV"
+          echo "P4HOME_PHASE7_AUDIT_STATUS_FILE=$AGENT_TMP_DIR/phase7-artifact-audit-status" >> "$GITHUB_ENV"
+          echo "P4HOME_PHASE7_RAW_MONITOR_LOG=$AGENT_TMP_DIR/phase7-raw-monitor.log" >> "$GITHUB_ENV"
+          echo "OLLAMA_MODEL=qwen3.6:35b-mlx" >> "$GITHUB_ENV"
 
       - name: Prepare Phase 4C HA profile
         if: inputs.validation_profile == 'phase4c_ha' || inputs.validation_profile == 'phase5e_e2e' || inputs.validation_profile == 'phase5e_ui'
@@ -423,7 +459,8 @@ jobs:
           grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
           if [[ "${{ inputs.validation_profile }}" == "phase2d_agent" || \
                 "${{ inputs.validation_profile }}" == "phase3d_object" || \
-                "${{ inputs.validation_profile }}" == "phase6h_cat_memory" ]]; then
+                "${{ inputs.validation_profile }}" == "phase6h_cat_memory" || \
+                "${{ inputs.validation_profile }}" == "phase7_autonomy" ]]; then
             grep -qx "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=$EXPECTED_AGENT_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
           fi
           if [[ "${{ inputs.validation_profile }}" == "phase5b_voice" || \
@@ -475,13 +512,13 @@ jobs:
           test "$SERVICE_SPKI_SHA256" = "$(head -n 1 "$HOME/.config/p4home/product-voice/spki-sha256")"
 
       - name: Set up Node for Agent harness
-        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase4c_ha' || inputs.validation_profile == 'phase5b_voice' || inputs.validation_profile == 'phase5c_stt' || inputs.validation_profile == 'phase5e_e2e' || inputs.validation_profile == 'phase5e_ui' || inputs.validation_profile == 'phase6h_cat_memory'
+        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase4c_ha' || inputs.validation_profile == 'phase5b_voice' || inputs.validation_profile == 'phase5c_stt' || inputs.validation_profile == 'phase5e_e2e' || inputs.validation_profile == 'phase5e_ui' || inputs.validation_profile == 'phase6h_cat_memory' || inputs.validation_profile == 'phase7_autonomy'
         uses: actions/setup-node@v4
         with:
           node-version: 24.19.0
 
       - name: Start Agent Runtime harness
-        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase5b_voice' || inputs.validation_profile == 'phase5c_stt' || inputs.validation_profile == 'phase5e_e2e' || inputs.validation_profile == 'phase5e_ui' || inputs.validation_profile == 'phase6h_cat_memory'
+        if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase5b_voice' || inputs.validation_profile == 'phase5c_stt' || inputs.validation_profile == 'phase5e_e2e' || inputs.validation_profile == 'phase5e_ui' || inputs.validation_profile == 'phase6h_cat_memory' || inputs.validation_profile == 'phase7_autonomy'
         shell: zsh {0}
         working-directory: agent
         run: |
@@ -517,7 +554,12 @@ jobs:
           if [[ "$VALIDATION_PROFILE" == "phase6h_cat_memory" ]]; then
             export P4HOME_PHASE6H_AUDIT_DB P4HOME_PHASE6H_MEMORY_CANARY_FILE
           fi
-          HARNESS_ENTRYPOINT=apps/device-harness/src/cli.ts
+          if [[ "$VALIDATION_PROFILE" == "phase7_autonomy" ]]; then
+            export P4HOME_PHASE7_HA_URL P4HOME_PHASE7_TOKEN_FILE P4HOME_PHASE7_POLICY_FILE
+            HARNESS_ENTRYPOINT=apps/device-harness/src/phase7-autonomy-cli.ts
+          else
+            HARNESS_ENTRYPOINT=apps/device-harness/src/cli.ts
+          fi
           export HARNESS_ENTRYPOINT
           nohup zsh -c '
             node --import tsx "$HARNESS_ENTRYPOINT"
@@ -658,6 +700,9 @@ jobs:
             rm -f firmware/monitor.log
           elif [[ "$VALIDATION_PROFILE" == "phase6h_cat_memory" ]]; then
             monitor_log="$P4HOME_PHASE6H_RAW_MONITOR_LOG"
+            rm -f firmware/monitor.log
+          elif [[ "$VALIDATION_PROFILE" == "phase7_autonomy" ]]; then
+            monitor_log="$P4HOME_PHASE7_RAW_MONITOR_LOG"
             rm -f firmware/monitor.log
           fi
           idf.py \
@@ -891,11 +936,19 @@ jobs:
           if [[ "$VALIDATION_PROFILE" == "phase5a_voice" ]]; then
             exit 0
           fi
+          harness_wait_attempts=1200
+          if [[ "$VALIDATION_PROFILE" == "phase7_autonomy" ]]; then
+            # The harness has a 20-minute hard deadline. Combined with the
+            # minimum 420-second serial capture, 900 seconds covers its
+            # bounded terminalization and status-file write.
+            harness_wait_attempts=9000
+          fi
           if [[ "$VALIDATION_PROFILE" == "phase5b_voice" || \
                 "$VALIDATION_PROFILE" == "phase5c_stt" || \
                 "$VALIDATION_PROFILE" == "phase5e_e2e" || \
-                "$VALIDATION_PROFILE" == "phase5e_ui" ]]; then
-            for attempt in {1..1200}; do
+                "$VALIDATION_PROFILE" == "phase5e_ui" || \
+                "$VALIDATION_PROFILE" == "phase7_autonomy" ]]; then
+            for ((attempt = 1; attempt <= harness_wait_attempts; attempt++)); do
               if [[ -s "$AGENT_HARNESS_STATUS_FILE" ]]; then
                 break
               fi
@@ -913,6 +966,8 @@ jobs:
               harness_monitor_log="$PHASE4C_RAW_MONITOR_LOG"
             elif [[ "$VALIDATION_PROFILE" == "phase6h_cat_memory" ]]; then
               harness_monitor_log="$P4HOME_PHASE6H_RAW_MONITOR_LOG"
+            elif [[ "$VALIDATION_PROFILE" == "phase7_autonomy" ]]; then
+              harness_monitor_log="$P4HOME_PHASE7_RAW_MONITOR_LOG"
             else
               harness_monitor_log="firmware/monitor.log"
             fi
@@ -970,6 +1025,26 @@ jobs:
             --secret-file "$AGENT_TMP_DIR/agent-key.pem" \
             --status-file "$P4HOME_PHASE6H_AUDIT_STATUS_FILE"
           grep -qx "pass" "$P4HOME_PHASE6H_AUDIT_STATUS_FILE"
+
+      - name: Audit Phase 7 upload candidates
+        if: always() && inputs.validation_profile == 'phase7_autonomy'
+        run: |
+          set -euo pipefail
+          test -s "$P4HOME_PHASE7_RAW_MONITOR_LOG"
+          audit_args=()
+          if [[ -s "$AGENT_HARNESS_RESULT_FILE" ]]; then
+            audit_args+=(--result "$AGENT_HARNESS_RESULT_FILE")
+          fi
+          python3 scripts/audit-phase7-artifacts.py \
+            --monitor "$P4HOME_PHASE7_RAW_MONITOR_LOG" \
+            --output firmware/monitor.log \
+            "${audit_args[@]}" \
+            --ha-policy "$P4HOME_PHASE7_POLICY_FILE" \
+            --secret-file "$AGENT_TMP_DIR/device-token" \
+            --secret-file "$AGENT_TMP_DIR/agent-key.pem" \
+            --secret-file "$P4HOME_PHASE7_TOKEN_FILE" \
+            --status-file "$P4HOME_PHASE7_AUDIT_STATUS_FILE"
+          grep -qx "pass" "$P4HOME_PHASE7_AUDIT_STATUS_FILE"
 
       - name: Audit persistent Human Voice upload candidates
         if: always() && inputs.validation_profile == 'product_human'
@@ -1029,6 +1104,9 @@ jobs:
           )
           product_human_audit_status_path = pathlib.Path(
               os.environ.get("P4HOME_PRODUCT_HUMAN_AUDIT_STATUS_FILE", "")
+          )
+          phase7_audit_status_path = pathlib.Path(
+              os.environ.get("P4HOME_PHASE7_AUDIT_STATUS_FILE", "")
           )
 
           def read_json(path):
@@ -1281,6 +1359,11 @@ jobs:
                   ]).is_file()
                   else None
               ),
+              "phase7_artifact_audit_status": (
+                  phase7_audit_status_path.read_text(encoding="utf-8").strip()
+                  if phase7_audit_status_path.is_file()
+                  else None
+              ),
               "phase4c_agent_transport_disabled": phase4c_agent_transport_disabled,
               "phase4c_policy_binding_verified": (
                   binding_status_path.is_file()
@@ -1334,6 +1417,10 @@ jobs:
             test -s "$AGENT_HARNESS_STATUS_FILE"
             grep -qx "pass" "$P4HOME_PHASE6H_AUDIT_STATUS_FILE"
           fi
+          if [[ "$VALIDATION_PROFILE" == "phase7_autonomy" ]]; then
+            test -s "$AGENT_HARNESS_STATUS_FILE"
+            grep -qx "pass" "$P4HOME_PHASE7_AUDIT_STATUS_FILE"
+          fi
           if [[ "$VALIDATION_PROFILE" == "product_human" ]]; then
             grep -qx "pass" "$P4HOME_PRODUCT_HUMAN_AUDIT_STATUS_FILE"
           fi
@@ -1350,11 +1437,11 @@ jobs:
           EOF
 
       - name: Show monitor log tail on failure
-        if: failure() && inputs.validation_profile != 'phase5e_e2e' && inputs.validation_profile != 'phase5e_ui' && inputs.validation_profile != 'phase6h_cat_memory'
+        if: failure() && inputs.validation_profile != 'phase5e_e2e' && inputs.validation_profile != 'phase5e_ui' && inputs.validation_profile != 'phase6h_cat_memory' && inputs.validation_profile != 'phase7_autonomy'
         run: tail -n 200 firmware/monitor.log || true
 
       - name: Upload serial artifact
-        if: always() && ((inputs.validation_profile != 'phase5e_e2e' && inputs.validation_profile != 'phase5e_ui' && inputs.validation_profile != 'phase6h_cat_memory' && inputs.validation_profile != 'product_human') || success())
+        if: always() && ((inputs.validation_profile != 'phase5e_e2e' && inputs.validation_profile != 'phase5e_ui' && inputs.validation_profile != 'phase6h_cat_memory' && inputs.validation_profile != 'phase7_autonomy' && inputs.validation_profile != 'product_human') || success())
         uses: actions/upload-artifact@v4
         with:
           name: esp32-p4-monitor-log

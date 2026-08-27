@@ -57,5 +57,7 @@ event/run/action identity、状态和有界错误码，不包含用户正文、H
 ## 当前验收边界
 
 本地测试已覆盖配置 fail-closed、等待 P4 ready、四来源装配、动作到 SQLite、autonomy World 尾部
-反馈阻断、控制鉴权与 pause/disable。真实 P4、真实 HA、真实模型频率/资源稳定性仍必须通过独立 7C
-实机证据后才能关闭 Phase 7。
+反馈阻断、控制鉴权与 pause/disable。专用 `phase7_autonomy` 实机 profile 和上传前隐私审计已完成
+编码并通过两路独立 bugs review；真实 workflow 尚未产生 commit-bound artifact。真实 P4、真实 HA 只读连接、真实模型和
+资源稳定性必须按 manifest-first 协议通过后才能关闭 Phase 7。该 profile 的 HA action 使用真实
+allowlist 快照的隔离投影，不等同于家庭现场实体真的发生了状态变化。

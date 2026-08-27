@@ -87,8 +87,9 @@ quota/retention revision 1 已获批并实现。代表性家庭数据、Voice + 
 Phase 5 仍为 `pending_real_environment`。2026-08-26 用户已明确授权启动 Phase 7，并要求先完成
 feature 编码；7A Runtime 已实现四类 trigger、Event Policy、quiet hours/budget/开关、低优先级
 抢占和审计查询。7B 的 7 天 10,080 trigger 长跑、跨日预算、HA storm、误触发、抢占和审计容量
-本地 gate 已通过。7C1 产品启动装配、控制/审计入口和两轮独立 bugs review 已完成；真实
-HA/P4/模型资源门禁和 final review 尚未通过，Phase 7 保持 `in_progress`。
+本地 gate 已通过。7C1 产品启动装配、控制/审计入口和两轮独立 bugs review 已完成；7C2 专用
+实机 profile、真实模型/P4 harness、HA 只读计数、隐私审计编码及两路 bugs review 也已完成。
+真实 workflow artifact 和 final review 尚未通过，Phase 7 保持 `in_progress`。
 
 Phase 1 的 SQLite Worker、启动恢复、Runtime 相对 timeout 与协作取消边界已经关闭。设备端
 deadline、action_id 幂等和 snapshot reconciliation 已在 Phase 2 完成并通过实机证据验证。

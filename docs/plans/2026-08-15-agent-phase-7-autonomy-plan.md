@@ -64,6 +64,9 @@ model admission（每日严格 24 次），无 trigger 的模型调用为 0；1,
 - [x] 产品启动装配挂载 Timer、真实 HA allowlist client、P4 device adapter 和 task-complete ingress，
   并通过独立 bugs review 与修复复核；
 - [ ] 验证真实 P4 action、HA/P4 原链不回归、资源与长稳；
+  - [x] 完成专用 `phase7_autonomy` profile、真实模型/P4 harness、HA 只读 frame 计数、隐私审计编码，
+    并完成两路独立 bugs review 与修复复核；
+  - [ ] 推送待测 commit，执行实机 workflow 并按 manifest-first 协议判定；
 - [x] 提供 loopback bearer 控制面、policy decision 与 execution terminal 的有界查询，并通过独立 review；
 - [ ] 完成真实环境证据与最终用户 review。
 

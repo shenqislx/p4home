@@ -56,6 +56,9 @@ importers:
 
   apps/device-harness:
     dependencies:
+      '@p4home/provider-ollama':
+        specifier: workspace:*
+        version: link:../../packages/provider-ollama
       '@p4home/provider-stt':
         specifier: workspace:*
         version: link:../../packages/provider-stt

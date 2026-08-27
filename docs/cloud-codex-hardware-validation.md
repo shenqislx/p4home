@@ -47,7 +47,7 @@ Actions secret。workflow 只把解码结果写入 `$RUNNER_TEMP`，不会复制
 
 | 参数 | 默认值 | 约束 |
 |---|---|---|
-| `validation_profile` | `generic` | `generic`、`phase2d_agent`、`phase3d_object`、`phase4c_ha`、`phase5a_voice`、`phase5b_voice`、`phase5c_stt`、`phase5e_e2e`、`phase5e_ui` 或 `phase6h_cat_memory` |
+| `validation_profile` | `generic` | `generic`、`phase2d_agent`、`phase3d_object`、`phase4c_ha`、`phase5a_voice`、`phase5b_voice`、`phase5c_stt`、`phase5e_e2e`、`phase5e_ui`、`phase6h_cat_memory`、`phase7_autonomy` 或 `product_human` |
 | `serial_port` | `/dev/cu.usbserial-210` | runner 上的字符设备 |
 | `monitor_seconds` | `120` | `10–7200` 秒 |
 | `agent_host` | 空 | Agent profile 时必填；P4 可访问的 runner LAN host |
@@ -118,6 +118,23 @@ Device Protocol 固定为 v2。runner 在 `0700` 临时目录创建 `0600` SQLit
 缺少任一功能 marker 时，Cloud Codex 必须判为 `inconclusive`，不能只凭 workflow 绿色通过；
 harness 业务退出码和 `VERIFY:*:FAIL` 本身不改变 transport job 状态，隐私发布失败仍会 fail closed。
 
+Phase 7 Cat Autonomy 真实环境门禁使用 `phase7_autonomy`，`monitor_seconds` 至少为 300 秒，
+Device Protocol 固定为 v2。runner 使用一次性 P4 TLS/device token，并从仓库外权限为 `0600` 的
+Robot HA URL/token/policy 建立真实非管理员只读连接；固件不会装配 HA client，也不会执行家庭设备
+写入。harness 先用真实 `qwen3.6:35b-mlx` 处理一次 60 秒 Timer，再把真实 HA allowlist 快照转换为
+隔离的 in-process 状态变化，验证 HA source bridge 的第二次 Cat action。后者不是家庭现场实体真的
+变化，证据必须保留 `origin=isolated_transition_from_real_allowlist_snapshot`，不得写成“真实 HA
+实体事件已发生”。随后门禁验证 P4 断线重连 snapshot、pause/disable 各 60 秒零模型调用、覆盖
+两次 action 和两段控制观察的 Agent RSS 1 秒采样峰值、HA client 仍 ready 且 outbound
+`call_service=0`；该采样不是瞬时内存硬上限。
+原始串口和 harness 日志只在 runner 私有
+临时目录合并；上传前扫描一次性 P4 凭据、Robot HA token、所有真实 HA entity id、崩溃和 reset-loop
+标记，审计通过后才原子发布。功能判定要求 manifest 身份一致，并同时核对
+`VERIFY:phase7:product_ready:PASS`、`timer_action:PASS`、`ha_projection_action:PASS`、
+`p4_reconnect:PASS`、`pause_disable:PASS`、峰值 RSS `resource_stability:PASS`、
+`ha_read_only:PASS` 与
+`artifact_audit:PASS`；workflow 绿色本身仍不构成 Phase 7 通过。
+
 ## 4. Artifact Contract
 
 Artifact 名称固定为 `esp32-p4-monitor-log`，至少包含：
@@ -168,6 +185,10 @@ manifest 推断。
 `phase5e_artifact_audit_status=pass`。Mac input driver 成功只证明测试语音已注入，不能替代 P4 UI
 渲染/ACK marker、真实模型调用、HA 读写恢复和 Agent 汇总判定。harness 或 input driver 的业务
 失败不会阻断已通过隐私审计的证据上传；隐私审计失败仍会 fail closed 并跳过 Phase 5E artifact。
+`phase7_autonomy` 还记录 `phase7_artifact_audit_status=pass` 与结构化
+`agent_hardware_result`；结构化结果中的 HA 字段只有 alias 数量、只读 frame 计数和上述隔离投影
+来源，不得包含 token、entity id 或模型请求正文。harness 业务退出码与结果的 `passed` 仍由
+Cloud Codex 按原始 marker 复核，不能由 transport job 代判。
 
 ## 5. 判定顺序
 
