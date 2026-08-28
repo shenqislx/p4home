@@ -1,12 +1,14 @@
 import importlib.util
+import io
 import json
 import pathlib
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import tarfile
 import unittest
-from contextlib import closing
+from contextlib import closing, redirect_stdout
 from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -81,6 +83,18 @@ class Phase5eProfileTests(unittest.TestCase):
     @staticmethod
     def init_repo(root: pathlib.Path):
         subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"], cwd=root,
+            input=b"bounded synthetic source object", check=True,
+            stdout=subprocess.DEVNULL,
+        )
+
+    @staticmethod
+    def write_source_archive(path: pathlib.Path, payload: bytes):
+        with tarfile.open(path, "w:gz") as archive:
+            member = tarfile.TarInfo("p4home/source.txt")
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
 
     def audit_command(
         self,
@@ -144,7 +158,9 @@ class Phase5eProfileTests(unittest.TestCase):
             "phase5e_reset_banner_count",
             "phase5e_crash_marker_count",
             "P4HOME_HARNESS_NODE_PID_FILE",
-            "trap cleanup_background EXIT",
+            "trap cleanup_and_record_transport_exit EXIT",
+            "P4HOME_SOURCE_ARCHIVE",
+            '--source-archive "$P4HOME_SOURCE_ARCHIVE"',
         ):
             self.assertIn(marker, workflow)
         driver = DRIVER.read_text(encoding="utf-8")
@@ -273,8 +289,14 @@ class Phase5eProfileTests(unittest.TestCase):
         flash_step = workflow.split(
             "      - name: Flash firmware and capture serial", 1
         )[1].split("      - name: Append Agent harness evidence", 1)[0]
+        self.assertIn("id: flash_capture", flash_step)
         self.assertIn("phase5e_artifact_only=yes", flash_step)
         self.assertIn("evidence_capture=continuing", flash_step)
+        self.assertIn("trap record_transport_exit EXIT", flash_step)
+        self.assertIn("trap cleanup_and_record_transport_exit EXIT", flash_step)
+        self.assertIn("VERIFY:transport:flash_capture:FAIL exit_code=%d", flash_step)
+        self.assertIn('> "$TRANSPORT_STATUS_FILE"', flash_step)
+        self.assertNotIn("continue-on-error", flash_step)
 
     def test_phase5e_final_audit_runs_after_manifest_and_before_upload(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -296,6 +318,23 @@ class Phase5eProfileTests(unittest.TestCase):
         self.assertIn('--secret-file "$AGENT_TMP_DIR/agent-key.pem"', final_block)
         self.assertIn('--artifact-sensitive-file "$PHASE4C_ENTITY_FILE"', final_block)
         self.assertNotIn("tee -a firmware/monitor.log", final_block)
+        self.assertIn("id: phase5e_final_audit", final_block)
+        upload_block = workflow[upload:]
+        self.assertIn("steps.phase5e_final_audit.outcome == 'success'", upload_block)
+        self.assertIn("firmware/monitor.log", upload_block)
+        self.assertIn("firmware/hardware-validation-manifest.json", upload_block)
+        self.assertNotIn("PHASE4C_RAW_MONITOR_LOG", upload_block)
+        self.assertNotIn("AGENT_HARNESS_LOG", upload_block)
+
+    def test_workflow_manifest_reports_transport_failure_without_feature_pass(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        manifest_block = workflow.split(
+            "      - name: Write hardware validation manifest", 1
+        )[1].split("      - name: Audit final Phase 5E upload candidates", 1)[0]
+        self.assertIn('"transport_exit_code"', manifest_block)
+        self.assertIn('"transport_status"', manifest_block)
+        self.assertIn('else "failed" if transport_status_path.is_file()', manifest_block)
+        self.assertNotIn('"passed": True', manifest_block)
 
     def test_artifact_audit_allows_missing_business_outputs(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -312,6 +351,47 @@ class Phase5eProfileTests(unittest.TestCase):
             command = self.audit_command(root, artifact, secret, status)
             self.assertEqual(self.run_audit(command), 0)
             self.assertEqual(status.read_text(encoding="ascii"), "pass\n")
+
+    def test_artifact_audit_scans_gitless_archive_and_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            secret = root / "secret"
+            self.write_secret(secret)
+            artifact = root / "monitor.log"
+            artifact.write_text("safe metadata\n", encoding="utf-8")
+            archive = root / "source.tar.gz"
+            self.write_source_archive(archive, b"bounded source metadata")
+            status = root / "status"
+            command = self.audit_command(
+                root, artifact, secret, status, "--source-archive", str(archive),
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(self.run_audit(command), 0)
+            self.assertIn("source_mode=archive", output.getvalue())
+            self.assertNotIn("git_objects=clean", output.getvalue())
+
+            self.write_source_archive(archive, b"top-secret-token-value")
+            self.assertNotEqual(self.run_audit(command), 0)
+
+            self.write_source_archive(archive, b"bounded source metadata")
+            (root / ".git").mkdir()
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "present but broken Git metadata must not silently fall back to the archive",
+            )
+
+            empty_repo = root / "empty-repo"
+            empty_repo.mkdir()
+            subprocess.run(["git", "init", "-q", str(empty_repo)], check=True)
+            empty_command = self.audit_command(
+                empty_repo, artifact, secret, status,
+                "--source-archive", str(archive),
+            )
+            self.assertNotEqual(
+                self.run_audit(empty_command), 0,
+                "an empty Git object database is not auditable source evidence",
+            )
 
     def test_artifact_audit_accepts_metadata_only_and_rejects_secret(self):
         with tempfile.TemporaryDirectory() as temporary:

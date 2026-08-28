@@ -11,6 +11,7 @@ import pathlib
 import re
 import sqlite3
 import stat
+import subprocess
 
 BASE64_CANDIDATE = re.compile(rb"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{256,}={0,2}(?![A-Za-z0-9+/=])")
 RAW_FIELD = re.compile(
@@ -332,6 +333,7 @@ def read_regular_file(path: pathlib.Path) -> bytes:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True, type=pathlib.Path)
+    parser.add_argument("--source-archive", type=pathlib.Path)
     parser.add_argument("--artifact", action="append", required=True, type=pathlib.Path)
     parser.add_argument("--secret-file", action="append", required=True, type=pathlib.Path)
     parser.add_argument(
@@ -342,6 +344,7 @@ def main() -> int:
     parser.add_argument("--status-file", required=True, type=pathlib.Path)
     args = parser.parse_args()
     reasons: set[str] = set()
+    source_mode = "unavailable"
     secrets: list[bytes] = []
     artifact_only_secrets: list[bytes] = []
     try:
@@ -357,10 +360,34 @@ def main() -> int:
         repo = None
         reasons.add("git_scan")
     if repo is not None:
+        try:
+            git_marker = (repo / ".git").lstat()
+        except FileNotFoundError:
+            git_marker = None
+        except OSError:
+            git_marker = False
+            reasons.add("git_scan")
+        if git_marker is not None and git_marker is not False \
+                and stat.S_ISLNK(git_marker.st_mode):
+            git_marker = False
+            reasons.add("git_scan")
         for secret in dict.fromkeys(secrets):
             try:
-                _objects_scanned, matches = PHASE4_AUDIT.scan_git_objects(repo, secret)
-            except (OSError, RuntimeError, ValueError):
+                if git_marker is None:
+                    source_mode = "archive"
+                    if args.source_archive is None:
+                        raise ValueError("gitless checkout requires its pinned source archive")
+                    _objects_scanned, matches = PHASE4_AUDIT.scan_source_archive(
+                        args.source_archive, secret,
+                    )
+                elif git_marker is False:
+                    raise ValueError("repository metadata is unsafe")
+                else:
+                    source_mode = "git_objects"
+                    _objects_scanned, matches = PHASE4_AUDIT.scan_git_objects(repo, secret)
+                if _objects_scanned < 1:
+                    raise RuntimeError("source scan returned no auditable objects")
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
                 reasons.add("git_scan")
             else:
                 if matches:
@@ -424,7 +451,7 @@ def main() -> int:
     args.status_file.write_text("pass\n" if passed else "fail\n", encoding="ascii")
     print(
         "VERIFY:phase5e:artifact_audit:PASS secrets=absent raw_audio=absent "
-        "git_objects=clean process_argv=clean"
+        f"source=clean source_mode={source_mode} process_argv=clean"
         if passed else f"VERIFY:phase5e:artifact_audit:FAIL reasons={','.join(sorted(reasons))}"
     )
     return 0 if passed else 1

@@ -1,7 +1,9 @@
 import importlib.util
+import io
 import os
 import pathlib
 import stat
+import tarfile
 import tempfile
 import unittest
 
@@ -18,6 +20,44 @@ SPEC.loader.exec_module(MODULE)
 
 
 class Phase4SensitiveAuditTests(unittest.TestCase):
+    def test_source_archive_scan_is_bounded_and_detects_exact_secret(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = pathlib.Path(directory) / "source.tar.gz"
+            secret = b"safe-token-value-123456"
+
+            def write_archive(payload: bytes):
+                with tarfile.open(archive, "w:gz") as handle:
+                    member = tarfile.TarInfo("p4home/source.txt")
+                    member.size = len(payload)
+                    handle.addfile(member, io.BytesIO(payload))
+
+            write_archive(b"bounded source metadata")
+            self.assertEqual(MODULE.scan_source_archive(archive, secret), (1, 0))
+            write_archive(b"prefix-" + secret + b"-suffix")
+            self.assertEqual(MODULE.scan_source_archive(archive, secret), (1, 1))
+            archive.write_bytes(b"not a tar archive")
+            with self.assertRaises(ValueError):
+                MODULE.scan_source_archive(archive, secret)
+            with tarfile.open(archive, "w:gz") as handle:
+                directory_member = tarfile.TarInfo("p4home")
+                directory_member.type = tarfile.DIRTYPE
+                handle.addfile(directory_member)
+            with self.assertRaises(ValueError):
+                MODULE.scan_source_archive(archive, secret)
+            with tarfile.open(archive, "w:gz") as handle:
+                symlink = tarfile.TarInfo("p4home/source-link")
+                symlink.type = tarfile.SYMTYPE
+                symlink.linkname = "source.txt"
+                handle.addfile(symlink)
+            with self.assertRaises(ValueError):
+                MODULE.scan_source_archive(archive, secret)
+            with tarfile.open(archive, "w:gz") as handle:
+                special = tarfile.TarInfo("p4home/device")
+                special.type = tarfile.CHRTYPE
+                handle.addfile(special)
+            with self.assertRaises(ValueError):
+                MODULE.scan_source_archive(archive, secret)
+
     def test_secure_secret_rejects_loose_permissions_and_symlinks(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

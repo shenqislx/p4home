@@ -14,6 +14,7 @@ import pathlib
 import re
 import stat
 import subprocess
+import tarfile
 from collections.abc import Iterable
 
 
@@ -34,6 +35,10 @@ RAW_OUTPUT_PATTERNS = {
     ),
 }
 OUTPUT_PATTERN_NAMES = (*COMPACT_OUTPUT_PATTERNS, *RAW_OUTPUT_PATTERNS)
+MAX_SOURCE_ARCHIVE_BYTES = 512 * 1024 * 1024
+MAX_SOURCE_ARCHIVE_MEMBERS = 100_000
+MAX_SOURCE_ARCHIVE_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
+MAX_SOURCE_ARCHIVE_MEMBER_BYTES = 512 * 1024 * 1024
 
 
 def secure_secret(path: pathlib.Path) -> bytes:
@@ -127,6 +132,64 @@ def scan_git_objects(repo: pathlib.Path, secret: bytes) -> tuple[int, int]:
     if process.returncode != 0:
         raise RuntimeError("git cat-file failed")
     return scanned, matches
+
+
+def scan_source_archive(path: pathlib.Path, secret: bytes) -> tuple[int, int]:
+    """Scan one bounded GitHub source tarball without extracting or following links."""
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise RuntimeError("O_NOFOLLOW is required for source archive safety")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | nofollow | os.O_NONBLOCK)
+    except OSError as error:
+        raise ValueError("source archive must be a non-symlink regular file") from error
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_size < 1
+                or info.st_size > MAX_SOURCE_ARCHIVE_BYTES):
+            raise ValueError("source archive size or type is invalid")
+        scanned = 0
+        regular_files = 0
+        matches = 0
+        expanded_bytes = 0
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            try:
+                with tarfile.open(fileobj=handle, mode="r:gz") as archive:
+                    for member in archive:
+                        scanned += 1
+                        if scanned > MAX_SOURCE_ARCHIVE_MEMBERS:
+                            raise ValueError("source archive has too many members")
+                        if member.size < 0 or member.size > MAX_SOURCE_ARCHIVE_MEMBER_BYTES:
+                            raise ValueError("source archive member is outside its size bound")
+                        expanded_bytes += member.size
+                        if expanded_bytes > MAX_SOURCE_ARCHIVE_EXPANDED_BYTES:
+                            raise ValueError("source archive expansion exceeds its bound")
+                        if not (member.isfile() or member.isdir()):
+                            raise ValueError("source archive contains an unsupported member type")
+                        metadata = (
+                            member.name,
+                            member.linkname,
+                            *member.pax_headers.keys(),
+                            *member.pax_headers.values(),
+                        )
+                        found = any(secret in value.encode("utf-8") for value in metadata)
+                        if member.isfile():
+                            regular_files += 1
+                            extracted = archive.extractfile(member)
+                            if extracted is None:
+                                raise ValueError("source archive member could not be read")
+                            with extracted:
+                                found = found or chunks_contain(
+                                    iter(lambda: extracted.read(65_536), b""), secret,
+                                )
+                        matches += int(found)
+            except (tarfile.TarError, UnicodeError) as error:
+                raise ValueError("source archive is malformed") from error
+        if regular_files == 0:
+            raise ValueError("source archive contains no regular source files")
+        return scanned, matches
+    finally:
+        os.close(descriptor)
 
 
 def scan_file(path: pathlib.Path, secret: bytes) -> dict[str, int]:

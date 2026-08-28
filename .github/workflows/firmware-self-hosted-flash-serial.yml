@@ -64,6 +64,7 @@ jobs:
       AGENT_HOST: ${{ inputs.agent_host }}
       AGENT_PORT: ${{ inputs.agent_port }}
       IDF_SKIP_CHECK_SUBMODULES: "1"
+      P4HOME_SOURCE_ARCHIVE: ${{ runner.temp }}/p4home-${{ github.sha }}.tar.gz
 
     steps:
       - name: Checkout repository archive
@@ -73,7 +74,6 @@ jobs:
           set -euo pipefail
           EXPECTED_WORKSPACE="$RUNNER_WORKSPACE/${GITHUB_REPOSITORY#*/}"
           test "$GITHUB_WORKSPACE" = "$EXPECTED_WORKSPACE"
-          ARCHIVE="$RUNNER_TEMP/p4home-$GITHUB_SHA.tar.gz"
           curl \
             --fail \
             --silent \
@@ -87,10 +87,10 @@ jobs:
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/tarball/$GITHUB_SHA" \
-            --output "$ARCHIVE"
-          tar -tzf "$ARCHIVE" > /dev/null
+            --output "$P4HOME_SOURCE_ARCHIVE"
+          tar -tzf "$P4HOME_SOURCE_ARCHIVE" > /dev/null
           find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-          tar -xzf "$ARCHIVE" --strip-components=1 -C "$GITHUB_WORKSPACE"
+          tar -xzf "$P4HOME_SOURCE_ARCHIVE" --strip-components=1 -C "$GITHUB_WORKSPACE"
           test -f .github/workflows/firmware-self-hosted-flash-serial.yml
 
       - name: Validate runner and inputs
@@ -145,6 +145,7 @@ jobs:
           echo "BUILD_DIR=$RUNNER_TEMP/p4home-hardware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
           echo "SIZE_REPORT=$RUNNER_TEMP/p4home-size-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json" >> "$GITHUB_ENV"
           echo "AGENT_TMP_DIR=$RUNNER_TEMP/p4home-agent-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          echo "TRANSPORT_STATUS_FILE=$RUNNER_TEMP/p4home-transport-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.status" >> "$GITHUB_ENV"
           if [[ "$VALIDATION_PROFILE" == "phase2d_agent" ]]; then
             echo "CAPTURE_SECONDS=$((MONITOR_SECONDS + 300))" >> "$GITHUB_ENV"
           elif [[ "$VALIDATION_PROFILE" == "phase7_autonomy" ]]; then
@@ -697,9 +698,9 @@ jobs:
           echo "$offline_exit_code" > "$PHASE4C_OFFLINE_STATUS_FILE"
 
       - name: Flash firmware and capture serial
+        id: flash_capture
         run: |
           set -euo pipefail
-          . scripts/activate-idf-v5.5.4.sh
           monitor_log="firmware/monitor.log"
           if [[ "$VALIDATION_PROFILE" == "phase4c_ha" || \
                 "$VALIDATION_PROFILE" == "phase5e_e2e" || \
@@ -713,6 +714,23 @@ jobs:
             monitor_log="$P4HOME_PHASE7_RAW_MONITOR_LOG"
             rm -f firmware/monitor.log
           fi
+          write_transport_status() {
+            local exit_code="$1"
+            printf '%d\n' "$exit_code" > "$TRANSPORT_STATUS_FILE"
+            if (( exit_code != 0 )); then
+              printf '\nVERIFY:transport:flash_capture:FAIL exit_code=%d\n' \
+                "$exit_code" >> "$monitor_log"
+            fi
+          }
+          record_transport_exit() {
+            local exit_code=$?
+            trap - EXIT
+            set +e
+            write_transport_status "$exit_code"
+            exit "$exit_code"
+          }
+          trap record_transport_exit EXIT
+          . scripts/activate-idf-v5.5.4.sh
           idf.py \
             -C firmware \
             -B "$BUILD_DIR" \
@@ -810,7 +828,20 @@ jobs:
                 return 1
               fi
             }
-            trap cleanup_background EXIT
+            cleanup_and_record_transport_exit() {
+              local exit_code=$?
+              local cleanup_exit_code=0
+              trap - EXIT
+              set +e
+              cleanup_background
+              cleanup_exit_code=$?
+              if (( exit_code == 0 && cleanup_exit_code != 0 )); then
+                exit_code="$cleanup_exit_code"
+              fi
+              write_transport_status "$exit_code"
+              exit "$exit_code"
+            }
+            trap cleanup_and_record_transport_exit EXIT
             ready_attempts=300
             phase5e_artifact_only=no
             if [[ "$VALIDATION_PROFILE" == "phase5e_e2e" || \
@@ -1021,6 +1052,7 @@ jobs:
           fi
           python3 scripts/audit-phase5e-artifacts.py \
             --repo "$GITHUB_WORKSPACE" \
+            --source-archive "$P4HOME_SOURCE_ARCHIVE" \
             "${artifact_args[@]}" \
             --secret-file "$AGENT_TMP_DIR/device-token" \
             --secret-file "$AGENT_TMP_DIR/agent-key.pem" \
@@ -1076,6 +1108,7 @@ jobs:
           set -euo pipefail
           python3 scripts/audit-phase5e-artifacts.py \
             --repo "$GITHUB_WORKSPACE" \
+            --source-archive "$P4HOME_SOURCE_ARCHIVE" \
             --artifact firmware/monitor.log \
             --secret-file "$HOME/.config/p4home/product-voice/device-token" \
             --secret-file "$HOME/.config/p4home/product-voice/agent-key.pem" \
@@ -1132,6 +1165,9 @@ jobs:
           )
           phase7_audit_status_path = pathlib.Path(
               os.environ.get("P4HOME_PHASE7_AUDIT_STATUS_FILE", "")
+          )
+          transport_status_path = pathlib.Path(
+              os.environ.get("TRANSPORT_STATUS_FILE", "")
           )
 
           def read_json(path):
@@ -1305,6 +1341,17 @@ jobs:
               "monitor_seconds": int(os.environ["MONITOR_SECONDS"]),
               "capture_seconds": int(os.environ["CAPTURE_SECONDS"]),
               "validation_profile": os.environ["VALIDATION_PROFILE"],
+              "transport_exit_code": (
+                  int(transport_status_path.read_text(encoding="ascii").strip())
+                  if transport_status_path.is_file()
+                  else None
+              ),
+              "transport_status": (
+                  "completed"
+                  if transport_status_path.is_file()
+                  and transport_status_path.read_text(encoding="ascii").strip() == "0"
+                  else "failed" if transport_status_path.is_file() else "unavailable"
+              ),
               "log_file": "monitor.log",
               "app_image": image.name if image.is_file() else None,
               "app_size_bytes": image.stat().st_size if image.is_file() else None,
@@ -1436,11 +1483,13 @@ jobs:
           PY
 
       - name: Audit final Phase 5E upload candidates
+        id: phase5e_final_audit
         if: always() && (inputs.validation_profile == 'phase5e_e2e' || inputs.validation_profile == 'phase5e_ui')
         run: |
           set -euo pipefail
           python3 scripts/audit-phase5e-artifacts.py \
             --repo "$GITHUB_WORKSPACE" \
+            --source-archive "$P4HOME_SOURCE_ARCHIVE" \
             --artifact firmware/monitor.log \
             --artifact firmware/hardware-validation-manifest.json \
             --secret-file "$AGENT_TMP_DIR/device-token" \
@@ -1487,7 +1536,17 @@ jobs:
         run: tail -n 200 firmware/monitor.log || true
 
       - name: Upload serial artifact
-        if: always() && ((inputs.validation_profile != 'phase5e_e2e' && inputs.validation_profile != 'phase5e_ui' && inputs.validation_profile != 'phase6h_cat_memory' && inputs.validation_profile != 'phase7_autonomy' && inputs.validation_profile != 'product_human') || success())
+        if: >-
+          always() && (
+            ((inputs.validation_profile != 'phase5e_e2e' &&
+              inputs.validation_profile != 'phase5e_ui' &&
+              inputs.validation_profile != 'phase6h_cat_memory' &&
+              inputs.validation_profile != 'phase7_autonomy' &&
+              inputs.validation_profile != 'product_human') || success()) ||
+            ((inputs.validation_profile == 'phase5e_e2e' ||
+              inputs.validation_profile == 'phase5e_ui') &&
+             steps.phase5e_final_audit.outcome == 'success')
+          )
         uses: actions/upload-artifact@v4
         with:
           name: esp32-p4-monitor-log
