@@ -28,6 +28,8 @@ import WebSocket from "ws";
 
 const DEVICE_ID = "p4-phase-5b-test";
 const DEVICE_TOKEN = "phase-5b-test-token-0123456789abcdef";
+const OTHER_DEVICE_ID = "p4-phase-5b-other";
+const OTHER_DEVICE_TOKEN = "phase-5b-other-token-0123456789abcdef";
 const SESSION_ID = "0102030405060708090a0b0c0d0e0f10";
 const TLS_KEY = readFileSync(new URL("../fixtures/voice-test-key.pem", import.meta.url));
 const TLS_CERT = readFileSync(new URL("../fixtures/voice-test-cert.pem", import.meta.url));
@@ -95,6 +97,49 @@ async function freePort(): Promise<number> {
     error === undefined ? resolve() : reject(error)
   )));
   return address.port;
+}
+
+async function rawUpgradeStatus(
+  address: { host: string; port: number; path: string },
+  headers: readonly string[],
+): Promise<number> {
+  const socket = createConnection({ host: address.host, port: address.port });
+  return await new Promise<number>((resolve, reject) => {
+    let response = "";
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("raw voice upgrade response timed out"));
+    }, 1_000);
+    timer.unref();
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      socket.removeAllListeners();
+    };
+    socket.once("error", (error) => {
+      cleanup();
+      reject(error);
+    });
+    socket.on("data", (chunk) => {
+      response += chunk.toString("latin1");
+      if (!response.includes("\r\n\r\n")) return;
+      const match = /^HTTP\/1\.1 (\d{3}) /u.exec(response);
+      cleanup();
+      socket.destroy();
+      if (match === null) reject(new Error("raw voice upgrade returned an invalid HTTP response"));
+      else resolve(Number(match[1]));
+    });
+    socket.once("connect", () => socket.write([
+      `GET ${address.path} HTTP/1.1`,
+      `Host: ${address.host}:${address.port}`,
+      "Connection: Upgrade",
+      "Upgrade: websocket",
+      "Sec-WebSocket-Version: 13",
+      "Sec-WebSocket-Key: MDEyMzQ1Njc4OWFiY2RlZg==",
+      ...headers,
+      "",
+      "",
+    ].join("\r\n")));
+  });
 }
 
 async function nextControl(socket: WebSocket): Promise<VoiceControlMessage> {
@@ -243,6 +288,55 @@ test("independent voice channel authenticates and aggregates bounded PCM without
     eos: true,
   }]);
   assert.equal("payload" in sink.completed[0]!, false);
+});
+
+test("voice authentication rejects adversarial identities and remains healthy", async (t) => {
+  const server = new VoiceWebSocketServer({
+    host: "127.0.0.1",
+    port: 0,
+    device_tokens: {
+      [DEVICE_ID]: DEVICE_TOKEN,
+      [OTHER_DEVICE_ID]: OTHER_DEVICE_TOKEN,
+    },
+    allow_insecure_loopback_test: true,
+  });
+  const address = await server.start();
+  t.after(async () => server.close());
+
+  const attacks: readonly (readonly string[])[] = [
+    [`X-P4-Device-ID: ${DEVICE_ID}`, "Authorization: Bearer definitely-wrong"],
+    ["X-P4-Device-ID: unknown-device", `Authorization: Bearer ${DEVICE_TOKEN}`],
+    [`X-P4-Device-ID: ${DEVICE_ID}`, `Authorization: Bearer ${OTHER_DEVICE_TOKEN}`],
+    [`X-P4-Device-ID: ${DEVICE_ID}`, `Authorization: Basic ${DEVICE_TOKEN}`],
+    [
+      `X-P4-Device-ID: ${DEVICE_ID}`,
+      `Authorization: Bearer ${DEVICE_TOKEN}`,
+      "Authorization: Bearer attacker-controlled-duplicate",
+    ],
+    [
+      `X-P4-Device-ID: ${DEVICE_ID}`,
+      `X-P4-Device-ID: ${OTHER_DEVICE_ID}`,
+      `Authorization: Bearer ${DEVICE_TOKEN}`,
+    ],
+    [`X-P4-Device-ID: ${DEVICE_ID}`, `Authorization: Bearer ${DEVICE_TOKEN} trailing`],
+  ];
+  for (const headers of attacks) {
+    assert.equal(await rawUpgradeStatus(address, headers), 401);
+  }
+
+  const healthy = await connect(address);
+  t.after(() => healthy.terminate());
+  healthy.send(control("session.open", {
+    direction: "capture",
+    format: {
+      encoding: "pcm_s16le", sample_rate_hz: 16_000, channels: 1,
+      bits_per_sample: 16, frame_samples: 320,
+    },
+    max_inflight_frames: 8,
+  }, 30));
+  assert.equal((await nextControl(healthy)).type, "session.ready");
+  healthy.send(control("session.cancel", { reason: "user" }, 30));
+  assert.equal((await nextControl(healthy)).type, "session.closed");
 });
 
 test("authenticated P4 acknowledges bounded Conversation UI updates independently of voice control", async (t) => {

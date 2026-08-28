@@ -26,6 +26,7 @@ VOICE_RESULT_KEYS = {
 }
 INTERACTION_KEYS = {
     "kind", "role_id", "role_status", "voice_outcome", "playback_statuses", "pcm_bytes",
+    "metrics",
 }
 UI_RESULT_KEYS = {
     "schema_version", "profile", "passed", "interaction_kinds", "role_ids",
@@ -35,7 +36,242 @@ UI_RESULT_KEYS = {
     "audit_events", "restored", "read_passed", "write_passed", "chat_passed",
     "ui_deliveries_completed", "audio_delivery_deferred",
     "composition_audits_persisted", "raw_audio_retained",
+    "interaction_metrics",
 }
+UI_METRIC_INTERACTION_KEYS = {"kind", "metrics"}
+METRICS_KEYS = {
+    "schema_version", "stages", "dropped_events", "cancelled_stages",
+    "interaction_cancelled",
+}
+STAGE_NAMES = {
+    "stt", "router", "human", "robot", "composer", "tts", "ui",
+    "playback_transport", "p4_wake", "p4_vad", "p4_playback",
+}
+STAGE_METRIC_KEYS = {
+    "measurement", "status", "duration_ms", "attempts", "dropped", "cancelled",
+}
+MEASUREMENTS = {
+    "agent", "hardware_pending", "not_applicable", "status_only", "unavailable",
+}
+STAGE_STATUSES = {
+    "cancelled", "completed", "failed", "hardware_pending", "not_applicable",
+    "not_attempted", "partial", "timed_out", "unavailable",
+}
+
+
+def bounded_counter(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 4096
+
+
+def bounded_integer(value: object, maximum: int) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= maximum
+
+
+def pinned_version(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,3}", value) is not None
+
+
+def pinned_revision(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) is not None
+
+
+def metrics_schema_valid(
+    value: object,
+    voice_outcome: object,
+    role_id: object,
+    mode: str,
+    playback_attempts: int = 0,
+) -> bool:
+    if not isinstance(value, dict) or set(value) != METRICS_KEYS:
+        return False
+    stages = value.get("stages")
+    if value.get("schema_version") != 1 or not isinstance(stages, dict) \
+            or set(stages) != STAGE_NAMES:
+        return False
+    dropped = 1 if voice_outcome == "stale" else 0
+    cancelled = 0
+    for name, metric in stages.items():
+        if not isinstance(metric, dict) or set(metric) != STAGE_METRIC_KEYS:
+            return False
+        measurement = metric.get("measurement")
+        status = metric.get("status")
+        duration = metric.get("duration_ms")
+        attempts = metric.get("attempts")
+        metric_dropped = metric.get("dropped")
+        metric_cancelled = metric.get("cancelled")
+        if measurement not in MEASUREMENTS or status not in STAGE_STATUSES \
+                or not bounded_counter(attempts) or not bounded_counter(metric_dropped) \
+                or not bounded_counter(metric_cancelled) or metric_cancelled > attempts:
+            return False
+        if measurement == "agent":
+            if not isinstance(duration, int) or isinstance(duration, bool) \
+                    or duration < 0 or duration > 600_000:
+                return False
+        elif duration is not None:
+            return False
+        if name in {"p4_wake", "p4_vad", "p4_playback"} and metric != {
+            "measurement": "hardware_pending",
+            "status": "hardware_pending",
+            "duration_ms": None,
+            "attempts": 0,
+            "dropped": 0,
+            "cancelled": 0,
+        }:
+            return False
+        dropped += metric_dropped
+        cancelled += metric_cancelled
+    if (value.get("dropped_events") != dropped
+            or value.get("cancelled_stages") != cancelled
+            or value.get("interaction_cancelled") != (
+                1 if voice_outcome == "cancelled" else 0
+            )):
+        return False
+
+    def exact(
+        name: str,
+        measurement: str,
+        status: str,
+        attempts: int,
+        metric_cancelled: int = 0,
+    ) -> bool:
+        metric = stages[name]
+        return (
+            metric["measurement"] == measurement
+            and metric["status"] == status
+            and metric["attempts"] == attempts
+            and metric["dropped"] == 0
+            and metric["cancelled"] == metric_cancelled
+        )
+
+    if (role_id not in {"human", "robot"}
+            or not exact("stt", "agent", "completed", 1)
+            or not exact("router", "status_only", "completed", 1)
+            or not exact("composer", "status_only", "completed", 1)
+            or not exact(role_id, "status_only", "completed", 1)
+            or not exact(
+                "robot" if role_id == "human" else "human",
+                "not_applicable", "not_applicable", 0,
+            )):
+        return False
+    if mode == "speakerless_ui":
+        return (
+            voice_outcome == "completed"
+            and exact("tts", "not_applicable", "not_applicable", 0)
+            and exact("ui", "agent", "completed", 2)
+            and exact("playback_transport", "not_applicable", "not_applicable", 0)
+        )
+    if mode != "audio" or playback_attempts < 1:
+        return False
+    playback_status = "cancelled" if voice_outcome == "cancelled" else "completed"
+    return (
+        exact("tts", "agent", "completed", 1)
+        and exact("ui", "not_applicable", "not_applicable", 0)
+        and exact(
+            "playback_transport", "agent", playback_status, playback_attempts,
+            1 if playback_status == "cancelled" else 0,
+        )
+    )
+
+
+def common_result_schema_valid(result: dict, profile: str) -> bool:
+    expected_calls = 3 if profile == "phase5e_ui" else 4
+    return (
+        result.get("profile") == profile
+        and result.get("passed") is True
+        and pinned_version(result.get("stt_provider_version"))
+        and pinned_revision(result.get("stt_model_revision"))
+        and result.get("stt_calls") == expected_calls
+        and result.get("stt_transcript_mismatches") == 0
+        and bounded_integer(result.get("stt_total_ms"), expected_calls * 600_000)
+        and bounded_integer(result.get("audit_events"), 65_536)
+        and result.get("restored") is True
+        and result.get("raw_audio_retained") is False
+    )
+
+
+def voice_interactions_schema_valid(interactions: object) -> bool:
+    expected = (
+        ("read", "robot", "completed", "completed"),
+        ("write", "robot", "completed", "completed"),
+        ("barge", "human", "completed", "cancelled"),
+        ("followup", "human", "completed", "completed"),
+    )
+    if not isinstance(interactions, list) or len(interactions) != len(expected):
+        return False
+    for item, values in zip(interactions, expected, strict=True):
+        if not isinstance(item, dict) or set(item) != INTERACTION_KEYS:
+            return False
+        kind, role_id, role_status, voice_outcome = values
+        statuses = item.get("playback_statuses")
+        expected_playback = "cancelled" if voice_outcome == "cancelled" else "completed"
+        if (item.get("kind") != kind or item.get("role_id") != role_id
+                or item.get("role_status") != role_status
+                or item.get("voice_outcome") != voice_outcome
+                or not isinstance(statuses, list) or not 1 <= len(statuses) <= 2
+                or any(status not in {"completed", "cancelled", "failed"} for status in statuses)
+                or expected_playback not in statuses
+                or not bounded_integer(item.get("pcm_bytes"), 1_920_000)
+                or item.get("pcm_bytes") == 0
+                or not metrics_schema_valid(
+                    item.get("metrics"), voice_outcome, role_id, "audio", len(statuses),
+                )):
+            return False
+    return True
+
+
+def ui_interactions_schema_valid(result: dict) -> bool:
+    expected_kinds = ["read", "write", "chat"]
+    expected_roles = ["robot", "robot", "human"]
+    if (result.get("interaction_kinds") != expected_kinds
+            or result.get("role_ids") != expected_roles
+            or result.get("role_statuses") != ["completed"] * 3
+            or result.get("voice_outcomes") != ["completed"] * 3
+            or result.get("ui_delivery_statuses") != ["completed"] * 3
+            or result.get("audio_delivery_statuses") != ["deferred"] * 3):
+        return False
+    interactions = result.get("interaction_metrics")
+    if not isinstance(interactions, list) or len(interactions) != 3:
+        return False
+    return all(
+        isinstance(item, dict)
+        and set(item) == UI_METRIC_INTERACTION_KEYS
+        and item.get("kind") == expected_kinds[index]
+        and metrics_schema_valid(
+            item.get("metrics"), "completed", expected_roles[index], "speakerless_ui",
+        )
+        for index, item in enumerate(interactions)
+    )
+
+
+def voice_result_summary_valid(result: dict) -> bool:
+    return (
+        pinned_version(result.get("tts_provider_version"))
+        and pinned_revision(result.get("tts_model_revision"))
+        and result.get("tts_calls") == 4
+        and bounded_integer(result.get("tts_total_ms"), 4 * 600_000)
+        and result.get("read_passed") is True
+        and result.get("write_passed") is True
+        and result.get("barge_in_passed") is True
+        and result.get("followup_passed") is True
+        and result.get("composition_audits_persisted") == 4
+        and bounded_integer(result.get("playback_segments"), 4_096)
+        and result.get("playback_segments") >= 4
+        and bounded_integer(result.get("playback_bytes"), 7_680_000)
+        and result.get("playback_bytes") > 0
+    )
+
+
+def ui_result_summary_valid(result: dict) -> bool:
+    return (
+        bounded_integer(result.get("real_model_calls"), 4_096)
+        and result.get("real_model_calls") > 0
+        and result.get("read_passed") is True
+        and result.get("write_passed") is True
+        and result.get("chat_passed") is True
+        and result.get("ui_deliveries_completed") == 3
+        and result.get("audio_delivery_deferred") is True
+        and result.get("composition_audits_persisted") == 3
+    )
 
 
 def load_phase4_sensitive_audit():
@@ -161,25 +397,25 @@ def main() -> int:
             result = None
             reasons.add("result_schema")
         profile = result.get("profile") if isinstance(result, dict) else None
-        expected_keys = UI_RESULT_KEYS if profile == "phase5e_ui" else VOICE_RESULT_KEYS
-        if not isinstance(result, dict) or set(result) != expected_keys:
+        expected_keys = (
+            UI_RESULT_KEYS if profile == "phase5e_ui"
+            else VOICE_RESULT_KEYS if profile == "phase5e_e2e"
+            else None
+        )
+        if (not isinstance(result, dict) or expected_keys is None
+                or set(result) != expected_keys or result.get("schema_version") != 2
+                or not common_result_schema_valid(result, profile)):
             reasons.add("result_schema")
-        if profile == "phase5e_ui" and isinstance(result, dict):
-            bounded_lists = (
-                "interaction_kinds", "role_ids", "role_statuses", "voice_outcomes",
-                "ui_delivery_statuses", "audio_delivery_statuses",
-            )
-            if any(not isinstance(result.get(key), list)
-                   or len(result[key]) > 3
-                   or any(not isinstance(value, str) for value in result[key])
-                   for key in bounded_lists):
+        elif profile == "phase5e_ui":
+            if not ui_interactions_schema_valid(result):
                 reasons.add("interaction_schema")
-        elif profile != "phase5e_ui":
-            interactions = result.get("interactions") if isinstance(result, dict) else None
-            if (not isinstance(interactions, list) or len(interactions) > 4
-                    or any(not isinstance(item, dict) or set(item) != INTERACTION_KEYS
-                            for item in interactions)):
+            if not ui_result_summary_valid(result):
+                reasons.add("result_schema")
+        elif profile == "phase5e_e2e":
+            if not voice_interactions_schema_valid(result.get("interactions")):
                 reasons.add("interaction_schema")
+            if not voice_result_summary_valid(result):
+                reasons.add("result_schema")
         if not isinstance(result, dict) or result.get("raw_audio_retained") is not False:
             reasons.add("retention_claim")
     if args.audit_db is not None and args.audit_db.is_file():

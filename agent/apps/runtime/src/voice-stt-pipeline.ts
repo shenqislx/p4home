@@ -271,11 +271,17 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
     this.#inflightByDevice.clear();
     for (const state of this.#active.values()) this.#record(state, "cancelled", null, 0);
     this.#active.clear();
+    this.#latestEpoch.clear();
   }
 
   public get results(): readonly VoiceSttResult[] {
     return structuredClone(this.#results);
   }
+
+  public get active_count(): number { return this.#active.size; }
+  public get known_device_count(): number { return this.#latestEpoch.size; }
+  public get inflight_count(): number { return this.#inflightByDevice.size; }
+  public get pending_count(): number { return this.#pending.size; }
 
   async #transcribeAndDispatch(state: CaptureState): Promise<void> {
     if ((this.#latestEpoch.get(state.summary.device_id) ?? -1) !== state.summary.epoch) {

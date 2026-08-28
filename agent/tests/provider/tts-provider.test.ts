@@ -7,6 +7,7 @@ import {
   PythonTtsProvider,
   pythonTtsProviderInternals,
   TTS_CHANNELS,
+  TTS_MAX_TEXT_CHARS,
   TTS_MODEL_REVISION,
   TTS_PROVIDER_VERSION,
   TTS_ROLE_VOICES,
@@ -72,6 +73,23 @@ test("real worker round trip returns identity-bound 16 kHz PCM", async () => {
   assert.equal(result.pcm.byteLength, 640);
   assert.equal(result.samples, 320);
   assert.equal(result.sample_rate_hz, 16_000);
+});
+
+test("TTS rejects unsafe text before spawn and preserves bounded structured speech", async () => {
+  const tts = provider("tts-worker-ok.py");
+  for (const text of [
+    "长".repeat(TTS_MAX_TEXT_CHARS + 1),
+    "正常文本\u0000伪造终态",
+  ]) {
+    await assert.rejects(tts.synthesize({ ...REQUEST, text }), TypeError);
+  }
+
+  const healthy = await tts.synthesize({
+    ...REQUEST,
+    text: '{"示例":"结构化文本也只是需要朗读的内容"}',
+  });
+  assert.equal(healthy.kind, "final_pcm");
+  assert.equal(healthy.pcm.byteLength, 640);
 });
 
 test("worker model errors are explicit and non-retryable", async () => {

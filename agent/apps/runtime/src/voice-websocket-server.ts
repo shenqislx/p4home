@@ -191,6 +191,17 @@ function fixedTimeTokenMatch(provided: string, expected: string): boolean {
     && timingSafeEqual(providedBytes, expectedBytes);
 }
 
+function singleRawHeader(rawHeaders: readonly string[], name: string): string | null {
+  let value: string | null = null;
+  let matches = 0;
+  for (let index = 0; index < rawHeaders.length; index += 2) {
+    if (rawHeaders[index]?.toLowerCase() !== name) continue;
+    matches++;
+    value = rawHeaders[index + 1] ?? null;
+  }
+  return matches === 1 ? value : null;
+}
+
 function rejectUpgrade(socket: Duplex, status: number, reason: string): void {
   if (!socket.destroyed) {
     socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
@@ -747,14 +758,13 @@ export class VoiceWebSocketServer {
         rejectUpgrade(socket, 404, "Not Found");
         return;
       }
-      const header = request.headers["x-p4-device-id"];
-      const deviceId = Array.isArray(header) ? header[0] : header;
-      const expected = deviceId === undefined ? undefined : this.#deviceTokens.get(deviceId);
-      const authorization = request.headers.authorization;
+      const deviceId = singleRawHeader(request.rawHeaders, "x-p4-device-id");
+      const expected = deviceId === null ? undefined : this.#deviceTokens.get(deviceId);
+      const authorization = singleRawHeader(request.rawHeaders, "authorization");
       const bearer = authorization?.startsWith("Bearer ") === true
         ? authorization.slice("Bearer ".length)
         : null;
-      if (deviceId === undefined || expected === undefined || bearer === null
+      if (deviceId === null || expected === undefined || bearer === null
           || !fixedTimeTokenMatch(bearer, expected)) {
         rejectUpgrade(socket, 401, "Unauthorized");
         return;

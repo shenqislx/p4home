@@ -2,7 +2,11 @@ import { OllamaProviderError, type OllamaChatRequest, type OllamaChatResult } fr
 import { TTS_ROLE_VOICES } from "@p4home/provider-tts";
 
 import type { RunRoleInteractionResult } from "./role-orchestrator.ts";
-import type { VoiceInteractionResult } from "./voice-interaction-coordinator.ts";
+import {
+  VOICE_INTERACTION_STAGE_NAMES,
+  type VoiceInteractionResult,
+  type VoiceStageMetric,
+} from "./voice-interaction-coordinator.ts";
 import type { GateRestoreResult } from "./phase4c-ha-gate-core.ts";
 
 export type Phase5ePromptKind = "barge" | "followup" | "read" | "write";
@@ -48,6 +52,153 @@ export interface Phase5eSpeakerlessUiGateVerdict {
 }
 
 const SAFE_ALIAS = /^[a-z][a-z0-9_]{0,63}$/;
+const STAGE_METRIC_KEYS = [
+  "measurement", "status", "duration_ms", "attempts", "dropped", "cancelled",
+] as const;
+const METRICS_KEYS = [
+  "schema_version", "stages", "dropped_events", "cancelled_stages",
+  "interaction_cancelled",
+] as const;
+const MEASUREMENTS = [
+  "agent", "hardware_pending", "not_applicable", "status_only", "unavailable",
+] as const;
+const STATUSES = [
+  "cancelled", "completed", "failed", "hardware_pending", "not_applicable",
+  "not_attempted", "partial", "timed_out", "unavailable",
+] as const;
+
+function hasExactKeys(value: object, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  return actual.length === expected.length
+    && actual.every((key, index) => key === [...expected].sort()[index]);
+}
+
+function assertStageMetric(value: unknown): asserts value is VoiceStageMetric {
+  if (value === null || typeof value !== "object" || Array.isArray(value)
+      || !hasExactKeys(value, STAGE_METRIC_KEYS)) {
+    throw new TypeError("Phase 5E stage metric shape is invalid");
+  }
+  const metric = value as unknown as VoiceStageMetric;
+  const boundedCounter = (counter: number): boolean => (
+    Number.isInteger(counter) && counter >= 0 && counter <= 4_096
+  );
+  if (!(MEASUREMENTS as readonly string[]).includes(metric.measurement)
+      || !(STATUSES as readonly string[]).includes(metric.status)
+      || !boundedCounter(metric.attempts) || !boundedCounter(metric.dropped)
+      || !boundedCounter(metric.cancelled) || metric.cancelled > metric.attempts
+      || (metric.measurement === "agent"
+        ? typeof metric.duration_ms !== "number" || !Number.isInteger(metric.duration_ms)
+          || metric.duration_ms < 0
+          || metric.duration_ms > 600_000
+        : metric.duration_ms !== null)) {
+    throw new TypeError("Phase 5E stage metric values are invalid");
+  }
+}
+
+function assertExactStage(
+  metric: VoiceStageMetric,
+  expected: Omit<VoiceStageMetric, "duration_ms">,
+): void {
+  if (metric.measurement !== expected.measurement || metric.status !== expected.status
+      || metric.attempts !== expected.attempts || metric.dropped !== expected.dropped
+      || metric.cancelled !== expected.cancelled) {
+    throw new TypeError("Phase 5E stage metric semantics do not match interaction truth");
+  }
+}
+
+function assertPhase5eMetrics(
+  voice: VoiceInteractionResult,
+  mode: "audio" | "speakerless_ui",
+  role: RunRoleInteractionResult,
+): void {
+  const roleId = role.run.role_id;
+  if (role.routing.model_output_accepted !== true
+      || role.routing.fallback_error_code !== null) {
+    throw new TypeError("Phase 5E Router fallback cannot satisfy the measured gate");
+  }
+  const metrics = voice.metrics;
+  if (voice.schema_version !== 2 || metrics === null || typeof metrics !== "object"
+      || Array.isArray(metrics) || !hasExactKeys(metrics, METRICS_KEYS)
+      || metrics.schema_version !== 1 || metrics.stages === null
+      || typeof metrics.stages !== "object" || Array.isArray(metrics.stages)
+      || !hasExactKeys(metrics.stages, VOICE_INTERACTION_STAGE_NAMES)) {
+    throw new TypeError("Phase 5E interaction metrics schema is invalid");
+  }
+  for (const name of VOICE_INTERACTION_STAGE_NAMES) assertStageMetric(metrics.stages[name]);
+  const values = Object.values(metrics.stages);
+  const dropped = values.reduce((sum, metric) => sum + metric.dropped, 0)
+    + (voice.outcome === "stale" ? 1 : 0);
+  const cancelled = values.reduce((sum, metric) => sum + metric.cancelled, 0);
+  if (metrics.dropped_events !== dropped || metrics.cancelled_stages !== cancelled
+      || metrics.interaction_cancelled !== (voice.outcome === "cancelled" ? 1 : 0)
+      || metrics.stages.stt.measurement !== "agent"
+      || metrics.stages.stt.status !== "completed"
+      || metrics.stages.router.measurement !== "status_only"
+      || metrics.stages.router.status !== "completed"
+      || metrics.stages.composer.measurement !== "status_only"
+      || metrics.stages.composer.status !== "completed") {
+    throw new TypeError("Phase 5E measured stage counters are inconsistent");
+  }
+  for (const hardware of ["p4_wake", "p4_vad", "p4_playback"] as const) {
+    const metric = metrics.stages[hardware];
+    if (metric.measurement !== "hardware_pending" || metric.status !== "hardware_pending"
+        || metric.duration_ms !== null || metric.attempts !== 0 || metric.dropped !== 0
+        || metric.cancelled !== 0) {
+      throw new TypeError("Phase 5E hardware-only stages must remain explicitly pending");
+    }
+  }
+  assertExactStage(metrics.stages.stt, {
+    measurement: "agent", status: "completed", attempts: 1, dropped: 0, cancelled: 0,
+  });
+  assertExactStage(metrics.stages.router, {
+    measurement: "status_only", status: "completed", attempts: 1, dropped: 0, cancelled: 0,
+  });
+  assertExactStage(metrics.stages.composer, {
+    measurement: "status_only", status: "completed", attempts: 1, dropped: 0, cancelled: 0,
+  });
+  const activeRole = metrics.stages[roleId];
+  const inactiveRole = metrics.stages[roleId === "human" ? "robot" : "human"];
+  assertExactStage(activeRole, {
+    measurement: "status_only",
+    status: "completed",
+    attempts: role.response.parts.filter((part) => part.role_id === roleId).length,
+    dropped: 0,
+    cancelled: 0,
+  });
+  assertExactStage(inactiveRole, {
+    measurement: "not_applicable", status: "not_applicable",
+    attempts: 0, dropped: 0, cancelled: 0,
+  });
+  if (mode === "speakerless_ui") {
+    assertExactStage(metrics.stages.ui, {
+      measurement: "agent", status: "completed", attempts: 2, dropped: 0, cancelled: 0,
+    });
+    for (const stage of [metrics.stages.tts, metrics.stages.playback_transport]) {
+      assertExactStage(stage, {
+        measurement: "not_applicable", status: "not_applicable",
+        attempts: 0, dropped: 0, cancelled: 0,
+      });
+    }
+    return;
+  }
+  const playbackStatus = voice.outcome === "cancelled" ? "cancelled" : "completed";
+  assertExactStage(metrics.stages.ui, {
+    measurement: "not_applicable", status: "not_applicable",
+    attempts: 0, dropped: 0, cancelled: 0,
+  });
+  assertExactStage(metrics.stages.tts, {
+    measurement: "agent", status: "completed", attempts: 1, dropped: 0, cancelled: 0,
+  });
+  assertExactStage(metrics.stages.playback_transport, {
+    measurement: "agent",
+    status: playbackStatus,
+    attempts: voice.playback_segments.length,
+    dropped: voice.playback_segments.reduce(
+      (sum, segment) => sum + segment.playback.dropped_frames, 0,
+    ),
+    cancelled: playbackStatus === "cancelled" ? 1 : 0,
+  });
+}
 
 export function requirePhase5eRestoredState(
   restore: GateRestoreResult,
@@ -203,6 +354,9 @@ export function validatePhase5eVoiceGate(options: {
     Phase5eGateInteraction, Phase5eGateInteraction,
     Phase5eGateInteraction, Phase5eGateInteraction,
   ];
+  for (const item of options.interactions) {
+    assertPhase5eMetrics(item.voice, "audio", item.role);
+  }
   const completed = (item: Phase5eGateInteraction, roleId: "human" | "robot"): boolean => (
     item.voice.outcome === "completed"
     && item.role.run.status === "completed" && item.role.run.role_id === roleId
@@ -267,6 +421,9 @@ export function validatePhase5eSpeakerlessUiGate(options: {
     Phase5eSpeakerlessUiGateInteraction, Phase5eSpeakerlessUiGateInteraction,
     Phase5eSpeakerlessUiGateInteraction,
   ];
+  for (const item of options.interactions) {
+    assertPhase5eMetrics(item.voice, "speakerless_ui", item.role);
+  }
   const completed = (
     item: Phase5eSpeakerlessUiGateInteraction, roleId: "human" | "robot",
   ): boolean => (

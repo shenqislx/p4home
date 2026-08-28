@@ -119,8 +119,15 @@ function mixedResponse(): ComposedRoleResponse {
   };
 }
 
-function roleResult(response = mixedResponse()): RunRoleInteractionResult {
+function roleResult(
+  response = mixedResponse(),
+  modelOutputAccepted = true,
+): RunRoleInteractionResult {
   return {
+    routing: {
+      model_output_accepted: modelOutputAccepted,
+      fallback_error_code: modelOutputAccepted ? null : "INVALID_ROUTE_DECISION",
+    },
     response,
     composition_audit_status: "persisted",
   } as unknown as RunRoleInteractionResult;
@@ -206,6 +213,7 @@ test("unified voice result renders and plays Human then Robot without retaining 
       played.push({ roleByte: pcm[0] ?? 0, deviceId });
       return playbackSummary(deviceId);
     },
+    stt_duration_ms: () => 12.4,
     cancel_low_priority_cat: () => undefined,
   });
   coordinator.onCaptureOpen(summary(1));
@@ -225,6 +233,42 @@ test("unified voice result renders and plays Human then Robot without retaining 
   ]);
   assert.equal(result.role_response?.parts[1]?.tool_results[0]?.status, "success");
   assert.equal(result.raw_audio_retained, false);
+  assert.equal(result.schema_version, 2);
+  assert.deepEqual({
+    stt: result.metrics.stages.stt,
+    router: result.metrics.stages.router,
+    human: result.metrics.stages.human.status,
+    robot: result.metrics.stages.robot.status,
+    composer: result.metrics.stages.composer.status,
+    tts: result.metrics.stages.tts.measurement,
+    ui: result.metrics.stages.ui.status,
+    playback: result.metrics.stages.playback_transport.status,
+    wake: result.metrics.stages.p4_wake.status,
+    vad: result.metrics.stages.p4_vad.status,
+    p4Playback: result.metrics.stages.p4_playback.status,
+    dropped: result.metrics.dropped_events,
+    cancelled: result.metrics.interaction_cancelled,
+  }, {
+    stt: {
+      measurement: "agent", status: "completed", duration_ms: 12,
+      attempts: 1, dropped: 0, cancelled: 0,
+    },
+    router: {
+      measurement: "status_only", status: "completed", duration_ms: null,
+      attempts: 1, dropped: 0, cancelled: 0,
+    },
+    human: "completed",
+    robot: "completed",
+    composer: "completed",
+    tts: "agent",
+    ui: "not_applicable",
+    playback: "completed",
+    wake: "hardware_pending",
+    vad: "hardware_pending",
+    p4Playback: "hardware_pending",
+    dropped: 0,
+    cancelled: 0,
+  });
   assert.ok(provider.generated.every((pcm) => pcm.every((sample) => sample === 0)));
   assert.equal(coordinator.active_count, 0);
 });
@@ -261,6 +305,10 @@ test("speakerless product mode completes only after role execution and Conversat
   assert.equal(result.audio_delivery, "deferred");
   assert.equal(result.tts_pcm_bytes, 0);
   assert.equal(result.playback_segments.length, 0);
+  assert.equal(result.metrics.stages.ui.measurement, "agent");
+  assert.equal(result.metrics.stages.tts.status, "not_applicable");
+  assert.equal(result.metrics.stages.playback_transport.status, "not_applicable");
+  assert.equal(result.metrics.stages.p4_playback.status, "hardware_pending");
   assert.deepEqual(updates, [
     {
       ui_protocol_version: 1,
@@ -289,6 +337,35 @@ test("speakerless product mode completes only after role execution and Conversat
       execution_status: "completed",
     },
   ]);
+});
+
+test("Router fallback is reported failed without rewriting a completed Human result", async () => {
+  const base = mixedResponse();
+  const fallbackResponse: ComposedRoleResponse = {
+    ...base,
+    text: "请换一种方式说明。",
+    parts: [{
+      ...base.parts[0]!,
+      text: "请换一种方式说明。",
+    }],
+  };
+  const coordinator = new VoiceInteractionCoordinator({
+    device_ids: [DEVICE_ID],
+    dispatch_role: async () => roleResult(fallbackResponse, false),
+    audio_output: "disabled",
+    cancel_low_priority_cat: () => undefined,
+  });
+  coordinator.onCaptureOpen(summary(26));
+  const result = await coordinator.run(
+    interaction(26), new AbortController().signal, context(26),
+  );
+
+  assert.equal(result.outcome, "completed");
+  assert.equal(result.role_execution, "completed");
+  assert.equal(result.metrics.stages.router.status, "failed");
+  assert.equal(result.metrics.stages.human.status, "completed");
+  assert.equal(result.metrics.stages.robot.status, "not_applicable");
+  assert.equal(result.metrics.stages.composer.status, "completed");
 });
 
 test("Conversation UI delivery failure does not rewrite a completed Robot result", async () => {
@@ -479,6 +556,7 @@ test("stale epochs never enter Role/TTS/playback and result history stays bounde
   const duplicate = await coordinator.run(interaction(7), new AbortController().signal, context(7));
 
   assert.equal(stale.outcome, "stale");
+  assert.equal(stale.metrics.dropped_events, 1);
   assert.equal(current.outcome, "tts_failed");
   assert.equal(duplicate.outcome, "stale");
   assert.equal(roleCalls, 1);
@@ -521,6 +599,9 @@ test("P4 cancelled playback remains cancelled even before the next capture callb
   const result = await coordinator.run(interaction(10), new AbortController().signal, context(10));
   assert.equal(result.outcome, "cancelled");
   assert.equal(result.playback_segments[0]?.playback.status, "cancelled");
+  assert.equal(result.metrics.stages.playback_transport.status, "cancelled");
+  assert.equal(result.metrics.cancelled_stages, 1);
+  assert.equal(result.metrics.interaction_cancelled, 1);
 });
 
 test("remote playback cancel remains a dispatched STT interaction through the real binding", async () => {

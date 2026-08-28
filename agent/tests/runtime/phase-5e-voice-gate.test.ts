@@ -21,6 +21,57 @@ const prompts: Phase5ePromptSet = {
   followup: "你好还在吗",
 };
 
+function stage(
+  measurement: "agent" | "hardware_pending" | "not_applicable" | "status_only",
+  status: "cancelled" | "completed" | "hardware_pending" | "not_applicable",
+  options: { duration?: number | null; attempts?: number; cancelled?: number } = {},
+) {
+  return {
+    measurement,
+    status,
+    duration_ms: options.duration ?? (measurement === "agent" ? 1 : null),
+    attempts: options.attempts ?? (measurement === "agent" || measurement === "status_only" ? 1 : 0),
+    dropped: 0,
+    cancelled: options.cancelled ?? (status === "cancelled" ? 1 : 0),
+  } as const;
+}
+
+function interactionMetrics(
+  roleId: "human" | "robot",
+  options: { cancelled?: boolean; speakerless?: boolean } = {},
+) {
+  const cancelled = options.cancelled === true;
+  const speakerless = options.speakerless === true;
+  return {
+    schema_version: 1,
+    stages: {
+      stt: stage("agent", "completed"),
+      router: stage("status_only", "completed"),
+      human: roleId === "human"
+        ? stage("status_only", "completed") : stage("not_applicable", "not_applicable"),
+      robot: roleId === "robot"
+        ? stage("status_only", "completed") : stage("not_applicable", "not_applicable"),
+      composer: stage("status_only", "completed"),
+      tts: speakerless
+        ? stage("not_applicable", "not_applicable") : stage("agent", "completed"),
+      ui: speakerless
+        ? stage("agent", "completed", { attempts: 2 })
+        : stage("not_applicable", "not_applicable"),
+      playback_transport: speakerless
+        ? stage("not_applicable", "not_applicable")
+        : stage("agent", cancelled ? "cancelled" : "completed", {
+          cancelled: cancelled ? 1 : 0,
+        }),
+      p4_wake: stage("hardware_pending", "hardware_pending"),
+      p4_vad: stage("hardware_pending", "hardware_pending"),
+      p4_playback: stage("hardware_pending", "hardware_pending"),
+    },
+    dropped_events: 0,
+    cancelled_stages: cancelled ? 1 : 0,
+    interaction_cancelled: cancelled ? 1 : 0,
+  } as const;
+}
+
 function request(text: string, options: { router?: boolean; tools?: string[] } = {}) {
   return {
     model: "gate",
@@ -61,6 +112,7 @@ function interaction(
   return {
     kind,
     role: {
+      routing: { model_output_accepted: true, fallback_error_code: null },
       run: { status: "completed", role_id: roleId },
       composition_audit_status: "persisted",
       response: {
@@ -80,7 +132,7 @@ function interaction(
       },
     },
     voice: {
-      schema_version: 1,
+      schema_version: 2,
       device_id: "p4-gate",
       session_id: "1".repeat(32),
       stream_id: 1,
@@ -114,6 +166,9 @@ function interaction(
       tts_duration_ms: 20,
       started_at_ms: 1,
       completed_at_ms: 2,
+      metrics: interactionMetrics(roleId, {
+        ...(options.cancelled === undefined ? {} : { cancelled: options.cancelled }),
+      }),
       raw_audio_retained: false,
     },
   } as unknown as Phase5eGateInteraction;
@@ -141,6 +196,7 @@ function speakerlessInteractions(): Phase5eSpeakerlessUiGateInteraction[] {
       playback_segments: [],
       tts_pcm_bytes: 0,
       tts_duration_ms: 0,
+      metrics: interactionMetrics(item.role.run.role_id, { speakerless: true }),
     },
   }));
 }
@@ -256,6 +312,43 @@ test("Phase 5E verdict requires ordered roles, barge cancellation, voices and re
     initial_state: "off",
     restored_state: "off",
   }));
+  const fabricatedHardwareTiming = structuredClone(validInteractions());
+  const p4Playback = fabricatedHardwareTiming[0]!.voice.metrics.stages.p4_playback;
+  Object.assign(p4Playback, {
+    measurement: "agent",
+    status: "completed",
+    duration_ms: 0,
+    attempts: 1,
+  });
+  assert.throws(() => validatePhase5eVoiceGate({
+    interactions: fabricatedHardwareTiming,
+    write_action: "turn_on",
+    initial_state: "off",
+    restored_state: "off",
+  }), /hardware-only stages/);
+
+  const routerFallback = structuredClone(validInteractions());
+  Object.assign(routerFallback[2]!.role.routing, {
+    model_output_accepted: false,
+    fallback_error_code: "ROUTER_POLICY_VIOLATION",
+  });
+  assert.throws(() => validatePhase5eVoiceGate({
+    interactions: routerFallback,
+    write_action: "turn_on",
+    initial_state: "off",
+    restored_state: "off",
+  }), /Router fallback/);
+
+  const inconsistentCancellation = structuredClone(validInteractions());
+  const completedPlayback = inconsistentCancellation[0]!.voice.metrics.stages.playback_transport;
+  Object.assign(completedPlayback, { cancelled: 1 });
+  (inconsistentCancellation[0]!.voice.metrics as { cancelled_stages: number }).cancelled_stages = 1;
+  assert.throws(() => validatePhase5eVoiceGate({
+    interactions: inconsistentCancellation,
+    write_action: "turn_on",
+    initial_state: "off",
+    restored_state: "off",
+  }), /semantics/);
 });
 
 test("Phase 5E speakerless verdict requires read, write and chat UI acknowledgements", () => {

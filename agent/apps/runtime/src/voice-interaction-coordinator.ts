@@ -22,6 +22,57 @@ import type {
 } from "./voice-websocket-server.ts";
 
 const MAX_RESULT_HISTORY = 4_096;
+const MAX_STAGE_DURATION_MS = 600_000;
+const MAX_STAGE_ATTEMPTS = 4_096;
+
+export const VOICE_INTERACTION_STAGE_NAMES = [
+  "stt",
+  "router",
+  "human",
+  "robot",
+  "composer",
+  "tts",
+  "ui",
+  "playback_transport",
+  "p4_wake",
+  "p4_vad",
+  "p4_playback",
+] as const;
+
+export type VoiceInteractionStageName = (typeof VOICE_INTERACTION_STAGE_NAMES)[number];
+export type VoiceStageMeasurement =
+  | "agent"
+  | "hardware_pending"
+  | "not_applicable"
+  | "status_only"
+  | "unavailable";
+export type VoiceStageStatus =
+  | "cancelled"
+  | "completed"
+  | "failed"
+  | "hardware_pending"
+  | "not_applicable"
+  | "not_attempted"
+  | "partial"
+  | "timed_out"
+  | "unavailable";
+
+export interface VoiceStageMetric {
+  readonly measurement: VoiceStageMeasurement;
+  readonly status: VoiceStageStatus;
+  readonly duration_ms: number | null;
+  readonly attempts: number;
+  readonly dropped: number;
+  readonly cancelled: number;
+}
+
+export interface VoiceInteractionMetrics {
+  readonly schema_version: 1;
+  readonly stages: Readonly<Record<VoiceInteractionStageName, VoiceStageMetric>>;
+  readonly dropped_events: number;
+  readonly cancelled_stages: number;
+  readonly interaction_cancelled: 0 | 1;
+}
 
 export type VoiceInteractionOutcome =
   | "cancelled"
@@ -51,7 +102,7 @@ export interface VoicePlaybackSegmentResult {
 }
 
 export interface VoiceInteractionResult extends VoiceDispatchContext {
-  readonly schema_version: 1;
+  readonly schema_version: 2;
   readonly interaction_id: string;
   readonly outcome: VoiceInteractionOutcome;
   readonly role_execution: VoiceRoleExecutionStatus;
@@ -64,6 +115,7 @@ export interface VoiceInteractionResult extends VoiceDispatchContext {
   readonly tts_duration_ms: number;
   readonly started_at_ms: number;
   readonly completed_at_ms: number;
+  readonly metrics: VoiceInteractionMetrics;
   readonly raw_audio_retained: false;
 }
 
@@ -95,6 +147,7 @@ export interface VoiceInteractionCoordinatorOptions {
     signal: AbortSignal,
   ) => Promise<ConversationUiDeliverySummary>;
   readonly clock?: () => number;
+  readonly stt_duration_ms?: (context: VoiceDispatchContext) => number | null;
   readonly max_results?: number;
 }
 
@@ -129,6 +182,135 @@ function assertContext(context: VoiceDispatchContext): void {
       || !Number.isInteger(context.epoch) || context.epoch < 1) {
     throw new TypeError("voice interaction context is invalid");
   }
+}
+
+type MutableStageMetrics = Record<VoiceInteractionStageName, VoiceStageMetric>;
+
+function metric(
+  measurement: VoiceStageMeasurement,
+  status: VoiceStageStatus,
+  durationMs: number | null,
+  attempts = 0,
+  dropped = 0,
+  cancelled = 0,
+): VoiceStageMetric {
+  const durationValid = durationMs === null || (
+    Number.isFinite(durationMs) && durationMs >= 0 && durationMs <= MAX_STAGE_DURATION_MS
+  );
+  if (!durationValid || !Number.isInteger(attempts) || attempts < 0
+      || attempts > MAX_STAGE_ATTEMPTS || !Number.isInteger(dropped) || dropped < 0
+      || dropped > MAX_STAGE_ATTEMPTS || !Number.isInteger(cancelled)
+      || cancelled < 0 || cancelled > attempts) {
+    throw new TypeError("voice stage metric is outside its bounds");
+  }
+  if ((measurement === "agent") !== (durationMs !== null)) {
+    throw new TypeError("only Agent-measured stages may contain duration_ms");
+  }
+  return {
+    measurement,
+    status,
+    duration_ms: durationMs === null ? null : Math.round(durationMs),
+    attempts,
+    dropped,
+    cancelled,
+  };
+}
+
+function agentMetric(
+  status: VoiceStageStatus,
+  startedAt: number,
+  attempts = 1,
+  dropped = 0,
+): VoiceStageMetric {
+  const durationMs = Math.min(MAX_STAGE_DURATION_MS, Math.max(0, performance.now() - startedAt));
+  const boundedAttempts = status === "cancelled" ? Math.max(1, attempts) : attempts;
+  return metric(
+    "agent", status, durationMs, boundedAttempts, dropped, status === "cancelled" ? 1 : 0,
+  );
+}
+
+function statusMetric(status: VoiceStageStatus, attempts = 1): VoiceStageMetric {
+  return metric("status_only", status, null, attempts, 0, status === "cancelled" ? 1 : 0);
+}
+
+function fixedMetric(
+  measurement: Extract<VoiceStageMeasurement, "hardware_pending" | "not_applicable" | "unavailable">,
+  status: Extract<VoiceStageStatus, "hardware_pending" | "not_applicable" | "unavailable">,
+): VoiceStageMetric {
+  return metric(measurement, status, null);
+}
+
+function initialStageMetrics(
+  context: VoiceDispatchContext,
+  sttDuration: VoiceInteractionCoordinatorOptions["stt_duration_ms"],
+  uiOutput: "disabled" | "required",
+  audioOutput: "disabled" | "required",
+): MutableStageMetrics {
+  let stt = fixedMetric("unavailable", "unavailable");
+  if (sttDuration !== undefined) {
+    try {
+      const durationMs = sttDuration(context);
+      if (durationMs !== null && Number.isFinite(durationMs)
+          && durationMs >= 0 && durationMs <= MAX_STAGE_DURATION_MS) {
+        stt = metric("agent", "completed", durationMs, 1);
+      }
+    } catch {
+      /* Metrics are observational and cannot rewrite interaction truth. */
+    }
+  }
+  const notAttempted = statusMetric("not_attempted", 0);
+  return {
+    stt,
+    router: notAttempted,
+    human: notAttempted,
+    robot: notAttempted,
+    composer: notAttempted,
+    tts: audioOutput === "disabled"
+      ? fixedMetric("not_applicable", "not_applicable") : notAttempted,
+    ui: uiOutput === "disabled"
+      ? fixedMetric("not_applicable", "not_applicable") : notAttempted,
+    playback_transport: audioOutput === "disabled"
+      ? fixedMetric("not_applicable", "not_applicable") : notAttempted,
+    p4_wake: fixedMetric("hardware_pending", "hardware_pending"),
+    p4_vad: fixedMetric("hardware_pending", "hardware_pending"),
+    p4_playback: fixedMetric("hardware_pending", "hardware_pending"),
+  };
+}
+
+function applyRoleStageMetrics(
+  stages: MutableStageMetrics,
+  result: RunRoleInteractionResult,
+): void {
+  stages.router = statusMetric(
+    result.routing.model_output_accepted ? "completed" : "failed",
+  );
+  for (const roleId of ["human", "robot"] as const) {
+    const parts = result.response.parts.filter((item) => item.role_id === roleId);
+    stages[roleId] = parts.length === 0
+      ? fixedMetric("not_applicable", "not_applicable")
+      : statusMetric(
+        parts.some((item) => item.status === "cancelled") ? "cancelled"
+          : parts.some((item) => item.status === "timed_out") ? "timed_out"
+            : parts.some((item) => item.status === "failed") ? "failed" : "completed",
+        parts.length,
+      );
+  }
+  stages.composer = statusMetric(result.response.status);
+}
+
+function finalizeMetrics(
+  stages: MutableStageMetrics,
+  outcome: VoiceInteractionOutcome,
+): VoiceInteractionMetrics {
+  const values = Object.values(stages);
+  return {
+    schema_version: 1,
+    stages: structuredClone(stages),
+    dropped_events: values.reduce((sum, value) => sum + value.dropped, 0)
+      + (outcome === "stale" ? 1 : 0),
+    cancelled_stages: values.reduce((sum, value) => sum + value.cancelled, 0),
+    interaction_cancelled: outcome === "cancelled" ? 1 : 0,
+  };
 }
 
 function boundedUiText(value: string, maxChars: number, maxBytes: number): string {
@@ -395,12 +577,16 @@ export class VoiceInteractionCoordinator {
       throw new TypeError("voice coordinator accepts only voice interactions");
     }
     const startedAtMs = (this.#options.clock ?? Date.now)();
+    const stageMetrics = initialStageMetrics(
+      context, this.#options.stt_duration_ms, this.#uiOutput, this.#audioOutput,
+    );
     const latestEpoch = this.#latestEpoch.get(context.device_id);
     const dispatchedEpoch = this.#dispatchedEpoch.get(context.device_id) ?? -1;
     if ((latestEpoch !== undefined && context.epoch !== latestEpoch)
         || context.epoch <= dispatchedEpoch) {
       return this.#record(this.#result(
         interaction.interaction_id, context, "stale", null, null, [], 0, 0, startedAtMs,
+        stageMetrics,
       ));
     }
     if (latestEpoch === undefined) this.#latestEpoch.set(context.device_id, context.epoch);
@@ -421,13 +607,18 @@ export class VoiceInteractionCoordinator {
       ? "disabled" : "not_attempted";
     const playbackSegments: VoicePlaybackSegmentResult[] = [];
     const playbackIdentities = new Set<string>();
+    let uiDurationMs = 0;
+    let uiAttempts = 0;
+    let currentStageStartedAt = performance.now();
     try {
       if (controller.signal.aborted) {
         return this.#record(this.#result(
           interaction.interaction_id, context, "cancelled", null, null, [], 0, 0, startedAtMs,
+          stageMetrics,
         ));
       }
       stage = "role";
+      currentStageStartedAt = performance.now();
       const pendingRole = this.#options.dispatch_role(interaction, controller.signal).then(
         (result) => ({ status: "fulfilled" as const, result }),
         (error: unknown) => ({ status: "rejected" as const, error }),
@@ -436,6 +627,8 @@ export class VoiceInteractionCoordinator {
         stage = "ui";
         const presenter = this.#options.present_ui;
         if (presenter === undefined) throw new TypeError("conversation UI presenter is unavailable");
+        const uiStartedAt = performance.now();
+        uiAttempts++;
         try {
           await presenter(
             context.device_id,
@@ -446,16 +639,22 @@ export class VoiceInteractionCoordinator {
           /* Transient progress is best-effort. The final, revision-2 update
            * remains required and is allowed to establish the first revision. */
           if (controller.signal.aborted) uiDelivery = "cancelled";
+        } finally {
+          uiDurationMs += performance.now() - uiStartedAt;
+        }
+        if (controller.signal.aborted) {
+          stageMetrics.ui = metric("agent", "cancelled", uiDurationMs, uiAttempts, 0, 1);
         }
       }
       stage = "role";
       const settledRole = await pendingRole;
       if (settledRole.status === "rejected") throw settledRole.error;
       roleResult = settledRole.result;
+      applyRoleStageMetrics(stageMetrics, roleResult);
       if (controller.signal.aborted) {
         return this.#record(this.#result(
           interaction.interaction_id, context, "cancelled", roleResult.response,
-          roleResult.composition_audit_status, [], 0, 0, startedAtMs, uiDelivery,
+          roleResult.composition_audit_status, [], 0, 0, startedAtMs, stageMetrics, uiDelivery,
         ));
       }
       if (this.#uiOutput === "required") {
@@ -463,7 +662,14 @@ export class VoiceInteractionCoordinator {
         const presenter = this.#options.present_ui;
         if (presenter === undefined) throw new TypeError("conversation UI presenter is unavailable");
         const update = completedConversationUiUpdate(interaction, roleResult.response, context, 2);
-        const delivery = await presenter(context.device_id, update, controller.signal);
+        const uiStartedAt = performance.now();
+        uiAttempts++;
+        let delivery: ConversationUiDeliverySummary;
+        try {
+          delivery = await presenter(context.device_id, update, controller.signal);
+        } finally {
+          uiDurationMs += performance.now() - uiStartedAt;
+        }
         if (delivery.schema_version !== 1 || delivery.status !== "completed"
             || delivery.device_id !== context.device_id
             || delivery.session_id !== context.session_id
@@ -472,11 +678,13 @@ export class VoiceInteractionCoordinator {
           throw new TypeError("conversation UI delivery identity is invalid");
         }
         uiDelivery = "completed";
+        stageMetrics.ui = metric("agent", "completed", uiDurationMs, uiAttempts);
       }
       if (controller.signal.aborted) {
         return this.#record(this.#result(
           interaction.interaction_id, context, "cancelled", roleResult.response,
           roleResult.composition_audit_status, [], 0, 0, startedAtMs,
+          stageMetrics,
           uiDelivery === "completed" ? "completed" : "cancelled",
           this.#audioOutput === "disabled" ? "deferred" : "not_attempted",
         ));
@@ -485,22 +693,26 @@ export class VoiceInteractionCoordinator {
         return this.#record(this.#result(
           interaction.interaction_id, context, "completed", roleResult.response,
           roleResult.composition_audit_status, [], 0, 0, startedAtMs,
+          stageMetrics,
           uiDelivery, "deferred",
         ));
       }
       stage = "tts";
+      currentStageStartedAt = performance.now();
       rendered = await this.#options.render_tts!(
         interaction.interaction_id, roleResult.response, controller.signal,
       );
+      stageMetrics.tts = agentMetric("completed", currentStageStartedAt);
       assertRenderedResult(rendered, interaction.interaction_id, roleResult.response);
       if (controller.signal.aborted) {
         return this.#record(this.#result(
           interaction.interaction_id, context, "cancelled", roleResult.response,
           roleResult.composition_audit_status, [], rendered.pcm_bytes,
-          rendered.duration_ms, startedAtMs,
+          rendered.duration_ms, startedAtMs, stageMetrics,
         ));
       }
       stage = "playback";
+      currentStageStartedAt = performance.now();
       for (const segment of rendered.segments) {
         if (controller.signal.aborted) break;
         const playback = await this.#options.playback!(
@@ -528,6 +740,16 @@ export class VoiceInteractionCoordinator {
       const playbackCancelled = playbackSegments.some(
         (segment) => segment.playback.status === "cancelled",
       );
+      const droppedFrames = playbackSegments.reduce(
+        (total, segment) => total + segment.playback.dropped_frames, 0,
+      );
+      stageMetrics.playback_transport = agentMetric(
+        controller.signal.aborted || playbackCancelled
+          ? "cancelled" : completed ? "completed" : "failed",
+        currentStageStartedAt,
+        playbackSegments.length,
+        droppedFrames,
+      );
       return this.#record(this.#result(
         interaction.interaction_id,
         context,
@@ -539,12 +761,33 @@ export class VoiceInteractionCoordinator {
         rendered.pcm_bytes,
         rendered.duration_ms,
         startedAtMs,
+        stageMetrics,
         uiDelivery,
         controller.signal.aborted || playbackCancelled ? "cancelled"
           : completed ? "completed" : "failed",
       ));
     } catch {
       const cancelled = controller.signal.aborted;
+      if (stage === "role") {
+        stageMetrics.router = statusMetric(cancelled ? "cancelled" : "failed");
+      } else if (stage === "ui") {
+        stageMetrics.ui = metric(
+          "agent", cancelled ? "cancelled" : "failed", uiDurationMs,
+          Math.max(1, uiAttempts), 0, cancelled ? 1 : 0,
+        );
+      } else if (stage === "tts") {
+        stageMetrics.tts = agentMetric(
+          cancelled ? "cancelled" : "failed", currentStageStartedAt,
+        );
+      } else {
+        stageMetrics.playback_transport = agentMetric(
+          cancelled ? "cancelled" : "failed", currentStageStartedAt,
+          Math.max(1, playbackSegments.length),
+          playbackSegments.reduce(
+            (total, segment) => total + segment.playback.dropped_frames, 0,
+          ),
+        );
+      }
       return this.#record(this.#result(
         interaction.interaction_id,
         context,
@@ -559,6 +802,7 @@ export class VoiceInteractionCoordinator {
         rendered?.pcm_bytes ?? 0,
         rendered?.duration_ms ?? 0,
         startedAtMs,
+        stageMetrics,
         stage === "ui" ? cancelled ? "cancelled" : "failed" : uiDelivery,
         this.#audioOutput === "disabled" ? "deferred"
           : stage === "role" || stage === "ui" ? "not_attempted"
@@ -602,12 +846,13 @@ export class VoiceInteractionCoordinator {
     ttsPcmBytes: number,
     ttsDurationMs: number,
     startedAtMs: number,
+    stageMetrics: MutableStageMetrics,
     uiDelivery: VoiceUiDeliveryStatus = this.#uiOutput === "disabled"
       ? "disabled" : "not_attempted",
     audioDelivery: VoiceAudioDeliveryStatus = defaultAudioDelivery(outcome, this.#audioOutput),
   ): VoiceInteractionResult {
     return {
-      schema_version: 1,
+      schema_version: 2,
       ...context,
       interaction_id: interactionId,
       outcome,
@@ -621,6 +866,7 @@ export class VoiceInteractionCoordinator {
       tts_duration_ms: ttsDurationMs,
       started_at_ms: startedAtMs,
       completed_at_ms: (this.#options.clock ?? Date.now)(),
+      metrics: finalizeMetrics(stageMetrics, outcome),
       raw_audio_retained: false,
     };
   }

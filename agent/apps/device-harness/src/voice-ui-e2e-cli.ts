@@ -50,6 +50,14 @@ function positivePort(value: string): number {
   return port;
 }
 
+function captureMetricKey(value: {
+  readonly session_id: string;
+  readonly stream_id: number;
+  readonly epoch: number;
+}): string {
+  return `${value.session_id}:${value.stream_id}:${value.epoch}`;
+}
+
 async function atomicJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.tmp`;
@@ -172,6 +180,7 @@ async function main(): Promise<void> {
       },
     };
     const sttDurations: number[] = [];
+    const sttDurationByCapture = new Map<string, number>();
     const expectedKinds = ["read", "write", "barge"] as const;
     let acceptedTranscripts = 0;
     let transcriptMismatches = 0;
@@ -198,7 +207,9 @@ async function main(): Promise<void> {
           acceptedTranscripts++;
           return transcript;
         } finally {
-          sttDurations.push(performance.now() - started);
+          const durationMs = performance.now() - started;
+          sttDurations.push(durationMs);
+          sttDurationByCapture.set(captureMetricKey(request), durationMs);
         }
       },
     };
@@ -241,6 +252,9 @@ async function main(): Promise<void> {
         dispatch_role: async (interaction, signal) => await dispatcher.dispatch(interaction, signal),
         ui_output: "required",
         audio_output: "disabled",
+        stt_duration_ms: (context) => (
+          sttDurationByCapture.get(captureMetricKey(context)) ?? null
+        ),
       },
     });
     await runtime.start();
@@ -286,7 +300,7 @@ async function main(): Promise<void> {
       auditEvents += trace.events.length;
     }
     await atomicJson(resultFile, {
-      schema_version: 1,
+      schema_version: 2,
       profile: "phase5e_ui",
       passed: true,
       interaction_kinds: interactions.map((item) => item.kind),
@@ -295,6 +309,10 @@ async function main(): Promise<void> {
       voice_outcomes: interactions.map((item) => item.voice.outcome),
       ui_delivery_statuses: interactions.map((item) => item.voice.ui_delivery),
       audio_delivery_statuses: interactions.map((item) => item.voice.audio_delivery),
+      interaction_metrics: interactions.map((item) => ({
+        kind: item.kind,
+        metrics: item.voice.metrics,
+      })),
       stt_provider_version: STT_PROVIDER_VERSION,
       stt_model_revision: STT_MODEL_REVISION,
       stt_calls: sttDurations.length,

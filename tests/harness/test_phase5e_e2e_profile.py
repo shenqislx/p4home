@@ -19,6 +19,59 @@ SDKCONFIG_DEFAULTS = ROOT / "firmware/sdkconfig.defaults"
 DEPENDENCY_LOCK = ROOT / "firmware/dependencies.lock"
 
 
+def phase5e_metrics(role_id: str, mode: str, outcome: str = "completed") -> dict:
+    def stage(measurement: str, status: str, attempts: int | None = None) -> dict:
+        attempted = measurement in {"agent", "status_only"}
+        cancelled = status == "cancelled"
+        return {
+            "measurement": measurement,
+            "status": status,
+            "duration_ms": 1 if measurement == "agent" else None,
+            "attempts": (1 if attempted else 0) if attempts is None else attempts,
+            "dropped": 0,
+            "cancelled": 1 if cancelled else 0,
+        }
+
+    speakerless = mode == "speakerless_ui"
+    playback_status = "cancelled" if outcome == "cancelled" else "completed"
+    stages = {
+        "stt": stage("agent", "completed"),
+        "router": stage("status_only", "completed"),
+        "human": stage(
+            "status_only" if role_id == "human" else "not_applicable",
+            "completed" if role_id == "human" else "not_applicable",
+        ),
+        "robot": stage(
+            "status_only" if role_id == "robot" else "not_applicable",
+            "completed" if role_id == "robot" else "not_applicable",
+        ),
+        "composer": stage("status_only", "completed"),
+        "tts": stage(
+            "not_applicable" if speakerless else "agent",
+            "not_applicable" if speakerless else "completed",
+        ),
+        "ui": stage(
+            "agent" if speakerless else "not_applicable",
+            "completed" if speakerless else "not_applicable",
+            2 if speakerless else 0,
+        ),
+        "playback_transport": stage(
+            "not_applicable" if speakerless else "agent",
+            "not_applicable" if speakerless else playback_status,
+        ),
+        "p4_wake": stage("hardware_pending", "hardware_pending"),
+        "p4_vad": stage("hardware_pending", "hardware_pending"),
+        "p4_playback": stage("hardware_pending", "hardware_pending"),
+    }
+    return {
+        "schema_version": 1,
+        "stages": stages,
+        "dropped_events": 0,
+        "cancelled_stages": 1 if outcome == "cancelled" else 0,
+        "interaction_cancelled": 1 if outcome == "cancelled" else 0,
+    }
+
+
 class Phase5eProfileTests(unittest.TestCase):
     @staticmethod
     def write_secret(path: pathlib.Path, value: str = "top-secret-token-value"):
@@ -270,11 +323,20 @@ class Phase5eProfileTests(unittest.TestCase):
             artifact.write_text("VERIFY:phase5e:voice_e2e:PASS\n", encoding="utf-8")
             result = root / "result.json"
             result_payload = {
-                "schema_version": 1, "profile": "phase5e_e2e", "passed": True,
+                "schema_version": 2, "profile": "phase5e_e2e", "passed": True,
                 "interactions": [{
                     "kind": kind, "role_id": "robot" if kind in {"read", "write"} else "human",
-                    "role_status": "completed", "voice_outcome": "completed",
-                    "playback_statuses": ["completed"], "pcm_bytes": 640,
+                    "role_status": "completed",
+                    "voice_outcome": "cancelled" if kind == "barge" else "completed",
+                    "playback_statuses": [
+                        "cancelled" if kind == "barge" else "completed"
+                    ],
+                    "pcm_bytes": 640,
+                    "metrics": phase5e_metrics(
+                        "robot" if kind in {"read", "write"} else "human",
+                        "audio",
+                        "cancelled" if kind == "barge" else "completed",
+                    ),
                 } for kind in ("read", "write", "barge", "followup")],
                 "stt_provider_version": "1", "stt_model_revision": "a" * 40,
                 "stt_calls": 4, "stt_transcript_mismatches": 0, "stt_total_ms": 1,
@@ -296,6 +358,11 @@ class Phase5eProfileTests(unittest.TestCase):
                 "--audit-db", str(database), "--result", str(result),
             )
             self.assertEqual(self.run_audit(command), 0)
+            result_payload["interactions"][0]["metrics"]["stages"]["stt"]["attempts"] = 0
+            result.write_text(json.dumps(result_payload), encoding="utf-8")
+            self.assertNotEqual(self.run_audit(command), 0)
+            result_payload["interactions"][0]["metrics"]["stages"]["stt"]["attempts"] = 1
+            result.write_text(json.dumps(result_payload), encoding="utf-8")
             artifact.write_text("top-secret-token-value", encoding="ascii")
             self.assertNotEqual(self.run_audit(command), 0)
             artifact.write_bytes(b"prefix\x00raw-pcm")
@@ -374,13 +441,19 @@ class Phase5eProfileTests(unittest.TestCase):
             artifact.write_text("VERIFY:phase5e:voice_ui_e2e:PASS\n", encoding="utf-8")
             result = root / "result.json"
             result.write_text(json.dumps({
-                "schema_version": 1, "profile": "phase5e_ui", "passed": True,
+                "schema_version": 2, "profile": "phase5e_ui", "passed": True,
                 "interaction_kinds": ["read", "write", "chat"],
                 "role_ids": ["robot", "robot", "human"],
                 "role_statuses": ["completed"] * 3,
                 "voice_outcomes": ["completed"] * 3,
                 "ui_delivery_statuses": ["completed"] * 3,
                 "audio_delivery_statuses": ["deferred"] * 3,
+                "interaction_metrics": [{
+                    "kind": kind,
+                    "metrics": phase5e_metrics(role_id, "speakerless_ui"),
+                } for kind, role_id in (
+                    ("read", "robot"), ("write", "robot"), ("chat", "human"),
+                )],
                 "stt_provider_version": "1", "stt_model_revision": "a" * 40,
                 "stt_calls": 3, "stt_transcript_mismatches": 0, "stt_total_ms": 1,
                 "real_model_calls": 7, "audit_events": 6, "restored": True,
@@ -399,9 +472,18 @@ class Phase5eProfileTests(unittest.TestCase):
             )
             self.assertEqual(self.run_audit(command), 0)
             payload = json.loads(result.read_text(encoding="utf-8"))
+            payload["interaction_metrics"][0]["metrics"]["stages"]["p4_wake"][
+                "duration_ms"
+            ] = 0
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(self.run_audit(command), 0)
+            payload["interaction_metrics"][0]["metrics"]["stages"]["p4_wake"][
+                "duration_ms"
+            ] = None
             payload["ui_delivery_statuses"][1] = "failed"
             result.write_text(json.dumps(payload), encoding="utf-8")
-            self.assertEqual(self.run_audit(command), 0)
+            self.assertNotEqual(self.run_audit(command), 0)
+            payload["ui_delivery_statuses"][1] = "completed"
             payload["unexpected"] = "field"
             result.write_text(json.dumps(payload), encoding="utf-8")
             self.assertNotEqual(self.run_audit(command), 0)

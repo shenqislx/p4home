@@ -140,12 +140,25 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
 
 - [ ] 加入认证绕过、frame 洪水、超长会话、序号回退、旧 epoch、恶意 transcript、TTS 注入、
   provider 离线/慢响应、P4/HA/Agent 任一断线和进程恢复 holdout；
+  - [x] 本地自动化覆盖认证单值/攻击后恢复、frame/session/epoch、恶意 transcript 的
+    Router/Role/UI 隔离、TTS 有界输入、provider timeout/abort 恢复，以及 Agent 真实子进程
+    crash/restart 后下一轮合法会话；
+  - [ ] 真实 P4 网络丢失、HA 服务重启与状态对账、launchd KeepAlive 和 P4 感知 Agent 重连（延期）；
 - [ ] 核对 Git、日志、SQLite、进程参数和 CI artifact 不含 token 或非 opt-in 原始音频；
+  - [x] 本地 scanner/harness 覆盖 Git objects、process argv、SQLite、上传候选、最终 manifest、token、
+    TLS 私钥、raw audio、symlink/权限及审计失败不上传；
+  - [ ] 当前候选真实 workflow artifact 重新生成后的最终审计（真实环境延期）；
 - [ ] 分别报告 wake/VAD/STT/Router/Human/Robot/Composer/TTS/播放和端到端延迟、丢帧、取消指标；
+  - [x] `VoiceInteractionResult` schema v2 与 Phase 5E artifact schema v2 固定 11 个阶段，并将 Agent
+    可测耗时、角色/UI/播放状态和 drop/cancel 与业务真值交叉校验；
+  - [ ] P4 wake/VAD/实体播放继续显式 `hardware_pending`，待真实 run 提供可信硬件时序；
 - [ ] 在真实 P4 + Agent + HA 完成本地唤醒到一次只读和一次隔离低风险家控语音闭环，并核对 HA
   result/state change、P4 回刷、分角色播放和审计关联；
 - [ ] 验证 barge-in、超时、断线、Agent/STT/TTS 离线恢复，以及长跑期间固定命令、触摸、P4 ↔ HA、
   Cat fallback、资源/栈/看门狗和 UI 8 FPS；人工观察不得用自动 marker 冒充。
+  - [x] 本地独立子进程完成 1000-session 确定性 soak，覆盖 offline/cancel/timeout/hang/abort 后恢复，
+    并验证端口、maps、results、listener、PCM、heap、event-loop 与 open handles 有界；
+  - [ ] 真实 P4/HA/Agent 长跑、heap/stack/watchdog、固定命令/触摸/HA/Cat/UI 连续性（延期）；
 - [x] 冻结独立的 Conversation UI Protocol v1：Agent 只能下发有界、已组合的展示文本和结构化
   execution status；P4 必须以 active epoch/revision fencing 接受，并在 LVGL 对话框显示用户 final
   transcript 与 Human/Robot 结果；不得借用 Cat `character.say`；
@@ -170,6 +183,10 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
 `board_support` 注入的通用 fail-closed probe，保持“HA 未就绪时只显示连接提示且不开始
 capture/STT/LLM”的产品语义；同时把 5A 源码格式契约改为对空白不敏感。独立源码 review 无阻塞
 问题，完整本地门禁结果记录在上述证据文件中。这些结果不将真实 P4 或人工门禁标记为通过。
+
+同日后续本地门禁补齐 metrics schema v2、对抗性认证/文本边界、真实 Agent 子进程重启和
+1000-session soak；交叉 review 修复 Router fallback 指标失真，并撤回会误杀合法朗读内容的
+“完整 JSON 文本即 TTS 注入”规则。P4 专属阶段保持 `hardware_pending`，本地结果不替代真实环境。
 
 退出门禁：所有 5A–5E 技术门禁与真实环境证据通过，再交由用户最终 review。workflow 绿色只证明
 构建/烧录/采集/上传链完成；必须先核对 manifest，再用原始 `VERIFY:` marker、音频指标、HA/Agent

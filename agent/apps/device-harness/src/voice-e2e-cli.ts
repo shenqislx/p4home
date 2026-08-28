@@ -50,6 +50,14 @@ function positivePort(value: string): number {
   return port;
 }
 
+function captureMetricKey(value: {
+  readonly session_id: string;
+  readonly stream_id: number;
+  readonly epoch: number;
+}): string {
+  return `${value.session_id}:${value.stream_id}:${value.epoch}`;
+}
+
 async function atomicJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.tmp`;
@@ -162,6 +170,7 @@ async function main(): Promise<void> {
       },
     };
     const sttDurations: number[] = [];
+    const sttDurationByCapture = new Map<string, number>();
     const ttsDurations: number[] = [];
     const expectedKinds = ["read", "write", "barge", "followup"] as const;
     let acceptedTranscripts = 0;
@@ -189,7 +198,11 @@ async function main(): Promise<void> {
           acceptedTranscripts++;
           return transcript;
         }
-        finally { sttDurations.push(performance.now() - started); }
+        finally {
+          const durationMs = performance.now() - started;
+          sttDurations.push(durationMs);
+          sttDurationByCapture.set(captureMetricKey(request), durationMs);
+        }
       },
     };
     const pythonTts = new PythonTtsProvider({
@@ -243,6 +256,9 @@ async function main(): Promise<void> {
         render_tts: async (interactionId, response, signal) => (
           await ttsPipeline.render(interactionId, response, signal)
         ),
+        stt_duration_ms: (context) => (
+          sttDurationByCapture.get(captureMetricKey(context)) ?? null
+        ),
       },
     });
     await runtime.start();
@@ -285,7 +301,7 @@ async function main(): Promise<void> {
       auditEvents += trace.events.length;
     }
     await atomicJson(resultFile, {
-      schema_version: 1,
+      schema_version: 2,
       profile: "phase5e_e2e",
       passed: true,
       interactions: interactions.map((item) => ({
@@ -295,6 +311,7 @@ async function main(): Promise<void> {
         voice_outcome: item.voice.outcome,
         playback_statuses: item.voice.playback_segments.map((segment) => segment.playback.status),
         pcm_bytes: item.voice.tts_pcm_bytes,
+        metrics: item.voice.metrics,
       })),
       stt_provider_version: STT_PROVIDER_VERSION,
       stt_model_revision: STT_MODEL_REVISION,
