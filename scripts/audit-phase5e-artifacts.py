@@ -450,7 +450,7 @@ def main() -> int:
     passed = not reasons
     args.status_file.write_text("pass\n" if passed else "fail\n", encoding="ascii")
     print(
-        "VERIFY:phase5e:artifact_audit:PASS secrets=absent raw_audio=absent "
+        "VERIFY:phase5e:artifact_audit:PASS secrets=absent audio_payload=absent "
         f"source=clean source_mode={source_mode} process_argv=clean"
         if passed else f"VERIFY:phase5e:artifact_audit:FAIL reasons={','.join(sorted(reasons))}"
     )

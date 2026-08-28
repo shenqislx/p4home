@@ -371,6 +371,34 @@ class Phase5eProfileTests(unittest.TestCase):
             command = self.audit_command(root, artifact, secret, status)
             self.assertEqual(self.run_audit(command), 0)
             self.assertEqual(status.read_text(encoding="ascii"), "pass\n")
+            with artifact.open("a", encoding="utf-8") as handle:
+                handle.write('{"raw_audio":"present"}\n')
+            self.assertNotEqual(self.run_audit(command), 0)
+
+    def test_preflight_pass_marker_does_not_poison_final_artifact_audit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            self.init_repo(root)
+            secret = root / "secret"
+            self.write_secret(secret)
+            artifact = root / "monitor.log"
+            artifact.write_text("safe metadata\n", encoding="utf-8")
+            status = root / "status"
+            command = self.audit_command(root, artifact, secret, status)
+
+            preflight_output = io.StringIO()
+            with redirect_stdout(preflight_output):
+                self.assertEqual(self.run_audit(command), 0)
+            marker = preflight_output.getvalue()
+            self.assertIn("VERIFY:phase5e:artifact_audit:PASS", marker)
+            self.assertIn("audio_payload=absent", marker)
+            auditor = self.load_driver(AUDIT, "phase5e_marker_regex_test")
+            self.assertIsNone(auditor.RAW_FIELD.search(marker.encode("utf-8")))
+            with artifact.open("a", encoding="utf-8") as handle:
+                handle.write(marker)
+
+            self.assertEqual(self.run_audit(command), 0)
+            self.assertEqual(status.read_text(encoding="ascii"), "pass\n")
 
     def test_artifact_audit_scans_gitless_archive_and_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
