@@ -3,8 +3,10 @@ import json
 import pathlib
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import closing
 from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -18,6 +20,41 @@ DEPENDENCY_LOCK = ROOT / "firmware/dependencies.lock"
 
 
 class Phase5eProfileTests(unittest.TestCase):
+    @staticmethod
+    def write_secret(path: pathlib.Path, value: str = "top-secret-token-value"):
+        path.write_text(value, encoding="ascii")
+        path.chmod(0o600)
+
+    @staticmethod
+    def init_repo(root: pathlib.Path):
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+
+    def audit_command(
+        self,
+        root: pathlib.Path,
+        artifact: pathlib.Path,
+        secret: pathlib.Path,
+        status: pathlib.Path,
+        *extra: str,
+    ) -> list[str]:
+        return [
+            "python3", str(AUDIT), "--repo", str(root),
+            "--artifact", str(artifact), "--secret-file", str(secret),
+            *extra, "--status-file", str(status),
+        ]
+
+    def run_audit(self, command: list[str], *, process_match: bool = False) -> int:
+        audit = self.load_driver(AUDIT, "phase5e_artifact_audit_test")
+        with (
+            mock.patch.object(
+                audit.PHASE4_AUDIT,
+                "process_contains_secret",
+                return_value=process_match,
+            ),
+            mock.patch.object(sys, "argv", [str(AUDIT), *command[2:]]),
+        ):
+            return audit.main()
+
     @staticmethod
     def load_driver(path: pathlib.Path, name: str):
         spec = importlib.util.spec_from_file_location(name, path)
@@ -186,29 +223,49 @@ class Phase5eProfileTests(unittest.TestCase):
         self.assertIn("phase5e_artifact_only=yes", flash_step)
         self.assertIn("evidence_capture=continuing", flash_step)
 
+    def test_phase5e_final_audit_runs_after_manifest_and_before_upload(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        preflight = workflow.index("      - name: Preflight Phase 5E upload candidates")
+        manifest = workflow.index("      - name: Write hardware validation manifest")
+        final_audit = workflow.index("      - name: Audit final Phase 5E upload candidates")
+        assertion = workflow.index("      - name: Assert transport artifact is complete")
+        upload = workflow.index("      - name: Upload serial artifact")
+        self.assertLess(preflight, manifest)
+        self.assertLess(manifest, final_audit)
+        self.assertLess(final_audit, assertion)
+        self.assertLess(assertion, upload)
+        final_block = workflow[final_audit:assertion]
+        preflight_block = workflow[preflight:manifest]
+        self.assertIn('--repo "$GITHUB_WORKSPACE"', final_block)
+        self.assertIn("--artifact firmware/monitor.log", final_block)
+        self.assertIn("--artifact firmware/hardware-validation-manifest.json", final_block)
+        self.assertIn('--secret-file "$AGENT_TMP_DIR/agent-key.pem"', preflight_block)
+        self.assertIn('--secret-file "$AGENT_TMP_DIR/agent-key.pem"', final_block)
+        self.assertIn('--artifact-sensitive-file "$PHASE4C_ENTITY_FILE"', final_block)
+        self.assertNotIn("tee -a firmware/monitor.log", final_block)
+
     def test_artifact_audit_allows_missing_business_outputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
+            self.init_repo(root)
             secret = root / "secret"
-            secret.write_text("top-secret-token-value", encoding="ascii")
+            self.write_secret(secret)
             artifact = root / "monitor.log"
             artifact.write_text(
                 "VERIFY:phase5e:voice_ui_e2e:FAIL reason=model_unavailable\n",
                 encoding="utf-8",
             )
             status = root / "status"
-            command = [
-                "python3", str(AUDIT), "--artifact", str(artifact),
-                "--secret-file", str(secret), "--status-file", str(status),
-            ]
-            self.assertEqual(subprocess.run(command, check=False).returncode, 0)
+            command = self.audit_command(root, artifact, secret, status)
+            self.assertEqual(self.run_audit(command), 0)
             self.assertEqual(status.read_text(encoding="ascii"), "pass\n")
 
     def test_artifact_audit_accepts_metadata_only_and_rejects_secret(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
+            self.init_repo(root)
             secret = root / "secret"
-            secret.write_text("top-secret-token-value", encoding="ascii")
+            self.write_secret(secret)
             artifact = root / "monitor.log"
             artifact.write_text("VERIFY:phase5e:voice_e2e:PASS\n", encoding="utf-8")
             result = root / "result.json"
@@ -230,68 +287,67 @@ class Phase5eProfileTests(unittest.TestCase):
             }
             result.write_text(json.dumps(result_payload), encoding="utf-8")
             database = root / "audit.db"
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute("CREATE TABLE events (id TEXT, payload_json TEXT)")
                 connection.execute("INSERT INTO events VALUES ('1', '{}')")
             status = root / "status"
-            command = [
-                "python3", str(AUDIT), "--artifact", str(artifact),
-                "--secret-file", str(secret), "--audit-db", str(database),
-                "--result", str(result), "--status-file", str(status),
-            ]
-            self.assertEqual(subprocess.run(command, check=False).returncode, 0)
+            command = self.audit_command(
+                root, artifact, secret, status,
+                "--audit-db", str(database), "--result", str(result),
+            )
+            self.assertEqual(self.run_audit(command), 0)
             artifact.write_text("top-secret-token-value", encoding="ascii")
-            self.assertNotEqual(subprocess.run(command, check=False).returncode, 0)
+            self.assertNotEqual(self.run_audit(command), 0)
             artifact.write_bytes(b"prefix\x00raw-pcm")
-            self.assertNotEqual(subprocess.run(command, check=False).returncode, 0)
+            self.assertNotEqual(self.run_audit(command), 0)
             artifact.write_text('{"rawAudio":"present"}', encoding="utf-8")
-            self.assertNotEqual(subprocess.run(command, check=False).returncode, 0)
+            self.assertNotEqual(self.run_audit(command), 0)
             artifact.write_text("A" * 512, encoding="ascii")
-            self.assertNotEqual(subprocess.run(command, check=False).returncode, 0)
+            self.assertNotEqual(self.run_audit(command), 0)
 
     def test_artifact_audit_checks_sqlite_storage_type_not_column_affinity(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
+            self.init_repo(root)
             secret = root / "secret"
-            secret.write_text("top-secret-token-value", encoding="ascii")
+            self.write_secret(secret)
             artifact = root / "monitor.log"
             artifact.write_text("VERIFY:phase5e:voice_ui_e2e:FAIL\n", encoding="utf-8")
             database = root / "audit.db"
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute("CREATE TABLE events (payload BLOB, flexible ANY)")
                 connection.execute("INSERT INTO events VALUES ('{}', 'safe metadata')")
             status = root / "status"
-            command = [
-                "python3", str(AUDIT), "--artifact", str(artifact),
-                "--secret-file", str(secret), "--audit-db", str(database),
-                "--status-file", str(status),
-            ]
-            self.assertEqual(subprocess.run(command, check=False).returncode, 0)
+            command = self.audit_command(
+                root, artifact, secret, status, "--audit-db", str(database),
+            )
+            self.assertEqual(self.run_audit(command), 0)
 
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute(
                     "INSERT INTO events VALUES (?, 'safe metadata')",
                     (sqlite3.Binary(b"binary payload"),),
                 )
-            self.assertNotEqual(subprocess.run(command, check=False).returncode, 0)
+            self.assertNotEqual(self.run_audit(command), 0)
 
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute("DELETE FROM events WHERE typeof(payload) = 'blob'")
                 connection.execute(
                     "INSERT INTO events VALUES ('{}', ?)",
                     ("A" * 512,),
                 )
-            self.assertNotEqual(subprocess.run(command, check=False).returncode, 0)
+            self.assertNotEqual(self.run_audit(command), 0)
 
     def test_artifact_audit_ignores_fts_shadow_storage_blobs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
+            self.init_repo(root)
             secret = root / "secret"
-            secret.write_text("top-secret-token-value", encoding="ascii")
+            self.write_secret(secret)
             artifact = root / "monitor.log"
             artifact.write_text("VERIFY:phase5e:voice_ui_e2e:FAIL\n", encoding="utf-8")
             database = root / "audit.db"
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 try:
                     connection.execute(
                         "CREATE VIRTUAL TABLE searchable USING fts5(content)"
@@ -302,19 +358,18 @@ class Phase5eProfileTests(unittest.TestCase):
                     "INSERT INTO searchable(content) VALUES ('safe metadata')"
                 )
             status = root / "status"
-            command = [
-                "python3", str(AUDIT), "--artifact", str(artifact),
-                "--secret-file", str(secret), "--audit-db", str(database),
-                "--status-file", str(status),
-            ]
-            self.assertEqual(subprocess.run(command, check=False).returncode, 0)
+            command = self.audit_command(
+                root, artifact, secret, status, "--audit-db", str(database),
+            )
+            self.assertEqual(self.run_audit(command), 0)
             self.assertEqual(status.read_text(encoding="ascii"), "pass\n")
 
     def test_artifact_audit_accepts_speakerless_ui_metadata(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
+            self.init_repo(root)
             secret = root / "secret"
-            secret.write_text("top-secret-token-value", encoding="ascii")
+            self.write_secret(secret)
             artifact = root / "monitor.log"
             artifact.write_text("VERIFY:phase5e:voice_ui_e2e:PASS\n", encoding="utf-8")
             result = root / "result.json"
@@ -334,23 +389,112 @@ class Phase5eProfileTests(unittest.TestCase):
                 "composition_audits_persisted": 3, "raw_audio_retained": False,
             }), encoding="utf-8")
             database = root / "audit.db"
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute("CREATE TABLE events (id TEXT, payload_json TEXT)")
                 connection.execute("INSERT INTO events VALUES ('1', '{}')")
             status = root / "status"
-            command = [
-                "python3", str(AUDIT), "--artifact", str(artifact),
-                "--secret-file", str(secret), "--audit-db", str(database),
-                "--result", str(result), "--status-file", str(status),
-            ]
-            self.assertEqual(subprocess.run(command, check=False).returncode, 0)
+            command = self.audit_command(
+                root, artifact, secret, status,
+                "--audit-db", str(database), "--result", str(result),
+            )
+            self.assertEqual(self.run_audit(command), 0)
             payload = json.loads(result.read_text(encoding="utf-8"))
             payload["ui_delivery_statuses"][1] = "failed"
             result.write_text(json.dumps(payload), encoding="utf-8")
-            self.assertEqual(subprocess.run(command, check=False).returncode, 0)
+            self.assertEqual(self.run_audit(command), 0)
             payload["unexpected"] = "field"
             result.write_text(json.dumps(payload), encoding="utf-8")
-            self.assertNotEqual(subprocess.run(command, check=False).returncode, 0)
+            self.assertNotEqual(self.run_audit(command), 0)
+
+    def test_artifact_audit_rejects_loose_and_symlinked_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            self.init_repo(root)
+            artifact = root / "monitor.log"
+            artifact.write_text("safe metadata\n", encoding="utf-8")
+            secret = root / "secret"
+            self.write_secret(secret)
+            status = root / "status"
+            command = self.audit_command(root, artifact, secret, status)
+            self.assertEqual(self.run_audit(command), 0)
+
+            secret.chmod(0o400)
+            self.assertEqual(self.run_audit(command), 0)
+            secret.chmod(0o644)
+            self.assertNotEqual(self.run_audit(command), 0)
+            self.assertEqual(status.read_text(encoding="ascii"), "fail\n")
+
+            secret.chmod(0o600)
+            link = root / "secret-link"
+            link.symlink_to(secret)
+            link_command = self.audit_command(root, artifact, link, status)
+            self.assertNotEqual(self.run_audit(link_command), 0)
+            self.assertEqual(status.read_text(encoding="ascii"), "fail\n")
+
+            artifact_link = root / "artifact-link"
+            artifact_link.symlink_to(artifact)
+            artifact_command = self.audit_command(root, artifact_link, secret, status)
+            self.assertNotEqual(self.run_audit(artifact_command), 0)
+            self.assertEqual(status.read_text(encoding="ascii"), "fail\n")
+
+    def test_artifact_audit_reuses_git_object_and_process_argv_scans(self):
+        audit_source = AUDIT.read_text(encoding="utf-8")
+        self.assertIn("PHASE4_AUDIT.scan_git_objects", audit_source)
+        self.assertIn("PHASE4_AUDIT.process_contains_secret", audit_source)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            self.init_repo(root)
+            artifact = root / "monitor.log"
+            artifact.write_text("safe metadata\n", encoding="utf-8")
+            secret = root / "secret"
+            canary = "synthetic-phase5e-secret-canary"
+            self.write_secret(secret, canary)
+            status = root / "status"
+            command = self.audit_command(root, artifact, secret, status)
+            self.assertEqual(self.run_audit(command), 0)
+
+            subprocess.run(
+                ["git", "hash-object", "-w", "--stdin"], cwd=root,
+                input=canary.encode("ascii"), check=True, stdout=subprocess.DEVNULL,
+            )
+            self.assertNotEqual(self.run_audit(command), 0)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            self.init_repo(root)
+            artifact = root / "monitor.log"
+            artifact.write_text("safe metadata\n", encoding="utf-8")
+            secret = root / "secret"
+            canary = "synthetic-phase5e-process-canary"
+            self.write_secret(secret, canary)
+            status = root / "status"
+            command = self.audit_command(root, artifact, secret, status)
+            self.assertNotEqual(self.run_audit(command, process_match=True), 0)
+
+    def test_artifact_only_sensitive_value_can_exist_in_git_but_not_uploads(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            self.init_repo(root)
+            artifact = root / "monitor.log"
+            artifact.write_text("safe metadata\n", encoding="utf-8")
+            credential = root / "credential"
+            self.write_secret(credential, "synthetic-phase5e-credential")
+            entity = root / "entity"
+            entity_canary = "switch.synthetic_tracked_entity"
+            self.write_secret(entity, entity_canary)
+            subprocess.run(
+                ["git", "hash-object", "-w", "--stdin"], cwd=root,
+                input=entity_canary.encode("ascii"), check=True,
+                stdout=subprocess.DEVNULL,
+            )
+            status = root / "status"
+            command = self.audit_command(
+                root, artifact, credential, status,
+                "--artifact-sensitive-file", str(entity),
+            )
+            self.assertEqual(self.run_audit(command), 0)
+            artifact.write_text(entity_canary, encoding="ascii")
+            self.assertNotEqual(self.run_audit(command), 0)
 
 
 if __name__ == "__main__":

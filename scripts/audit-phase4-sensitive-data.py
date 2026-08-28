@@ -113,8 +113,17 @@ def scan_git_objects(repo: pathlib.Path, secret: bytes) -> tuple[int, int]:
             scanned += 1
             matches += int(found)
     finally:
-        process.stdin.close()
-        process.wait(timeout=30)
+        try:
+            process.stdin.close()
+        finally:
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired as error:
+                process.kill()
+                process.wait()
+                raise RuntimeError("git cat-file timed out") from error
+            finally:
+                process.stdout.close()
     if process.returncode != 0:
         raise RuntimeError("git cat-file failed")
     return scanned, matches

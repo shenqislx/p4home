@@ -2,10 +2,10 @@
 
 > Status: `pending_real_environment`
 > Started: 2026-08-23
-> Current Gate: 5D TTS/播放/barge-in 技术门禁通过；5E 真实硬件/HA/语音总门禁因当前
-> WSL2 开发环境不具备验证条件而保持 `pending`。2026-08-25 用户在 Phase 7 前审计中确认
-> 当前尚缺 Human/Robot 响应到 P4 UI 的产品闭环，并明确授权先完成 5E 无扬声器闭环；Phase 7
-> 继续保持 `pending`。
+> Current Gate: 5A–5D 技术门禁通过；5E 无扬声器产品闭环已有历史真实 P4 自动化 run
+> `32862092039`（commit `3edb229`）证明读、写并恢复、Human 聊天和三次 UI ACK 完成，但之后
+> Voice 产品代码继续演进，因此当前候选仍需重跑。2026-08-28 用户要求先推进非人工工作，真实环境
+> 重跑、P4 UI 肉眼核对和扬声器可听观察统一延期；Phase 6、7 已分别完成并归档。
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用
 
@@ -159,8 +159,17 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
   串口 `VERIFY:`、Agent/SQLite 审计、HA state_changed 与用户可见 UI 观察必须相互一致。
   - [x] 独立 `phase5e_ui` workflow profile、真实模型/HA/STT harness、一次性写入恢复、UI ACK、
     speakerless input driver、artifact 隐私审计和 manifest 字段已实现并通过本地静态/单元门禁；
-  - [ ] 提交并推送待测 commit 后触发真实 P4 run，下载 artifact 并按 manifest-first 协议判定；
-  - [ ] 用户核对 P4 对话框的三轮可见文本，人工观察不由串口 marker 代替。
+  - [x] 历史 commit `3edb229` 的 run `32862092039` 已按 manifest-first 协议判定：真实模型/HA/STT、
+    读/写/恢复/聊天、三次 UI ACK、隐私审计均通过，`audio_delivery=deferred` 且没有打开 playback；
+    该 run 不覆盖其后的 Voice 产品改动，也不替代用户肉眼观察；
+  - [ ] 对当前候选提交重新触发真实 P4 run，并下载 artifact 按 manifest-first 协议判定（2026-08-28
+    按用户要求随人工/真实环境工作延期）；
+  - [ ] 用户核对 P4 对话框的三轮可见文本，人工观察不由串口 marker 代替（延期）。
+
+2026-08-28 本地修复把 HA 初始同步 readiness 从 `voice_transport` 具体依赖改为由
+`board_support` 注入的通用 fail-closed probe，保持“HA 未就绪时只显示连接提示且不开始
+capture/STT/LLM”的产品语义；同时把 5A 源码格式契约改为对空白不敏感。独立源码 review 无阻塞
+问题，完整本地门禁结果记录在上述证据文件中。这些结果不将真实 P4 或人工门禁标记为通过。
 
 退出门禁：所有 5A–5E 技术门禁与真实环境证据通过，再交由用户最终 review。workflow 绿色只证明
 构建/烧录/采集/上传链完成；必须先核对 manifest，再用原始 `VERIFY:` marker、音频指标、HA/Agent
@@ -176,4 +185,4 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
 - [ ] Agent/STT/TTS 离线不破坏固定命令、触摸、P4 ↔ HA、Cat fallback 与 UI；
 - [ ] 原始音频和凭证满足最小保留与敏感审计边界；
 - [ ] 用户最终 review 通过，Phase 5 关闭；
-- [ ] Phase 6 需用户另行明确授权后启动。
+- [x] Phase 6、7 已经各自获得授权、完成并归档；其结果不自动关闭 Phase 5，也不授权新的 Phase。

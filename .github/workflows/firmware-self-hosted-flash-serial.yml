@@ -1006,7 +1006,7 @@ jobs:
             --entity-file "$PHASE4C_ENTITY_FILE" \
             --status-file "$PHASE4C_SANITIZED_STATUS_FILE"
 
-      - name: Audit Phase 5E upload candidates
+      - name: Preflight Phase 5E upload candidates
         if: always() && (inputs.validation_profile == 'phase5e_e2e' || inputs.validation_profile == 'phase5e_ui')
         run: |
           set -euo pipefail
@@ -1020,10 +1020,12 @@ jobs:
             audit_db_args+=(--audit-db "$P4HOME_PHASE5E_AUDIT_DB")
           fi
           python3 scripts/audit-phase5e-artifacts.py \
+            --repo "$GITHUB_WORKSPACE" \
             "${artifact_args[@]}" \
             --secret-file "$AGENT_TMP_DIR/device-token" \
+            --secret-file "$AGENT_TMP_DIR/agent-key.pem" \
             --secret-file "$P4HOME_PHASE4C_TOKEN_FILE" \
-            --secret-file "$PHASE4C_ENTITY_FILE" \
+            --artifact-sensitive-file "$PHASE4C_ENTITY_FILE" \
             "${audit_db_args[@]}" \
             --status-file "$P4HOME_PHASE5E_AUDIT_STATUS_FILE" \
             | tee -a firmware/monitor.log
@@ -1073,6 +1075,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/audit-phase5e-artifacts.py \
+            --repo "$GITHUB_WORKSPACE" \
             --artifact firmware/monitor.log \
             --secret-file "$HOME/.config/p4home/product-voice/device-token" \
             --secret-file "$HOME/.config/p4home/product-voice/agent-key.pem" \
@@ -1431,6 +1434,21 @@ jobs:
               encoding="utf-8",
           )
           PY
+
+      - name: Audit final Phase 5E upload candidates
+        if: always() && (inputs.validation_profile == 'phase5e_e2e' || inputs.validation_profile == 'phase5e_ui')
+        run: |
+          set -euo pipefail
+          python3 scripts/audit-phase5e-artifacts.py \
+            --repo "$GITHUB_WORKSPACE" \
+            --artifact firmware/monitor.log \
+            --artifact firmware/hardware-validation-manifest.json \
+            --secret-file "$AGENT_TMP_DIR/device-token" \
+            --secret-file "$AGENT_TMP_DIR/agent-key.pem" \
+            --secret-file "$P4HOME_PHASE4C_TOKEN_FILE" \
+            --artifact-sensitive-file "$PHASE4C_ENTITY_FILE" \
+            --status-file "$P4HOME_PHASE5E_AUDIT_STATUS_FILE"
+          grep -qx "pass" "$P4HOME_PHASE5E_AUDIT_STATUS_FILE"
 
       - name: Assert transport artifact is complete
         run: |

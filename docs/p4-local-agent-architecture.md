@@ -771,8 +771,11 @@ Voice Protocol v1、自动化硬件、真实 wake 与固定命令动作门禁已
 证明真实 P4 PCM 有界抵达 Agent fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 review
 后技术门禁关闭。5C 最终 run `32635742553` 已证明真实 P4 中文输入经固定 MLX STT 后只进入统一
 Human Runtime，transcript 哈希、SQLite 审计、Cat 零泄漏和原始音频不保留均满足门禁。P4 可听
-startup tone 人工观察待补；5D 分角色 TTS、播放与 barge-in 技术门禁已通过，5E 真实环境总门禁
-保持 `pending_real_environment`，尚未打开默认 SR。
+startup tone 人工观察待补；5D 分角色 TTS、播放与 barge-in 技术门禁已通过。5E 历史
+`phase5e_ui` run `32862092039` 已自动证明真实模型/HA/STT 的读、低风险写入并恢复、Human 聊天和
+三次 UI ACK，且 artifact 隐私审计通过、音频明确 deferred；后续 Voice 产品改动仍需当前候选重跑。
+2026-08-28 用户要求真实环境与人工验证延期，因此 P4 UI 肉眼核对、扬声器可听观察和当前候选总
+门禁保持 `pending_real_environment`，尚未打开默认 SR。
 
 ### Phase 6 — Memory
 

@@ -10,6 +10,7 @@ VOICE_SOURCE = ROOT / "firmware/components/voice_transport/voice_transport.c"
 PLAYBACK_SOURCE = ROOT / "firmware/components/voice_transport/voice_playback_receiver.c"
 VOICE_HEADER = ROOT / "firmware/components/voice_transport/include/voice_transport.h"
 VOICE_KCONFIG = ROOT / "firmware/components/voice_transport/Kconfig.projbuild"
+VOICE_CMAKE = ROOT / "firmware/components/voice_transport/CMakeLists.txt"
 BOARD_KCONFIG = ROOT / "firmware/components/board_support/Kconfig.projbuild"
 BOARD_SOURCE = ROOT / "firmware/components/board_support/board_support.c"
 HA_SOURCE = ROOT / "firmware/components/ha_client/ha_client.c"
@@ -38,6 +39,74 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         self.assertIn("maxPayload: VOICE_MAX_CONTROL_BYTES", runtime)
         self.assertNotIn("agent_transport.h", firmware)
         self.assertNotIn("ha_client.h", firmware)
+
+    def test_ha_readiness_is_injected_at_the_board_composition_boundary(self) -> None:
+        firmware = VOICE_SOURCE.read_text(encoding="utf-8")
+        header = VOICE_HEADER.read_text(encoding="utf-8")
+        cmake = VOICE_CMAKE.read_text(encoding="utf-8")
+        board = BOARD_SOURCE.read_text(encoding="utf-8")
+
+        self.assertIn("voice_transport_capture_readiness_probe_t", header)
+        self.assertIn("voice_transport_set_capture_readiness_probe", header)
+        self.assertNotIn("ha_client", firmware)
+        self.assertNotIn("ha_client", cmake)
+
+        readiness = firmware[
+            firmware.index("static bool voice_capture_dependency_ready(void)"):
+            firmware.index("static bool voice_valid_uri(")
+        ]
+        self.assertIn(
+            "return probe != NULL && probe(s_voice.capture_readiness_context);",
+            readiness,
+        )
+
+        setter = firmware[
+            firmware.index("esp_err_t voice_transport_set_capture_readiness_probe("):
+            firmware.index("esp_err_t voice_transport_init(")
+        ]
+        self.assertIn("!s_voice.initialized && !s_voice.running", setter)
+        self.assertIn("probe != NULL", setter)
+
+        initialize = firmware[
+            firmware.index("esp_err_t voice_transport_init("):
+            firmware.index("esp_err_t voice_transport_start(")
+        ]
+        self.assertIn("s_voice.capture_readiness_probe != NULL", initialize)
+        self.assertIn("capture readiness probe is not configured", initialize)
+
+        wake = firmware[
+            firmware.index(
+                "static void voice_wake_detected(void *context, uint64_t detected_at_us)\n{"
+            ):
+            firmware.index("static bool voice_ready_for_capture(void *context)\n{")
+        ]
+        self.assertIn("s_voice.suppress_wake_session = !dependency_ready;", wake)
+        self.assertIn(
+            "if (dependency_ready) voice_playback_receiver_request_wake_prompt();",
+            wake,
+        )
+        self.assertIn("else voice_playback_receiver_request_connecting_prompt();", wake)
+
+        suppress_start = firmware.index(
+            "static bool voice_suppress_wake_session(void *context)\n{"
+        )
+        suppress = firmware[
+            suppress_start:
+            firmware.index(
+                "static void voice_offer_pcm(void *context, const int16_t *samples,",
+                suppress_start,
+            )
+        ]
+        self.assertIn("const bool suppress = requested || !dependency_ready;", suppress)
+        self.assertIn("if (suppress) {", suppress)
+
+        self.assertIn("return ha_client_initial_sync_ready();", board)
+        inject = board.index("voice_transport_set_capture_readiness_probe(")
+        initialize_call = board.index("voice_transport_init(NULL)")
+        self.assertLess(inject, initialize_call)
+        injection_path = board[inject:initialize_call]
+        self.assertIn("board_support_voice_capture_ready, NULL", injection_path)
+        self.assertIn("if (voice_ret == ESP_OK)", injection_path)
 
     def test_spki_pin_hashes_the_certificate_subject_public_key_info(self) -> None:
         firmware = VOICE_SOURCE.read_text(encoding="utf-8")

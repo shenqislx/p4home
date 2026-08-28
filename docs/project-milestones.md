@@ -25,7 +25,7 @@
 | M7.2 Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作闭环 |
 | M7.3 Cat Object World | `completed` | sofa/window/desk 等 Cat 对象级动作，实机门禁与最终 review 已通过 |
 | M7.4 Robot HA & Multi-role | `completed` | 4A–4E 技术/真实环境门禁及用户最终 review 已通过 |
-| M7.5 Role-aware Voice | `pending_real_environment` | 5A–5D 技术主体完成；5E 实机总门禁与 P4 可听观察待补 |
+| M7.5 Role-aware Voice | `pending_real_environment` | 5A–5D 完成；5E 历史自动化实机通过，当前候选重跑与人工观察延期 |
 | M7.6 Role-aware Memory | `completed` | 最终 review 通过；6F/6G/6H Cat 与 6I 已通过，其余真实门禁由用户接受延期 |
 | M7.7 Cat Autonomy | `completed` | 7A–7C 技术/实机门禁及用户最终 review 已通过 |
 
@@ -99,8 +99,11 @@ wake 与固定命令动作已通过。5B 最终 run `32627837273` 证明真实 P
 `32635742553` 已证明现场中文经真实 P4/VAD/固定 MLX STT 后只进入统一 Human Runtime，审计完整、
 Cat 零泄漏且不保留原始音频；独立 review 后技术门禁关闭。5D 已完成固定 Kokoro TTS、分角色
 Composer 消费、有界 P4 playback、统一语音 assembly 与 barge-in/Cat cancellation，最终全量
-319/319 且第五轮 closure review 为 no findings；当前进入 5E 安全/评测/实机总门禁。P4 可听
-startup tone 与分角色播放人工观察仍明确待补，默认 SR 仍关闭。
+319/319 且第五轮 closure review 为 no findings。5E 历史 `phase5e_ui` run `32862092039` 已自动
+证明真实模型/HA/STT 的读、低风险写入并恢复、Human 聊天和三次 UI ACK，artifact 隐私审计通过且
+音频明确 deferred。后续 Voice 产品改动仍需当前候选实机重跑；2026-08-28 用户要求真实环境与人工
+验证延期，因此 P4 UI 肉眼核对、startup tone/分角色播放可听观察和当前候选总门禁仍待补，默认
+SR 仍关闭。
 
 2026-08-24，Phase 6A–6D 依次完成 Memory Store、写入/冲突/删除策略、private 产品召回和三策略
 确定性 visibility 对照；6E 新增可重复 `pnpm gate:phase6` 并在 Node `v24.19.0` / pnpm `11.19.0`

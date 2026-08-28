@@ -10,6 +10,8 @@
 #define VOICE_TRANSPORT_TOKEN_MAX_BYTES 256U
 #define VOICE_TRANSPORT_SPKI_SHA256_BYTES 32U
 
+typedef bool (*voice_transport_capture_readiness_probe_t)(void *context);
+
 typedef struct {
     const char *uri;
     const char *device_id;
@@ -50,6 +52,8 @@ typedef struct {
     uint32_t playback_stack_high_water_bytes;
 } voice_transport_snapshot_t;
 
+esp_err_t voice_transport_set_capture_readiness_probe(
+    voice_transport_capture_readiness_probe_t probe, void *context);
 esp_err_t voice_transport_init(const voice_transport_config_t *config);
 esp_err_t voice_transport_start(void);
 esp_err_t voice_transport_stop(void);

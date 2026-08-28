@@ -240,9 +240,14 @@ class Phase5AVoiceContractTest(unittest.TestCase):
 
         runtime = source.split("static void sr_service_runtime_task(void *parameter)\n{", 1)[1]
         awake_reset = runtime.index("s_status.command_window_frame_count = 0;")
-        awake_state = runtime.index(
-            'sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_AWAKE, "wake detected hold elapsed")'
+        awake_state_match = re.search(
+            r"sr_service_set_voice_state\s*\(\s*"
+            r"SR_SERVICE_VOICE_STATE_AWAKE\s*,\s*"
+            r'"wake detected hold elapsed"\s*\)',
+            runtime,
         )
+        self.assertIsNotNone(awake_state_match)
+        awake_state = awake_state_match.start()
         frame_count = runtime.index("s_status.command_window_frame_count++;")
         detect_count = runtime.index("s_status.command_window_detect_call_count++;")
         detect_call = runtime.index("s_command_iface->detect(", detect_count)

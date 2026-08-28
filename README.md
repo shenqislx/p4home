@@ -51,9 +51,12 @@ wake 与固定命令动作门禁已通过；5B 最终 run `32627837273` 已证�
 fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 review 后技术门禁关闭。5C 最终 run
 `32635742553` 已证明真实 P4 中文输入经固定 STT 后只进入统一 Human Runtime，审计完整且 Cat 零
 泄漏；2026-08-24 确认开发板 `SPK/J16` 未连接外接扬声器，5A 人工可听验证暂缓至扬声器到货，
-数字播放 marker 不替代该输出证明。5D 分角色 TTS、播放与 barge-in 技术门禁已通过；5E
-安全/评测/真实硬件总门禁因当前 WSL2 不具备验证条件而保持 `pending_real_environment`，默认 SR
-仍关闭。2026-08-24 用户明确授权 Phase 6 先在 WSL2 完成编码、确定性测试与模拟验证。Phase 6A–6E
+数字播放 marker 不替代该输出证明。5D 分角色 TTS、播放与 barge-in 技术门禁已通过；5E 历史
+`phase5e_ui` run `32862092039` 已自动证明真实模型/HA/STT 的读、低风险写入并恢复、Human 聊天和
+三次 UI ACK，artifact 隐私审计通过且音频明确 deferred。后续 Voice 产品改动仍需当前候选实机
+重跑；2026-08-28 用户要求真实环境与人工验证延期，因此 P4 UI 肉眼核对、扬声器可听观察和当前
+候选总门禁继续保持 `pending_real_environment`，默认 SR 仍关闭。2026-08-24 用户明确授权 Phase 6
+先完成编码、确定性测试与模拟验证。Phase 6A–6E
 本地门禁现已完成：Memory contract/SQLite、
 确定性写入与删除、private 产品召回、三种 visibility 策略对照和 `pnpm gate:phase6` 均有本地证据。
 2026-08-24 用户已批准 visibility matrix v1 保持 `private`；三类 Memory 均保持 owner-role private，

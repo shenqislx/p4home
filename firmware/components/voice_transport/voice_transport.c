@@ -19,7 +19,6 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "ha_client.h"
 #include "mbedtls/sha256.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
@@ -132,6 +131,8 @@ typedef struct {
     bool rx_binary;
     bool ui_ack_pending;
     bool suppress_wake_session;
+    voice_transport_capture_readiness_probe_t capture_readiness_probe;
+    void *capture_readiness_context;
     voice_ui_ack_t pending_ui_ack;
     voice_transport_snapshot_t metrics;
 } voice_transport_state_t;
@@ -149,6 +150,12 @@ static void voice_end_capture(void *context, const char *reason, uint64_t ended_
 static void voice_wake_detected(void *context, uint64_t detected_at_us);
 static bool voice_ready_for_capture(void *context);
 static bool voice_suppress_wake_session(void *context);
+
+static bool voice_capture_dependency_ready(void)
+{
+    voice_transport_capture_readiness_probe_t probe = s_voice.capture_readiness_probe;
+    return probe != NULL && probe(s_voice.capture_readiness_context);
+}
 
 static bool voice_valid_uri(const char *uri)
 {
@@ -962,12 +969,12 @@ static void voice_wake_detected(void *context, uint64_t detected_at_us)
 {
     (void)context;
     (void)detected_at_us;
-    const bool ha_ready = ha_client_initial_sync_ready();
+    const bool dependency_ready = voice_capture_dependency_ready();
     taskENTER_CRITICAL(&s_voice.lock);
-    s_voice.suppress_wake_session = !ha_ready;
+    s_voice.suppress_wake_session = !dependency_ready;
     taskEXIT_CRITICAL(&s_voice.lock);
     voice_playback_receiver_barge_in();
-    if (ha_ready) voice_playback_receiver_request_wake_prompt();
+    if (dependency_ready) voice_playback_receiver_request_wake_prompt();
     else voice_playback_receiver_request_connecting_prompt();
 }
 
@@ -984,13 +991,14 @@ static bool voice_suppress_wake_session(void *context)
     const bool requested = s_voice.suppress_wake_session;
     s_voice.suppress_wake_session = false;
     taskEXIT_CRITICAL(&s_voice.lock);
-    const bool suppress = requested || !ha_client_initial_sync_ready();
+    const bool dependency_ready = voice_capture_dependency_ready();
+    const bool suppress = requested || !dependency_ready;
     if (suppress) {
         voice_playback_receiver_capture_finished();
         voice_playback_receiver_capture_failed();
         ESP_LOGW(TAG,
                  "VERIFY:voice:ha_gate:PASS action=suppressed_capture ha_ready=%s",
-                 ha_client_initial_sync_ready() ? "yes" : "no");
+                 dependency_ready ? "yes" : "no");
     }
     return suppress;
 }
@@ -1214,6 +1222,19 @@ static esp_err_t voice_delete_worker_task(void)
     return ESP_ERR_TIMEOUT;
 }
 
+esp_err_t voice_transport_set_capture_readiness_probe(
+    voice_transport_capture_readiness_probe_t probe, void *context)
+{
+    ESP_RETURN_ON_FALSE(!s_voice.initialized && !s_voice.running,
+                        ESP_ERR_INVALID_STATE, TAG,
+                        "capture readiness probe must be set before initialization");
+    ESP_RETURN_ON_FALSE(probe != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "capture readiness probe is required");
+    s_voice.capture_readiness_probe = probe;
+    s_voice.capture_readiness_context = context;
+    return ESP_OK;
+}
+
 esp_err_t voice_transport_init(const voice_transport_config_t *config)
 {
     if (s_voice.initialized) return ESP_OK;
@@ -1237,6 +1258,9 @@ esp_err_t voice_transport_init(const voice_transport_config_t *config)
         return ESP_OK;
 #endif
     }
+    ESP_RETURN_ON_FALSE(s_voice.capture_readiness_probe != NULL,
+                        ESP_ERR_INVALID_STATE, TAG,
+                        "capture readiness probe is not configured");
     if (!voice_valid_uri(config->uri) || !voice_valid_id(config->device_id) ||
         !voice_valid_token(config->device_token)) return ESP_ERR_INVALID_ARG;
     uint8_t zero_pin[VOICE_TRANSPORT_SPKI_SHA256_BYTES] = {0};

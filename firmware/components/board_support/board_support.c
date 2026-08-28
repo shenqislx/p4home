@@ -32,6 +32,14 @@ static bool s_board_initialized;
 #define CONFIG_P4HOME_SR_ENABLE 0
 #endif
 
+#if CONFIG_P4HOME_SR_ENABLE
+static bool board_support_voice_capture_ready(void *context)
+{
+    (void)context;
+    return ha_client_initial_sync_ready();
+}
+#endif
+
 static esp_err_t board_support_publish_gateway_state_internal(const char *reason)
 {
     gateway_service_panel_state_t panel_state = {
@@ -227,7 +235,11 @@ esp_err_t board_support_init(void)
 #endif
 
 #if CONFIG_P4HOME_SR_ENABLE
-    esp_err_t voice_ret = voice_transport_init(NULL);
+    esp_err_t voice_ret = voice_transport_set_capture_readiness_probe(
+        board_support_voice_capture_ready, NULL);
+    if (voice_ret == ESP_OK) {
+        voice_ret = voice_transport_init(NULL);
+    }
     if (voice_ret != ESP_OK) {
         ESP_LOGW(TAG, "voice transport init failed: %s", esp_err_to_name(voice_ret));
     }

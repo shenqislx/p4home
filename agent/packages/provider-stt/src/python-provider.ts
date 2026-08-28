@@ -195,6 +195,9 @@ export class PythonSttProvider implements SttProvider {
       }, this.#timeoutMs);
       timer.unref();
       options.signal?.addEventListener("abort", onAbort, { once: true });
+      if (options.signal?.aborted === true) {
+        onAbort();
+      }
       child.stdout.on("data", (chunk: Buffer) => {
         try { stdout = appendBounded(stdout, chunk); } catch (error) {
           fail(error as SttProviderError);
