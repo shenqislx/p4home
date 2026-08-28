@@ -64,7 +64,6 @@ jobs:
       AGENT_HOST: ${{ inputs.agent_host }}
       AGENT_PORT: ${{ inputs.agent_port }}
       IDF_SKIP_CHECK_SUBMODULES: "1"
-      P4HOME_SOURCE_ARCHIVE: ${{ runner.temp }}/p4home-${{ github.sha }}.tar.gz
 
     steps:
       - name: Checkout repository archive
@@ -74,6 +73,8 @@ jobs:
           set -euo pipefail
           EXPECTED_WORKSPACE="$RUNNER_WORKSPACE/${GITHUB_REPOSITORY#*/}"
           test "$GITHUB_WORKSPACE" = "$EXPECTED_WORKSPACE"
+          P4HOME_SOURCE_ARCHIVE="$RUNNER_TEMP/p4home-$GITHUB_SHA.tar.gz"
+          echo "P4HOME_SOURCE_ARCHIVE=$P4HOME_SOURCE_ARCHIVE" >> "$GITHUB_ENV"
           curl \
             --fail \
             --silent \

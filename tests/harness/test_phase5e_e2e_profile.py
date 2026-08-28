@@ -176,6 +176,26 @@ class Phase5eProfileTests(unittest.TestCase):
         finally_block = harness[harness.rindex("  } finally {"):]
         self.assertLess(finally_block.index("await runtime?.close()"), finally_block.index("restoreRobotState"))
 
+    def test_source_archive_path_is_initialized_inside_checkout_step(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        job_env = workflow.split("    env:", 1)[1].split("    steps:", 1)[0]
+        checkout = workflow.split(
+            "      - name: Checkout repository archive", 1
+        )[1].split("      - name: Validate runner and inputs", 1)[0]
+        self.assertNotIn("runner.temp", job_env)
+        assignment = 'P4HOME_SOURCE_ARCHIVE="$RUNNER_TEMP/p4home-$GITHUB_SHA.tar.gz"'
+        export = 'echo "P4HOME_SOURCE_ARCHIVE=$P4HOME_SOURCE_ARCHIVE" >> "$GITHUB_ENV"'
+        self.assertIn(assignment, checkout)
+        self.assertIn(export, checkout)
+        self.assertLess(checkout.index(assignment), checkout.index(export))
+        self.assertLess(checkout.index(export), checkout.index("curl \\"))
+        self.assertIn('--output "$P4HOME_SOURCE_ARCHIVE"', checkout)
+        self.assertEqual(
+            workflow.count('--source-archive "$P4HOME_SOURCE_ARCHIVE"'),
+            3,
+            "all Phase 5E and product-human audits must scan the pinned source archive",
+        )
+
     def test_workflow_wires_speakerless_real_model_ui_gate(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         for marker in (
