@@ -64,6 +64,7 @@ jobs:
       AGENT_HOST: ${{ inputs.agent_host }}
       AGENT_PORT: ${{ inputs.agent_port }}
       IDF_SKIP_CHECK_SUBMODULES: "1"
+      FLASH_BAUD: "115200"
 
     steps:
       - name: Checkout repository archive
@@ -142,6 +143,7 @@ jobs:
           test -f scripts/activate-idf-v5.5.4.sh
           test -s firmware/dependencies.lock
           test -f "$HOME/.espressif/tools/activate_idf_v5.5.4.sh"
+          test "$FLASH_BAUD" = "115200"
           echo "DEPENDENCY_LOCK_SHA256_BEFORE=$(shasum -a 256 firmware/dependencies.lock | awk '{print $1}')" >> "$GITHUB_ENV"
           echo "BUILD_DIR=$RUNNER_TEMP/p4home-hardware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
           echo "SIZE_REPORT=$RUNNER_TEMP/p4home-size-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json" >> "$GITHUB_ENV"
@@ -738,6 +740,7 @@ jobs:
             -D IDF_TARGET=esp32p4 \
             -D SDKCONFIG="$HARDWARE_SDKCONFIG" \
             -p "$SERIAL_PORT" \
+            -b "$FLASH_BAUD" \
             flash > "$monitor_log" 2>&1
           if [[ "$VALIDATION_PROFILE" == "phase5b_voice" || \
                 "$VALIDATION_PROFILE" == "phase5c_stt" || \
@@ -1339,6 +1342,7 @@ jobs:
               "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
               "job": "flash-and-monitor",
               "serial_port": os.environ["SERIAL_PORT"],
+              "flash_baud": int(os.environ["FLASH_BAUD"]),
               "monitor_seconds": int(os.environ["MONITOR_SECONDS"]),
               "capture_seconds": int(os.environ["CAPTURE_SECONDS"]),
               "validation_profile": os.environ["VALIDATION_PROFILE"],

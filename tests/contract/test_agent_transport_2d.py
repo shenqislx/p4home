@@ -149,6 +149,22 @@ class AgentTransportPhase2DContractTests(unittest.TestCase):
         self.assertIn("P4HOME_AGENT_DEVICE_TOKEN_FILE", workflow)
         self.assertNotIn("P4HOME_AGENT_DEVICE_TOKEN=", workflow)
 
+    def test_hardware_workflow_pins_noise_resilient_flash_baud(self) -> None:
+        workflow = HARDWARE_WORKFLOW.read_text(encoding="utf-8")
+        job_env = workflow.split("    env:", 1)[1].split("    steps:", 1)[0]
+        flash_step = workflow.split(
+            "      - name: Flash firmware and capture serial", 1
+        )[1].split("      - name: Append Agent harness evidence", 1)[0]
+        manifest_step = workflow.split(
+            "      - name: Write hardware validation manifest", 1
+        )[1].split("      - name: Audit final Phase 5E upload candidates", 1)[0]
+
+        self.assertIn('FLASH_BAUD: "115200"', job_env)
+        self.assertIn('-p "$SERIAL_PORT" \\\n            -b "$FLASH_BAUD" \\\n            flash', flash_step)
+        self.assertEqual(workflow.count('-b "$FLASH_BAUD"'), 1)
+        self.assertNotIn("460800", flash_step)
+        self.assertIn('"flash_baud": int(os.environ["FLASH_BAUD"])', manifest_step)
+
 
 if __name__ == "__main__":
     unittest.main()
