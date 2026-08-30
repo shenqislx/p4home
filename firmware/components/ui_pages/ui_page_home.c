@@ -69,11 +69,17 @@ typedef enum {
     UI_HOME_WEATHER_FOG,
 } ui_home_weather_t;
 
+typedef enum {
+    UI_HOME_PARTICLE_FALLING = 0,
+    UI_HOME_PARTICLE_SPLASH,
+} ui_home_particle_phase_t;
+
 typedef struct {
     lv_obj_t *sprite;
     int16_t art_x;
     int16_t art_y;
-    bool splashing;
+    ui_home_particle_phase_t phase;
+    uint8_t splash_frame;
 } ui_home_particle_t;
 
 static lv_obj_t *s_root;
@@ -419,7 +425,8 @@ static void ui_page_home_reseed_particle(size_t index)
      * makes simulator frame dumps comparable between builds. */
     particle->art_x = (int16_t)(4 + (index * 19U) % (UI_HOME_SKY_ART_W - 8));
     particle->art_y = (int16_t)(-(int16_t)((index * 7U) % UI_HOME_SKY_ART_H));
-    particle->splashing = false;
+    particle->phase = UI_HOME_PARTICLE_FALLING;
+    particle->splash_frame = 0;
 }
 
 static void ui_page_home_apply_weather(ui_home_weather_t weather)
@@ -438,8 +445,10 @@ static void ui_page_home_apply_weather(ui_home_weather_t weather)
             ui_pixel_fx_sprite_set_src(s_particles[i].sprite,
                              weather == UI_HOME_WEATHER_RAIN ? s_rain_frames[0]
                                                             : s_snow_frames[0]);
-            lv_obj_clear_flag(s_particles[i].sprite, LV_OBJ_FLAG_HIDDEN);
             ui_page_home_reseed_particle(i);
+            ui_pixel_fx_sprite_move(s_particles[i].sprite, s_particles[i].art_x,
+                                    s_particles[i].art_y);
+            lv_obj_clear_flag(s_particles[i].sprite, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_add_flag(s_particles[i].sprite, LV_OBJ_FLAG_HIDDEN);
         }
@@ -526,6 +535,24 @@ static bool ui_page_home_particle_tick(uint32_t tick, void *user_data)
         if (particle->sprite == NULL) {
             continue;
         }
+
+        /* A particle sprite has exactly one owner. Rain landing frames are
+         * advanced here instead of handing the sprite to the generic one-shot
+         * scheduler, which would otherwise race this loop's move/reseed. */
+        if (rain && particle->phase == UI_HOME_PARTICLE_SPLASH) {
+            if ((size_t)particle->splash_frame + 1U < FX_SPLASH_FRAME_COUNT) {
+                particle->splash_frame++;
+                ui_pixel_fx_sprite_set_src(particle->sprite,
+                                           s_splash_frames[particle->splash_frame]);
+            } else {
+                ui_pixel_fx_sprite_set_src(particle->sprite, s_rain_frames[0]);
+                ui_page_home_reseed_particle(i);
+                ui_pixel_fx_sprite_move(particle->sprite, particle->art_x,
+                                        particle->art_y);
+            }
+            continue;
+        }
+
         particle->art_y = (int16_t)(particle->art_y + (rain ? 3 : 1));
         if (!rain) {
             /* Quantised sway: a smooth sine would be sub-pixel at this scale. */
@@ -534,14 +561,13 @@ static bool ui_page_home_particle_tick(uint32_t tick, void *user_data)
         }
 
         if (particle->art_y >= UI_HOME_SKY_ART_H - 2) {
-            if (rain && !particle->splashing) {
-                particle->splashing = true;
-                ui_pixel_fx_play_once(particle->sprite, s_splash_frames,
-                                      FX_SPLASH_FRAME_COUNT, 1);
+            if (rain) {
+                particle->art_y = UI_HOME_SKY_ART_H - 2;
+                particle->phase = UI_HOME_PARTICLE_SPLASH;
+                particle->splash_frame = 0;
+                ui_pixel_fx_sprite_set_src(particle->sprite, s_splash_frames[0]);
             } else {
-                ui_pixel_fx_sprite_set_src(particle->sprite,
-                                 rain ? s_rain_frames[0] : s_snow_frames[0]);
-                lv_obj_clear_flag(particle->sprite, LV_OBJ_FLAG_HIDDEN);
+                ui_pixel_fx_sprite_set_src(particle->sprite, s_snow_frames[0]);
                 ui_page_home_reseed_particle(i);
             }
         } else if (rain) {
