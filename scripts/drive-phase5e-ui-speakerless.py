@@ -14,6 +14,9 @@ HA_INITIAL_SYNC_READY_MARKER = "VERIFY:ha:initial_sync_ready:PASS"
 HA_READINESS_TIMEOUT_SECONDS = 300
 WAKE_ATTEMPTS = 3
 WAKE_RETRY_DELAY_SECONDS = 1
+ATTEMPT_COMPLETED = "completed"
+ATTEMPT_TERMINAL_FAILED = "terminal_failed"
+ATTEMPT_TIMED_OUT = "timed_out"
 
 
 def count_marker(path: pathlib.Path, marker: str) -> int:
@@ -54,17 +57,27 @@ def wait_for_ha_readiness(monitor: pathlib.Path) -> None:
 
 
 def wait_attempt(
-    progress_file: pathlib.Path, target: int, timeout: float = 180
-) -> bool:
+    progress_file: pathlib.Path,
+    target: int,
+    attempts_before: int | None = None,
+    timeout: float = 270,
+) -> str:
     deadline = time.monotonic() + timeout
+    baseline = attempts_before
     while time.monotonic() < deadline:
-        completed, _attempts = progress_state(progress_file)
+        completed, attempts = progress_state(progress_file)
         if completed >= target:
-            return True
-        # capture_attempts advances after STT, before model execution and the
-        # required UI ACK. It is not a terminal signal for this interaction.
+            return ATTEMPT_COMPLETED
+        if baseline is None and attempts >= 0:
+            baseline = attempts
+        elif baseline is not None and attempts > baseline:
+            # VoiceSttPipeline records an attempt only after dispatch/UI has
+            # completed or the capture has reached a terminal pre-dispatch
+            # failure. The latter is safe to retry for read/chat, but a write
+            # must fail immediately rather than wait or replay blindly.
+            return ATTEMPT_TERMINAL_FAILED
         time.sleep(0.05)
-    return False
+    return ATTEMPT_TIMED_OUT
 
 
 def say(text: str, voice: str) -> None:
@@ -103,9 +116,18 @@ def speak_until_progress(
     monitor: pathlib.Path, progress_file: pathlib.Path, prompt: str, target: int
 ) -> None:
     for _attempt in range(3):
+        _completed, attempts_before = progress_state(progress_file)
+        if attempts_before < 0:
+            raise RuntimeError("invalid_progress_state")
         speak_interaction(monitor, prompt)
-        if wait_attempt(progress_file, target):
+        outcome = wait_attempt(progress_file, target, attempts_before)
+        if outcome == ATTEMPT_COMPLETED:
             return
+        if outcome == ATTEMPT_TIMED_OUT:
+            # With no terminal attempt record the existing interaction may
+            # still be inside its bounded STT/Role/UI work. Never overlap it
+            # with a replayed capture.
+            raise RuntimeError("interaction_attempt_timeout_no_replay")
     raise RuntimeError("voice_attempts_exhausted")
 
 
@@ -128,10 +150,15 @@ def main() -> int:
         wait_for_ha_readiness(args.monitor_log)
         speak_until_progress(args.monitor_log, args.progress_file, prompts["read"], 1)
 
+        _completed, write_attempts_before = progress_state(args.progress_file)
+        if write_attempts_before < 0:
+            raise RuntimeError("invalid_progress_state")
         speak_interaction(args.monitor_log, prompts["write"])
         # A write is never replayed: its HA side effect may have crossed the
         # boundary even when the terminal observation or UI ACK is delayed.
-        if not wait_attempt(args.progress_file, 2, timeout=420):
+        if wait_attempt(
+            args.progress_file, 2, write_attempts_before, timeout=420
+        ) != ATTEMPT_COMPLETED:
             raise RuntimeError("write_attempt_not_completed_no_replay")
 
         speak_until_progress(args.monitor_log, args.progress_file, prompts["barge"], 3)

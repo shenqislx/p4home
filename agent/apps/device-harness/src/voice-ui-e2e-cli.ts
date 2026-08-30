@@ -68,6 +68,7 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 async function waitForResults(
   runtime: UnifiedVoiceRuntime,
   progressFile: string,
+  inputDriverStatusFile: string,
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<void> {
@@ -84,6 +85,13 @@ async function waitForResults(
     if (serialized !== published) {
       await atomicJson(progressFile, snapshot);
       published = serialized;
+    }
+    try {
+      const inputStatus = (await readFile(inputDriverStatusFile, "ascii")).trim();
+      if (inputStatus === "1") throw new Error("voice_ui_input_driver_failed");
+      if (inputStatus !== "0") throw new Error("voice_ui_input_driver_status_invalid");
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
     }
     if (performance.now() >= deadline) throw new Error("voice_ui_e2e_result_timeout");
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -109,6 +117,7 @@ async function main(): Promise<void> {
   const resultFile = requiredEnvironment("P4HOME_HARNESS_RESULT_FILE");
   const promptFile = requiredEnvironment("P4HOME_PHASE5E_PROMPT_FILE");
   const progressFile = requiredEnvironment("P4HOME_PHASE5E_PROGRESS_FILE");
+  const inputDriverStatusFile = requiredEnvironment("P4HOME_PHASE5E_UI_INPUT_STATUS_FILE");
   const alias = process.env.P4HOME_PHASE4C_ALIAS?.trim() || "study_ceiling_light";
   const haUrl = requiredEnvironment("P4HOME_PHASE4C_HA_URL");
   const config = await loadRobotHaRuntimeConfig({
@@ -276,7 +285,9 @@ async function main(): Promise<void> {
     process.stdout.write(
       "HARNESS:voice_ui_e2e_server:READY ui=required audio=deferred raw_audio_retained=false\n",
     );
-    await waitForResults(runtime, progressFile, 900_000, shutdown.signal);
+    await waitForResults(
+      runtime, progressFile, inputDriverStatusFile, 900_000, shutdown.signal,
+    );
     await runtime.pipeline.drain();
 
     const voiceResults = runtime.coordinator.results;

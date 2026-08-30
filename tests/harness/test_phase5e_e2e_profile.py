@@ -225,8 +225,14 @@ class Phase5eProfileTests(unittest.TestCase):
             "createPrivateRoleMemoryRuntime",
             "validatePhase5eSpeakerlessUiGate",
             "VERIFY:phase5e:voice_ui_e2e:PASS",
+            'requiredEnvironment("P4HOME_PHASE5E_UI_INPUT_STATUS_FILE")',
+            'throw new Error("voice_ui_input_driver_failed")',
         ):
             self.assertIn(marker, harness)
+        phase5e_ui_harness = workflow.split(
+            'elif [[ "$VALIDATION_PROFILE" == "phase5e_ui" ]]', 1
+        )[1].split("HARNESS_ENTRYPOINT=apps/device-harness/src/voice-ui-e2e-cli.ts", 1)[0]
+        self.assertIn("export P4HOME_PHASE5E_UI_INPUT_STATUS_FILE", phase5e_ui_harness)
         ui_actor = (
             ROOT / "firmware/components/ui_pages/ui_home_actor.c"
         ).read_text(encoding="utf-8")
@@ -307,7 +313,8 @@ class Phase5eProfileTests(unittest.TestCase):
                 mock.patch.object(driver, "wait_for_ha_readiness", side_effect=readiness),
                 mock.patch.object(driver, "speak_until_progress", side_effect=repeatable),
                 mock.patch.object(driver, "speak_interaction", side_effect=write_once),
-                mock.patch.object(driver, "wait_attempt", return_value=True),
+                mock.patch.object(driver, "progress_state", return_value=(1, 1)),
+                mock.patch.object(driver, "wait_attempt", return_value=driver.ATTEMPT_COMPLETED),
             ):
                 self.assertEqual(driver.main(), 0)
 
@@ -543,9 +550,36 @@ class Phase5eProfileTests(unittest.TestCase):
                     ),
                     mock.patch.object(driver.time, "sleep"),
                 ):
-                    self.assertTrue(
-                        driver.wait_attempt(pathlib.Path("progress.json"), 1, timeout=1)
-                    )
+                    outcome = driver.wait_attempt(pathlib.Path("progress.json"), 1, timeout=1)
+                    if path == UI_DRIVER:
+                        self.assertEqual(outcome, driver.ATTEMPT_COMPLETED)
+                    else:
+                        self.assertTrue(outcome)
+
+    def test_speakerless_ui_driver_stops_waiting_on_terminal_failed_attempt(self):
+        driver = self.load_driver(UI_DRIVER, "phase5e_ui_terminal_attempt_driver")
+        with mock.patch.object(driver, "progress_state", return_value=(1, 3)):
+            self.assertEqual(
+                driver.wait_attempt(
+                    pathlib.Path("progress.json"), 2, attempts_before=2, timeout=420
+                ),
+                driver.ATTEMPT_TERMINAL_FAILED,
+            )
+
+    def test_speakerless_ui_driver_never_replays_an_unsettled_timeout(self):
+        driver = self.load_driver(UI_DRIVER, "phase5e_ui_unsettled_timeout_driver")
+        with (
+            mock.patch.object(driver, "progress_state", return_value=(0, 0)),
+            mock.patch.object(driver, "speak_interaction") as speak_mock,
+            mock.patch.object(
+                driver, "wait_attempt", return_value=driver.ATTEMPT_TIMED_OUT
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "interaction_attempt_timeout_no_replay"):
+                driver.speak_until_progress(
+                    pathlib.Path("monitor.log"), pathlib.Path("progress.json"), "private", 1
+                )
+        speak_mock.assert_called_once()
 
     def test_workflow_keeps_business_verdict_out_of_transport_assertion(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
