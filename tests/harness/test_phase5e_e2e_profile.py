@@ -750,6 +750,15 @@ class Phase5eProfileTests(unittest.TestCase):
                 "--audit-db", str(database), "--result", str(result),
             )
             self.assertEqual(self.run_audit(command), 0)
+            result_payload["stt_calls"] = 5
+            result_payload["stt_transcript_mismatches"] = 1
+            result.write_text(json.dumps(result_payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "the audio profile has no transcript retry contract",
+            )
+            result_payload["stt_calls"] = 4
+            result_payload["stt_transcript_mismatches"] = 0
             result_payload["interactions"][0]["metrics"]["stages"]["stt"]["attempts"] = 0
             result.write_text(json.dumps(result_payload), encoding="utf-8")
             self.assertNotEqual(self.run_audit(command), 0)
@@ -848,6 +857,9 @@ class Phase5eProfileTests(unittest.TestCase):
                 )],
                 "stt_provider_version": "1", "stt_model_revision": "a" * 40,
                 "stt_calls": 3, "stt_transcript_mismatches": 0, "stt_total_ms": 1,
+                "stt_rejections_by_expected_kind": {
+                    "read": 0, "write": 0, "chat": 0, "unexpected": 0,
+                },
                 "real_model_calls": 7, "audit_events": 6, "restored": True,
                 "read_passed": True, "write_passed": True, "chat_passed": True,
                 "ui_deliveries_completed": 3, "audio_delivery_deferred": True,
@@ -864,6 +876,65 @@ class Phase5eProfileTests(unittest.TestCase):
             )
             self.assertEqual(self.run_audit(command), 0)
             payload = json.loads(result.read_text(encoding="utf-8"))
+            payload["stt_calls"] = 7
+            payload["stt_transcript_mismatches"] = 4
+            payload["stt_rejections_by_expected_kind"] = {
+                "read": 2, "write": 0, "chat": 2, "unexpected": 0,
+            }
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(
+                self.run_audit(command), 0,
+                "read/chat retries at the exact driver upper bound are valid",
+            )
+            payload["stt_calls"] = 5
+            payload["stt_transcript_mismatches"] = 1
+            payload["stt_rejections_by_expected_kind"] = {
+                "read": 1, "write": 0, "chat": 0, "unexpected": 0,
+            }
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "every extra STT call must have a rejection attribution",
+            )
+            payload["stt_calls"] = 6
+            payload["stt_transcript_mismatches"] = 3
+            payload["stt_rejections_by_expected_kind"] = {
+                "read": 3, "write": 0, "chat": 0, "unexpected": 0,
+            }
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "read rejections beyond its retry budget must fail closed",
+            )
+            for forbidden_kind in ("write", "unexpected"):
+                payload["stt_calls"] = 4
+                payload["stt_transcript_mismatches"] = 1
+                payload["stt_rejections_by_expected_kind"] = {
+                    "read": 0, "write": 0, "chat": 0, "unexpected": 0,
+                }
+                payload["stt_rejections_by_expected_kind"][forbidden_kind] = 1
+                result.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertNotEqual(
+                    self.run_audit(command), 0,
+                    f"{forbidden_kind} rejections must fail closed",
+                )
+            payload["stt_rejections_by_expected_kind"] = {
+                "read": 0, "write": 0, "chat": 0,
+            }
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(self.run_audit(command), 0)
+            payload["stt_rejections_by_expected_kind"] = {
+                "read": True, "write": 0, "chat": 0, "unexpected": 0,
+            }
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(self.run_audit(command), 0)
+            payload["stt_calls"] = 3
+            payload["stt_transcript_mismatches"] = 0
+            payload["stt_rejections_by_expected_kind"] = {
+                "read": 0, "write": 0, "chat": 0, "unexpected": 0,
+            }
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            payload = json.loads(result.read_text(encoding="utf-8"))
             payload["interaction_metrics"][0]["metrics"]["stages"]["p4_wake"][
                 "duration_ms"
             ] = 0
@@ -879,6 +950,32 @@ class Phase5eProfileTests(unittest.TestCase):
             payload["unexpected"] = "field"
             result.write_text(json.dumps(payload), encoding="utf-8")
             self.assertNotEqual(self.run_audit(command), 0)
+
+    def test_voice_ui_result_attributes_rejections_before_dispatch(self):
+        source = (
+            ROOT / "agent/apps/device-harness/src/voice-ui-e2e-cli.ts"
+        ).read_text(encoding="utf-8")
+        measured = source.split(
+            "const measuredStt: SttProvider", 1
+        )[1].split("const roleResults", 1)[0]
+        result = source.split("await atomicJson(resultFile", 1)[1].split(
+            "process.stdout.write", 1
+        )[0]
+
+        self.assertIn("const transcriptRejectionsByExpectedKind = {", source)
+        for expected_kind in ("read", "write", "chat", "unexpected"):
+            self.assertIn(f"{expected_kind}: 0", source)
+        self.assertLess(
+            measured.index("transcriptRejectionsByExpectedKind"),
+            measured.index("throw new SttProviderError("),
+        )
+        self.assertIn(
+            "else transcriptRejectionsByExpectedKind.unexpected++", measured
+        )
+        self.assertIn(
+            "stt_rejections_by_expected_kind: transcriptRejectionsByExpectedKind",
+            result,
+        )
 
     def test_artifact_audit_rejects_loose_and_symlinked_inputs(self):
         with tempfile.TemporaryDirectory() as temporary:

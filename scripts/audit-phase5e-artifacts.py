@@ -33,7 +33,8 @@ UI_RESULT_KEYS = {
     "schema_version", "profile", "passed", "interaction_kinds", "role_ids",
     "role_statuses", "voice_outcomes", "ui_delivery_statuses",
     "audio_delivery_statuses", "stt_provider_version", "stt_model_revision",
-    "stt_calls", "stt_transcript_mismatches", "stt_total_ms", "real_model_calls",
+    "stt_calls", "stt_transcript_mismatches", "stt_rejections_by_expected_kind",
+    "stt_total_ms", "real_model_calls",
     "audit_events", "restored", "read_passed", "write_passed", "chat_passed",
     "ui_deliveries_completed", "audio_delivery_deferred",
     "composition_audits_persisted", "raw_audio_retained",
@@ -58,6 +59,13 @@ STAGE_STATUSES = {
     "cancelled", "completed", "failed", "hardware_pending", "not_applicable",
     "not_attempted", "partial", "timed_out", "unavailable",
 }
+UI_REQUIRED_INTERACTIONS = 3
+# The speakerless driver may retry the read and chat prompts twice each. The
+# write prompt is never replayed because its HA side effect may have crossed
+# the boundary. Every extra STT call must therefore be an explicitly rejected
+# transcript and the bounded total cannot exceed 3 + 2 + 2.
+UI_MAX_REJECTED_TRANSCRIPTS = 4
+UI_STT_REJECTION_KEYS = {"read", "write", "chat", "unexpected"}
 
 
 def bounded_counter(value: object) -> bool:
@@ -174,16 +182,45 @@ def metrics_schema_valid(
     )
 
 
+def ui_stt_attempts_valid(result: dict) -> bool:
+    stt_calls = result.get("stt_calls")
+    transcript_mismatches = result.get("stt_transcript_mismatches")
+    rejections = result.get("stt_rejections_by_expected_kind")
+    if (not isinstance(rejections, dict) or set(rejections) != UI_STT_REJECTION_KEYS
+            or not all(bounded_counter(value) for value in rejections.values())
+            or not bounded_counter(stt_calls)
+            or not bounded_counter(transcript_mismatches)):
+        return False
+    rejected = sum(rejections.values())
+    return (
+        rejections["read"] <= 2
+        and rejections["write"] == 0
+        and rejections["chat"] <= 2
+        and rejections["unexpected"] == 0
+        and rejected <= UI_MAX_REJECTED_TRANSCRIPTS
+        and transcript_mismatches == rejected
+        and stt_calls == UI_REQUIRED_INTERACTIONS + rejected
+    )
+
+
 def common_result_schema_valid(result: dict, profile: str) -> bool:
-    expected_calls = 3 if profile == "phase5e_ui" else 4
+    stt_calls = result.get("stt_calls")
+    stt_attempts_valid = (
+        ui_stt_attempts_valid(result)
+        if profile == "phase5e_ui"
+        else (
+            profile == "phase5e_e2e"
+            and stt_calls == 4
+            and result.get("stt_transcript_mismatches") == 0
+        )
+    )
     return (
         result.get("profile") == profile
         and result.get("passed") is True
         and pinned_version(result.get("stt_provider_version"))
         and pinned_revision(result.get("stt_model_revision"))
-        and result.get("stt_calls") == expected_calls
-        and result.get("stt_transcript_mismatches") == 0
-        and bounded_integer(result.get("stt_total_ms"), expected_calls * 600_000)
+        and stt_attempts_valid
+        and bounded_integer(result.get("stt_total_ms"), stt_calls * 600_000)
         and bounded_integer(result.get("audit_events"), 65_536)
         and result.get("restored") is True
         and result.get("raw_audio_retained") is False

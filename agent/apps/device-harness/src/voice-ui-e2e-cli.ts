@@ -184,6 +184,12 @@ async function main(): Promise<void> {
     const expectedKinds = ["read", "write", "barge"] as const;
     let acceptedTranscripts = 0;
     let transcriptMismatches = 0;
+    const transcriptRejectionsByExpectedKind = {
+      read: 0,
+      write: 0,
+      chat: 0,
+      unexpected: 0,
+    };
     const pythonStt = new PythonSttProvider({
       python_executable: requiredEnvironment("P4HOME_STT_PYTHON"),
       worker_script: requiredEnvironment("P4HOME_STT_WORKER"),
@@ -200,6 +206,10 @@ async function main(): Promise<void> {
           const kind = classifyPhase5ePrompt(transcript.text, prompts);
           if (kind === null || kind !== expectedKinds[acceptedTranscripts]) {
             transcriptMismatches++;
+            if (acceptedTranscripts === 0) transcriptRejectionsByExpectedKind.read++;
+            else if (acceptedTranscripts === 1) transcriptRejectionsByExpectedKind.write++;
+            else if (acceptedTranscripts === 2) transcriptRejectionsByExpectedKind.chat++;
+            else transcriptRejectionsByExpectedKind.unexpected++;
             throw new SttProviderError(
               "INVALID_RESPONSE", "Phase 5E transcript did not match speakerless UI prompt",
             );
@@ -317,6 +327,7 @@ async function main(): Promise<void> {
       stt_model_revision: STT_MODEL_REVISION,
       stt_calls: sttDurations.length,
       stt_transcript_mismatches: transcriptMismatches,
+      stt_rejections_by_expected_kind: transcriptRejectionsByExpectedKind,
       stt_total_ms: Math.round(sttDurations.reduce((sum, value) => sum + value, 0)),
       real_model_calls: realModelCalls,
       audit_events: auditEvents,
