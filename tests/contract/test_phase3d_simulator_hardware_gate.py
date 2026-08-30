@@ -8,6 +8,30 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class Phase3DSimulatorHardwareGateContractTests(unittest.TestCase):
+    def test_simulator_uses_the_real_conversation_service_with_a_host_mutex_shim(
+        self,
+    ) -> None:
+        cmake = (ROOT / "sim/CMakeLists.txt").read_text(encoding="utf-8")
+        semaphore = (ROOT / "sim/shim/freertos/semphr.h").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            'set(CONVERSATION_SERVICE_DIR "${FIRMWARE_DIR}/components/conversation_service")',
+            cmake,
+        )
+        self.assertIn(
+            '"${CONVERSATION_SERVICE_DIR}/conversation_service.c"', cmake
+        )
+        self.assertIn('"${CONVERSATION_SERVICE_DIR}/include"', cmake)
+        self.assertIn('"${UI_PAGES_DIR}/ui_async.c"', cmake)
+        self.assertNotIn("fake_conversation_service", cmake)
+        self.assertIn("typedef sim_semaphore_t *SemaphoreHandle_t;", semaphore)
+        self.assertIn("xSemaphoreCreateMutex", semaphore)
+        self.assertIn("xSemaphoreTake", semaphore)
+        self.assertIn("xSemaphoreGive", semaphore)
+        self.assertIn("single threaded", semaphore)
+
     def test_pixel_renderer_consumes_object_semantics_and_exposes_a_gate(self) -> None:
         actor = (ROOT / "firmware/components/ui_pages/ui_home_actor.c").read_text(
             encoding="utf-8"

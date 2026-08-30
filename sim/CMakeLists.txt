@@ -33,6 +33,7 @@ set(UI_ART_DIR "${FIRMWARE_DIR}/components/ui_pixel_art")
 set(WORLD_SERVICE_DIR "${FIRMWARE_DIR}/components/world_service")
 set(VOICE_PROTOCOL_DIR "${FIRMWARE_DIR}/components/voice_protocol")
 set(AUDIO_SERVICE_DIR "${FIRMWARE_DIR}/components/audio_service")
+set(CONVERSATION_SERVICE_DIR "${FIRMWARE_DIR}/components/conversation_service")
 
 function(add_audio_service_lease_host_test_target)
     add_executable(audio_service_lease_host_test
@@ -157,11 +158,13 @@ add_executable(pixel_sim
     fake/fake_ha_client.c
     fake/fake_panel_data_store.c
     fake/fake_scenario.c
+    "${UI_PAGES_DIR}/ui_async.c"
     "${UI_PAGES_DIR}/ui_page_home.c"
     "${UI_PAGES_DIR}/ui_home_rooms.c"
     "${UI_PAGES_DIR}/ui_home_actor.c"
     "${UI_PAGES_DIR}/ui_pixel_fx.c"
     "${UI_PAGES_DIR}/ui_time_source.c"
+    "${CONVERSATION_SERVICE_DIR}/conversation_service.c"
     "${WORLD_SERVICE_DIR}/world_service.c"
     "${WORLD_SERVICE_DIR}/world_object_registry.c"
     "${UI_PAGES_DIR}/fonts/ui_font_source_han_sans_sc_16.c"
@@ -176,6 +179,7 @@ target_include_directories(pixel_sim PRIVATE
     "${UI_PAGES_DIR}"
     "${UI_PAGES_DIR}/include"
     "${UI_ART_DIR}/include"
+    "${CONVERSATION_SERVICE_DIR}/include"
     "${WORLD_SERVICE_DIR}/include"
     "${FIRMWARE_DIR}/components/ha_client/include"
     "${FIRMWARE_DIR}/components/panel_data_store/include"
