@@ -29,6 +29,7 @@ typedef struct {
 } voice_playback_snapshot_t;
 
 esp_err_t voice_playback_receiver_init(voice_playback_send_json_fn send_json, void *context);
+esp_err_t voice_playback_receiver_deinit(void);
 esp_err_t voice_playback_receiver_start(void);
 esp_err_t voice_playback_receiver_stop(void);
 bool voice_playback_receiver_matches(const cJSON *root);

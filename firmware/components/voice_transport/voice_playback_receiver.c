@@ -6,9 +6,11 @@
 
 #include "audio_service.h"
 #include "conversation_service.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "sr_service.h"
@@ -521,7 +523,9 @@ esp_err_t voice_playback_receiver_init(voice_playback_send_json_fn send_json, vo
 {
     if (send_json == NULL) return ESP_ERR_INVALID_ARG;
     if (s_playback.initialized) return ESP_OK;
-    s_playback.queue = xQueueCreate(PLAYBACK_QUEUE_FRAMES, sizeof(playback_frame_t));
+    s_playback.queue = xQueueCreateWithCaps(
+        PLAYBACK_QUEUE_FRAMES, sizeof(playback_frame_t),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (s_playback.queue == NULL) return ESP_ERR_NO_MEM;
     s_playback.send_json = send_json;
     s_playback.send_context = context;
@@ -529,10 +533,26 @@ esp_err_t voice_playback_receiver_init(voice_playback_send_json_fn send_json, vo
     return ESP_OK;
 }
 
+esp_err_t voice_playback_receiver_deinit(void)
+{
+    if (s_playback.running || s_playback.task != NULL ||
+        s_playback.state != PLAYBACK_IDLE) return ESP_ERR_INVALID_STATE;
+    if (s_playback.queue != NULL) {
+        vQueueDeleteWithCaps(s_playback.queue);
+        s_playback.queue = NULL;
+    }
+    s_playback.state = PLAYBACK_IDLE;
+    s_playback.send_json = NULL;
+    s_playback.send_context = NULL;
+    s_playback.initialized = false;
+    return ESP_OK;
+}
+
 esp_err_t voice_playback_receiver_start(void)
 {
     if (!s_playback.initialized) return ESP_ERR_INVALID_STATE;
     if (s_playback.running) return ESP_OK;
+    if (s_playback.task != NULL) return ESP_ERR_INVALID_STATE;
     s_playback.running = true;
     if (xTaskCreate(playback_task, "voice_playback", PLAYBACK_TASK_STACK, NULL, 5,
                     &s_playback.task) != pdPASS) {
@@ -544,8 +564,8 @@ esp_err_t voice_playback_receiver_start(void)
 
 esp_err_t voice_playback_receiver_stop(void)
 {
-    if (!s_playback.running) return ESP_OK;
     s_playback.running = false;
+    if (s_playback.task == NULL) return ESP_OK;
     for (size_t i = 0; i < 250U; ++i) {
         if (eTaskGetState(s_playback.task) == eSuspended) {
             vTaskDelete(s_playback.task);

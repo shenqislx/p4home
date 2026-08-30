@@ -243,6 +243,149 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
             self.assertIn("MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT", background)
             self.assertIn("VERIFY:phase5b:background_stack:PASS", background)
 
+    def test_pcm_queues_use_psram_caps_api_with_matching_cleanup(self) -> None:
+        firmware = VOICE_SOURCE.read_text(encoding="utf-8")
+        playback = PLAYBACK_SOURCE.read_text(encoding="utf-8")
+
+        initialize = firmware[
+            firmware.index("esp_err_t voice_transport_init("):
+            firmware.index("esp_err_t voice_transport_start(")
+        ]
+        self.assertIn("s_voice.frame_queue = xQueueCreateWithCaps(", initialize)
+        self.assertIn("MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT", initialize)
+        self.assertNotIn("s_voice.frame_queue = xQueueCreate(", initialize)
+        self.assertGreaterEqual(initialize.count("vQueueDeleteWithCaps(s_voice.frame_queue)"), 4)
+        self.assertNotIn("vQueueDelete(s_voice.frame_queue)", initialize)
+        self.assertIn("voice_playback_receiver_deinit()", initialize)
+
+        playback_lifecycle = playback[
+            playback.index("esp_err_t voice_playback_receiver_init("):
+            playback.index("esp_err_t voice_playback_receiver_start(")
+        ]
+        self.assertIn("s_playback.queue = xQueueCreateWithCaps(", playback_lifecycle)
+        self.assertIn("MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT", playback_lifecycle)
+        self.assertNotIn("s_playback.queue = xQueueCreate(", playback_lifecycle)
+        self.assertIn("vQueueDeleteWithCaps(s_playback.queue)", playback_lifecycle)
+        self.assertNotIn("vQueueDelete(s_playback.queue)", playback_lifecycle)
+        self.assertIn("s_playback.running || s_playback.task != NULL ||", playback_lifecycle)
+        self.assertIn("s_playback.state != PLAYBACK_IDLE", playback_lifecycle)
+        self.assertIn("audio_service_write_speaker_samples", playback)
+
+        start = playback[
+            playback.index("esp_err_t voice_playback_receiver_start("):
+            playback.index("esp_err_t voice_playback_receiver_stop(")
+        ]
+        stop = playback[
+            playback.index("esp_err_t voice_playback_receiver_stop("):
+            playback.index("bool voice_playback_receiver_matches(")
+        ]
+        self.assertIn("if (s_playback.task != NULL) return ESP_ERR_INVALID_STATE;", start)
+        self.assertIn("s_playback.running = false;", stop)
+        self.assertIn("if (s_playback.task == NULL) return ESP_OK;", stop)
+        self.assertNotIn("if (!s_playback.running) return ESP_OK;", stop)
+        self.assertIn("s_playback.task = NULL;", stop)
+
+    def test_ha_auth_send_failure_is_retryable_and_diagnostic_is_aggregate_only(self) -> None:
+        ha = HA_SOURCE.read_text(encoding="utf-8")
+        auth = ha[
+            ha.index('if (strcmp(type->valuestring, "auth_required") == 0)'):
+            ha.index('} else if (strcmp(type->valuestring, "auth_ok") == 0)')
+        ]
+
+        self.assertIn("const int sent = esp_websocket_client_send_text(", auth)
+        self.assertIn("if (sent != (int)auth_len)", auth)
+        failure = auth[auth.index("if (sent != (int)auth_len)"):auth.index("} else {")]
+        self.assertIn('"auth_send_failed", "auth_send_failed"', failure)
+        self.assertNotIn("HA_CLIENT_STATE_AUTHENTICATING", failure)
+        success = auth[auth.index("} else {"):]
+        self.assertIn("s_ctx.auth_sent = true;", success)
+        self.assertIn("HA_CLIENT_STATE_AUTHENTICATING", success)
+        self.assertNotIn("portMAX_DELAY", auth)
+        self.assertIn("pdMS_TO_TICKS(HA_CLIENT_AUTH_SEND_TIMEOUT_MS)", auth)
+        self.assertIn("CONFIG_P4HOME_HA_CLIENT_HANDSHAKE_TIMEOUT_MS / 2U", ha)
+        self.assertIn("< 3000U", ha)
+        self.assertIn("mbedtls_platform_zeroize(auth_json, sizeof(auth_json))", auth)
+        self.assertIn("mbedtls_platform_zeroize(token, sizeof(token))", auth)
+        self.assertIn('"auth_token_unavailable", "auth_token_unavailable"', auth)
+
+        fail_helper = ha[
+            ha.index("static void ha_client_signal_handshake_failure("):
+            ha.index("static void ha_client_set_call_result_locked(")
+        ]
+        self.assertIn("s_ctx.auth_sent = false;", fail_helper)
+        self.assertIn("s_ctx.authenticated = false;", fail_helper)
+        self.assertIn("HA_CLIENT_STATE_ERROR", fail_helper)
+        self.assertIn("xEventGroupClearBits(s_ctx.event_group, HA_CLIENT_READY_BIT)", fail_helper)
+        self.assertIn("HA_CLIENT_HANDSHAKE_FAILED_BIT", fail_helper)
+
+        auth_ok = ha[
+            ha.index('} else if (strcmp(type->valuestring, "auth_ok") == 0)'):
+            ha.index('} else if (strcmp(type->valuestring, "auth_invalid") == 0)')
+        ]
+        for condition in (
+            "source_client == s_ctx.ws",
+            "s_ctx.ws_connected",
+            "s_ctx.auth_sent",
+            "s_ctx.state == HA_CLIENT_STATE_AUTHENTICATING",
+            "(handshake_bits & HA_CLIENT_HANDSHAKE_FAILED_BIT) == 0U",
+        ):
+            self.assertIn(condition, auth_ok)
+        self.assertIn("if (accept_auth_ok)", auth_ok)
+        self.assertIn("ignored out-of-sequence HA auth_ok", auth_ok)
+
+        worker = ha[
+            ha.index("static void ha_client_worker("):
+            ha.index("static esp_err_t ha_client_delete_worker_task(")
+        ]
+        failure_check = worker.index("if ((bits & HA_CLIENT_FAILURE_BITS) != 0U)")
+        ready_check = worker.index("else if ((bits & HA_CLIENT_READY_BIT) != 0U)")
+        self.assertLess(failure_check, ready_check)
+        failure_mask = ha[
+            ha.index("#define HA_CLIENT_FAILURE_BITS"):
+            ha.index("#define HA_CLIENT_MAX_INITIAL_ENTITIES")
+        ]
+        for failure_bit in (
+            "HA_CLIENT_AUTH_FAIL_BIT",
+            "HA_CLIENT_FATAL_ERROR_BIT",
+            "HA_CLIENT_HANDSHAKE_FAILED_BIT",
+        ):
+            with self.subTest(failure_bit=failure_bit):
+                self.assertIn(failure_bit, failure_mask)
+
+        auth_invalid = ha[
+            ha.index('} else if (strcmp(type->valuestring, "auth_invalid") == 0)'):
+            ha.index('} else if (strcmp(type->valuestring, "result") == 0)')
+        ]
+        self.assertIn("s_ctx.authenticated = false;", auth_invalid)
+        self.assertIn("s_ctx.auth_sent = false;", auth_invalid)
+        self.assertIn("ha_client_reset_subscription_locked();", auth_invalid)
+        self.assertIn("HA_CLIENT_STATE_ERROR", auth_invalid)
+        self.assertIn('ha_client_set_error_locked("auth_invalid")', auth_invalid)
+        self.assertIn("xEventGroupClearBits(s_ctx.event_group, HA_CLIENT_READY_BIT |", auth_invalid)
+
+        wait_ready = ha[
+            ha.index("esp_err_t ha_client_wait_ready("):
+            ha.index("bool ha_client_ready(")
+        ]
+        self.assertGreaterEqual(
+            wait_ready.count("if ((bits & HA_CLIENT_FAILURE_BITS) != 0U)"), 2
+        )
+        self.assertLess(
+            wait_ready.index("if ((bits & HA_CLIENT_FAILURE_BITS) != 0U)"),
+            wait_ready.index("if ((bits & HA_CLIENT_READY_BIT) != 0U)"),
+        )
+        self.assertIn("HA_CLIENT_READY_BIT | HA_CLIENT_FAILURE_BITS", wait_ready)
+        self.assertIn("return ESP_FAIL;", wait_ready)
+
+        self.assertIn("HA_CLIENT_HANDSHAKE_FAILED_BIT", ha)
+        self.assertIn('ha_client_log_internal_heap("ws_init_before")', ha)
+        self.assertIn('"ws_start_ok"', ha)
+        self.assertIn('ha_client_log_internal_heap("ws_connected")', ha)
+        self.assertIn('"auth_send_failed", "auth_send_failed"', ha)
+        self.assertIn("internal_free=%u internal_largest=%u internal_min=%u", ha)
+        self.assertIn("error type=%d errno=%d handshake_status=%d", ha)
+        self.assertNotRegex(ha, r"HA heap[^\n]*(token|entity|url)")
+
     def test_defaults_remain_disabled_and_diagnostics_are_aggregate_only(self) -> None:
         defaults = (ROOT / "firmware/sdkconfig.defaults").read_text(encoding="utf-8")
         kconfig = VOICE_KCONFIG.read_text(encoding="utf-8")

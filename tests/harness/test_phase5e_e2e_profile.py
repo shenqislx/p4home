@@ -354,6 +354,83 @@ class Phase5eProfileTests(unittest.TestCase):
         self.assertIn("ha_client_mark_initial_sync_done(false);", get_states)
         self.assertNotIn("ha_client_mark_initial_sync_done(true);", get_states)
 
+    def test_phase5e_voice_memory_and_ha_auth_hardening_contract(self):
+        voice = (
+            ROOT / "firmware/components/voice_transport/voice_transport.c"
+        ).read_text(encoding="utf-8")
+        playback = (
+            ROOT / "firmware/components/voice_transport/voice_playback_receiver.c"
+        ).read_text(encoding="utf-8")
+        ha_client = (
+            ROOT / "firmware/components/ha_client/ha_client.c"
+        ).read_text(encoding="utf-8")
+
+        for source, queue in ((voice, "s_voice.frame_queue"),
+                              (playback, "s_playback.queue")):
+            self.assertIn(f"{queue} = xQueueCreateWithCaps(", source)
+            self.assertIn("MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT", source)
+            self.assertIn(f"vQueueDeleteWithCaps({queue})", source)
+            self.assertNotIn(f"vQueueDelete({queue})", source)
+
+        auth = ha_client.split(
+            'if (strcmp(type->valuestring, "auth_required") == 0)', 1
+        )[1].split('} else if (strcmp(type->valuestring, "auth_ok") == 0)', 1)[0]
+        failed, succeeded = auth.split("} else {", 1)
+        self.assertIn("if (sent != (int)auth_len)", failed)
+        self.assertIn('"auth_send_failed", "auth_send_failed"', failed)
+        self.assertNotIn("HA_CLIENT_STATE_AUTHENTICATING", failed)
+        self.assertIn("HA_CLIENT_STATE_AUTHENTICATING", succeeded)
+        self.assertNotIn("portMAX_DELAY", auth)
+        self.assertIn("pdMS_TO_TICKS(HA_CLIENT_AUTH_SEND_TIMEOUT_MS)", auth)
+        self.assertIn("mbedtls_platform_zeroize(auth_json, sizeof(auth_json))", auth)
+        self.assertIn("mbedtls_platform_zeroize(token, sizeof(token))", auth)
+        self.assertIn("auth_token_unavailable", auth)
+
+        auth_ok = ha_client.split(
+            '} else if (strcmp(type->valuestring, "auth_ok") == 0)', 1
+        )[1].split('} else if (strcmp(type->valuestring, "auth_invalid") == 0)', 1)[0]
+        self.assertIn("source_client == s_ctx.ws", auth_ok)
+        self.assertIn("s_ctx.auth_sent", auth_ok)
+        self.assertIn("s_ctx.state == HA_CLIENT_STATE_AUTHENTICATING", auth_ok)
+        self.assertIn("HA_CLIENT_HANDSHAKE_FAILED_BIT) == 0U", auth_ok)
+        self.assertIn("if (accept_auth_ok)", auth_ok)
+
+        worker = ha_client.split(
+            "static void ha_client_worker", 1
+        )[1].split("static esp_err_t ha_client_delete_worker_task", 1)[0]
+        self.assertLess(
+            worker.index("if ((bits & HA_CLIENT_FAILURE_BITS) != 0U)"),
+            worker.index("else if ((bits & HA_CLIENT_READY_BIT) != 0U)"),
+        )
+        failure_mask = ha_client.split(
+            "#define HA_CLIENT_FAILURE_BITS", 1
+        )[1].split("#define HA_CLIENT_MAX_INITIAL_ENTITIES", 1)[0]
+        for failure_bit in ("HA_CLIENT_AUTH_FAIL_BIT", "HA_CLIENT_FATAL_ERROR_BIT",
+                            "HA_CLIENT_HANDSHAKE_FAILED_BIT"):
+            self.assertIn(failure_bit, failure_mask)
+
+        wait_ready = ha_client.split(
+            "esp_err_t ha_client_wait_ready", 1
+        )[1].split("bool ha_client_ready", 1)[0]
+        self.assertLess(
+            wait_ready.index("if ((bits & HA_CLIENT_FAILURE_BITS) != 0U)"),
+            wait_ready.index("if ((bits & HA_CLIENT_READY_BIT) != 0U)"),
+        )
+        self.assertIn("HA_CLIENT_READY_BIT | HA_CLIENT_FAILURE_BITS", wait_ready)
+
+        stop = playback.split(
+            "esp_err_t voice_playback_receiver_stop", 1
+        )[1].split("bool voice_playback_receiver_matches", 1)[0]
+        deinit = playback.split(
+            "esp_err_t voice_playback_receiver_deinit", 1
+        )[1].split("esp_err_t voice_playback_receiver_start", 1)[0]
+        self.assertNotIn("if (!s_playback.running) return ESP_OK;", stop)
+        self.assertIn("if (s_playback.task == NULL) return ESP_OK;", stop)
+        self.assertIn("s_playback.task != NULL", deinit)
+        self.assertIn("s_playback.state != PLAYBACK_IDLE", deinit)
+        self.assertIn("internal_free=%u internal_largest=%u internal_min=%u", ha_client)
+        self.assertIn("error type=%d errno=%d handshake_status=%d", ha_client)
+
     def test_phase5e_drivers_require_device_readiness_marker_with_bounded_wait(self):
         for index, path in enumerate((DRIVER, UI_DRIVER)):
             with self.subTest(driver=path.name):

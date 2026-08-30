@@ -1275,12 +1275,13 @@ esp_err_t voice_transport_init(const voice_transport_config_t *config)
     snprintf(s_voice.headers, sizeof(s_voice.headers),
              "Authorization: Bearer %s\r\nX-P4-Device-ID: %s\r\n",
              s_voice.token, s_voice.device_id);
-    s_voice.frame_queue = xQueueCreate(VOICE_TRANSPORT_QUEUE_FRAMES,
-                                       sizeof(voice_transport_frame_t));
+    s_voice.frame_queue = xQueueCreateWithCaps(
+        VOICE_TRANSPORT_QUEUE_FRAMES, sizeof(voice_transport_frame_t),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (s_voice.frame_queue == NULL) return ESP_ERR_NO_MEM;
     s_voice.send_mutex = xSemaphoreCreateMutex();
     if (s_voice.send_mutex == NULL) {
-        vQueueDelete(s_voice.frame_queue);
+        vQueueDeleteWithCaps(s_voice.frame_queue);
         s_voice.frame_queue = NULL;
         return ESP_ERR_NO_MEM;
     }
@@ -1288,15 +1289,16 @@ esp_err_t voice_transport_init(const voice_transport_config_t *config)
     if (result != ESP_OK) {
         vSemaphoreDelete(s_voice.send_mutex);
         s_voice.send_mutex = NULL;
-        vQueueDelete(s_voice.frame_queue);
+        vQueueDeleteWithCaps(s_voice.frame_queue);
         s_voice.frame_queue = NULL;
         return result;
     }
     result = conversation_service_set_rendered_observer(voice_conversation_rendered, NULL);
     if (result != ESP_OK) {
+        (void)voice_playback_receiver_deinit();
         vSemaphoreDelete(s_voice.send_mutex);
         s_voice.send_mutex = NULL;
-        vQueueDelete(s_voice.frame_queue);
+        vQueueDeleteWithCaps(s_voice.frame_queue);
         s_voice.frame_queue = NULL;
         return result;
     }
@@ -1312,9 +1314,10 @@ esp_err_t voice_transport_init(const voice_transport_config_t *config)
     result = sr_service_register_capture_listener(&listener);
     if (result != ESP_OK) {
         (void)conversation_service_set_rendered_observer(NULL, NULL);
+        (void)voice_playback_receiver_deinit();
         vSemaphoreDelete(s_voice.send_mutex);
         s_voice.send_mutex = NULL;
-        vQueueDelete(s_voice.frame_queue);
+        vQueueDeleteWithCaps(s_voice.frame_queue);
         s_voice.frame_queue = NULL;
         return result;
     }

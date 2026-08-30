@@ -22,6 +22,7 @@
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "mbedtls/platform_util.h"
 #include "network_service.h"
 #include "settings_service.h"
 #include "time_service.h"
@@ -32,6 +33,10 @@ static const char *TAG = "ha_client";
 #define HA_CLIENT_WORKER_STOP_WAIT_MS 7500U
 #define HA_CLIENT_REST_OPERATION_TIMEOUT_MS 1500
 #define HA_CLIENT_REST_REQUEST_DEADLINE_MS 5000U
+#define HA_CLIENT_AUTH_SEND_TIMEOUT_MS                                           \
+    ((CONFIG_P4HOME_HA_CLIENT_HANDSHAKE_TIMEOUT_MS / 2U) < 3000U                 \
+         ? (CONFIG_P4HOME_HA_CLIENT_HANDSHAKE_TIMEOUT_MS / 2U)                   \
+         : 3000U)
 
 static bool ha_client_stop_requested(void);
 
@@ -44,6 +49,10 @@ static bool ha_client_stop_requested(void);
 #define HA_CLIENT_CALL_DONE_BIT     BIT6
 #define HA_CLIENT_REQUEST_DONE_BIT  BIT7
 #define HA_CLIENT_SUB_FAILED_BIT    BIT8
+#define HA_CLIENT_HANDSHAKE_FAILED_BIT BIT9
+#define HA_CLIENT_FAILURE_BITS                                                      \
+    (HA_CLIENT_AUTH_FAIL_BIT | HA_CLIENT_FATAL_ERROR_BIT |                         \
+     HA_CLIENT_HANDSHAKE_FAILED_BIT)
 #define HA_CLIENT_MAX_INITIAL_ENTITIES CONFIG_P4HOME_HA_CLIENT_MAX_INITIAL_ENTITIES
 #define HA_CLIENT_ENTITY_ID_MAX_LEN 128U
 
@@ -156,6 +165,16 @@ static ha_client_state_ctx_t s_ctx = {
     .token_masked = {0},
 };
 
+static void ha_client_log_internal_heap(const char *stage)
+{
+    ESP_LOGW(TAG,
+             "HA heap stage=%s internal_free=%u internal_largest=%u internal_min=%u",
+             stage,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+}
+
 static void ha_client_mark_initial_sync_done(bool snapshot_succeeded)
 {
     xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_INITIAL_DONE_BIT);
@@ -190,6 +209,19 @@ static void ha_client_set_state_locked(ha_client_state_t state)
 static void ha_client_set_error_locked(const char *reason)
 {
     snprintf(s_ctx.last_error, sizeof(s_ctx.last_error), "%s", reason != NULL ? reason : "unknown");
+}
+
+static void ha_client_signal_handshake_failure(const char *reason, const char *heap_stage)
+{
+    taskENTER_CRITICAL(&s_ctx.lock);
+    s_ctx.auth_sent = false;
+    s_ctx.authenticated = false;
+    ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
+    ha_client_set_error_locked(reason);
+    taskEXIT_CRITICAL(&s_ctx.lock);
+    xEventGroupClearBits(s_ctx.event_group, HA_CLIENT_READY_BIT);
+    ha_client_log_internal_heap(heap_stage);
+    xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_HANDSHAKE_FAILED_BIT);
 }
 
 static void ha_client_set_call_result_locked(uint32_t id, bool success, const char *reason)
@@ -730,9 +762,18 @@ static void ha_client_send_subscribe_sequence(void)
     ha_client_set_pending(subscribe_id, HA_PENDING_SUBSCRIBE);
 }
 
-static void ha_client_handle_text_frame(const char *payload, size_t payload_len)
+static void ha_client_handle_text_frame(esp_websocket_client_handle_t source_client,
+                                        const char *payload, size_t payload_len)
 {
     if (payload == NULL || payload_len == 0U || payload_len > CONFIG_P4HOME_HA_CLIENT_MAX_EVENT_JSON_BYTES) {
+        return;
+    }
+    taskENTER_CRITICAL(&s_ctx.lock);
+    const bool current_connection = source_client != NULL && source_client == s_ctx.ws &&
+                                    s_ctx.ws_connected;
+    taskEXIT_CRITICAL(&s_ctx.lock);
+    if (!current_connection) {
+        ESP_LOGW(TAG, "ignored HA frame from stale websocket connection");
         return;
     }
 
@@ -745,31 +786,63 @@ static void ha_client_handle_text_frame(const char *payload, size_t payload_len)
     cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
     if (cJSON_IsString(type)) {
         if (strcmp(type->valuestring, "auth_required") == 0) {
-            char token[P4HOME_HA_TOKEN_MAX_LEN];
-            if (settings_service_ha_get_token(token, sizeof(token)) == ESP_OK && token[0] != '\0') {
-                char auth_json[512];
+            char token[P4HOME_HA_TOKEN_MAX_LEN] = {0};
+            const esp_err_t token_err = settings_service_ha_get_token(token, sizeof(token));
+            if (token_err == ESP_OK && token[0] != '\0') {
+                char auth_json[512] = {0};
                 snprintf(auth_json, sizeof(auth_json),
                          "{\"type\":\"auth\",\"access_token\":\"%s\"}", token);
-                esp_websocket_client_send_text(s_ctx.ws, auth_json, strlen(auth_json), portMAX_DELAY);
-                taskENTER_CRITICAL(&s_ctx.lock);
-                s_ctx.auth_sent = true;
-                ha_client_set_state_locked(HA_CLIENT_STATE_AUTHENTICATING);
-                taskEXIT_CRITICAL(&s_ctx.lock);
+                const size_t auth_len = strlen(auth_json);
+                const int sent = esp_websocket_client_send_text(
+                    s_ctx.ws, auth_json, (int)auth_len,
+                    pdMS_TO_TICKS(HA_CLIENT_AUTH_SEND_TIMEOUT_MS));
+                mbedtls_platform_zeroize(auth_json, sizeof(auth_json));
+                if (sent != (int)auth_len) {
+                    ha_client_signal_handshake_failure(
+                        "auth_send_failed", "auth_send_failed");
+                } else {
+                    taskENTER_CRITICAL(&s_ctx.lock);
+                    s_ctx.auth_sent = true;
+                    ha_client_set_error_locked("idle");
+                    ha_client_set_state_locked(HA_CLIENT_STATE_AUTHENTICATING);
+                    taskEXIT_CRITICAL(&s_ctx.lock);
+                }
+            } else {
+                ha_client_signal_handshake_failure(
+                    "auth_token_unavailable", "auth_token_unavailable");
             }
+            mbedtls_platform_zeroize(token, sizeof(token));
         } else if (strcmp(type->valuestring, "auth_ok") == 0) {
+            const EventBits_t handshake_bits = xEventGroupGetBits(s_ctx.event_group);
             taskENTER_CRITICAL(&s_ctx.lock);
-            s_ctx.authenticated = true;
-            ha_client_set_error_locked("idle");
-            ha_client_set_state_locked(HA_CLIENT_STATE_READY);
+            const bool accept_auth_ok = source_client == s_ctx.ws && s_ctx.ws_connected &&
+                                        s_ctx.auth_sent &&
+                                        s_ctx.state == HA_CLIENT_STATE_AUTHENTICATING &&
+                                        (handshake_bits & HA_CLIENT_HANDSHAKE_FAILED_BIT) == 0U;
+            if (accept_auth_ok) {
+                s_ctx.authenticated = true;
+                ha_client_set_error_locked("idle");
+                ha_client_set_state_locked(HA_CLIENT_STATE_READY);
+            }
             taskEXIT_CRITICAL(&s_ctx.lock);
-            xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_READY_BIT);
-            ha_client_send_subscribe_sequence();
+            if (accept_auth_ok) {
+                xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_READY_BIT);
+                ha_client_send_subscribe_sequence();
+            } else {
+                ESP_LOGW(TAG, "ignored out-of-sequence HA auth_ok");
+            }
         } else if (strcmp(type->valuestring, "auth_invalid") == 0) {
             taskENTER_CRITICAL(&s_ctx.lock);
+            s_ctx.authenticated = false;
+            s_ctx.auth_sent = false;
+            ha_client_reset_subscription_locked();
             ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
             ha_client_set_error_locked("auth_invalid");
             s_ctx.retry_lockout = true;
             taskEXIT_CRITICAL(&s_ctx.lock);
+            xEventGroupClearBits(s_ctx.event_group, HA_CLIENT_READY_BIT |
+                                                    HA_CLIENT_SUB_READY_BIT |
+                                                    HA_CLIENT_INITIAL_DONE_BIT);
             xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_AUTH_FAIL_BIT | HA_CLIENT_FATAL_ERROR_BIT);
         } else if (strcmp(type->valuestring, "result") == 0) {
             ha_client_handle_result(root);
@@ -798,7 +871,7 @@ static void ha_client_handle_ws_text_data(const esp_websocket_event_data_t *data
     }
 
     if (data->payload_len <= data->data_len && data->payload_offset == 0) {
-        ha_client_handle_text_frame(data->data_ptr, (size_t)data->data_len);
+        ha_client_handle_text_frame(data->client, data->data_ptr, (size_t)data->data_len);
         return;
     }
 
@@ -837,7 +910,7 @@ static void ha_client_handle_ws_text_data(const esp_websocket_event_data_t *data
     if ((data->fin || s_ctx.rx_frame_received >= s_ctx.rx_frame_expected) &&
         s_ctx.rx_frame_received == s_ctx.rx_frame_expected) {
         s_ctx.rx_frame[s_ctx.rx_frame_expected] = '\0';
-        ha_client_handle_text_frame(s_ctx.rx_frame, s_ctx.rx_frame_expected);
+        ha_client_handle_text_frame(data->client, s_ctx.rx_frame, s_ctx.rx_frame_expected);
         ha_client_reset_rx_frame();
     }
 }
@@ -855,9 +928,11 @@ static void ha_client_ws_event_handler(void *args,
     case WEBSOCKET_EVENT_CONNECTED:
         taskENTER_CRITICAL(&s_ctx.lock);
         s_ctx.ws_connected = true;
+        ha_client_set_error_locked("idle");
         ha_client_set_state_locked(HA_CLIENT_STATE_CONNECTING);
         taskEXIT_CRITICAL(&s_ctx.lock);
         ESP_LOGI(TAG, "HA WebSocket connected");
+        ha_client_log_internal_heap("ws_connected");
         break;
     case WEBSOCKET_EVENT_DISCONNECTED:
         ha_client_reset_rx_frame();
@@ -867,7 +942,8 @@ static void ha_client_ws_event_handler(void *args,
         s_ctx.auth_sent = false;
         if (!s_ctx.stop_requested) {
             ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
-            if (!s_ctx.retry_lockout) {
+            if (!s_ctx.retry_lockout &&
+                (s_ctx.last_error[0] == '\0' || strcmp(s_ctx.last_error, "idle") == 0)) {
                 ha_client_set_error_locked("ws_disconnected");
             }
         }
@@ -885,6 +961,13 @@ static void ha_client_ws_event_handler(void *args,
             ha_client_set_error_locked("ws_error");
         }
         taskEXIT_CRITICAL(&s_ctx.lock);
+        if (data != NULL) {
+            ESP_LOGW(TAG, "HA websocket error type=%d errno=%d handshake_status=%d",
+                     (int)data->error_handle.error_type,
+                     data->error_handle.esp_transport_sock_errno,
+                     data->error_handle.esp_ws_handshake_status_code);
+        }
+        ha_client_log_internal_heap("ws_error");
         break;
     default:
         break;
@@ -1071,13 +1154,27 @@ static esp_err_t ha_client_start_socket(const char *url, bool verify_tls)
         config.skip_cert_common_name_check = true;
     }
 
+    ha_client_log_internal_heap("ws_init_before");
     s_ctx.ws = esp_websocket_client_init(&config);
-    ESP_RETURN_ON_FALSE(s_ctx.ws != NULL, ESP_FAIL, TAG, "failed to allocate websocket client");
-    ESP_RETURN_ON_ERROR(esp_websocket_register_events(s_ctx.ws, WEBSOCKET_EVENT_ANY,
-                                                      ha_client_ws_event_handler, NULL),
-                        TAG, "failed to register websocket events");
-    ESP_RETURN_ON_ERROR(esp_websocket_client_start(s_ctx.ws), TAG, "failed to start websocket client");
-    return ESP_OK;
+    if (s_ctx.ws == NULL) {
+        ha_client_log_internal_heap("ws_init_failed");
+        ESP_LOGE(TAG, "failed to allocate websocket client");
+        return ESP_FAIL;
+    }
+    ha_client_log_internal_heap("ws_init_ok");
+    esp_err_t err = esp_websocket_register_events(
+        s_ctx.ws, WEBSOCKET_EVENT_ANY, ha_client_ws_event_handler, NULL);
+    if (err != ESP_OK) {
+        ha_client_log_internal_heap("ws_register_failed");
+        ESP_LOGE(TAG, "failed to register websocket events: %s", esp_err_to_name(err));
+        return err;
+    }
+    err = esp_websocket_client_start(s_ctx.ws);
+    ha_client_log_internal_heap(err == ESP_OK ? "ws_start_ok" : "ws_start_failed");
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "failed to start websocket client: %s", esp_err_to_name(err));
+    }
+    return err;
 }
 
 static void ha_client_stop_socket(void)
@@ -1202,21 +1299,45 @@ static void ha_client_worker(void *arg)
             taskEXIT_CRITICAL(&s_ctx.lock);
             xEventGroupClearBits(s_ctx.event_group, HA_CLIENT_READY_BIT | HA_CLIENT_AUTH_FAIL_BIT |
                                                    HA_CLIENT_FATAL_ERROR_BIT | HA_CLIENT_SUB_READY_BIT |
-                                                   HA_CLIENT_INITIAL_DONE_BIT | HA_CLIENT_SUB_FAILED_BIT);
+                                                   HA_CLIENT_INITIAL_DONE_BIT | HA_CLIENT_SUB_FAILED_BIT |
+                                                   HA_CLIENT_HANDSHAKE_FAILED_BIT);
 
             const char *subscription_error = NULL;
             esp_err_t start_err = ha_client_start_socket(s_ctx.normalized_url, verify_tls);
             if (start_err == ESP_OK) {
                 EventBits_t bits = xEventGroupWaitBits(s_ctx.event_group,
                                                        HA_CLIENT_READY_BIT | HA_CLIENT_AUTH_FAIL_BIT |
-                                                           HA_CLIENT_FATAL_ERROR_BIT | HA_CLIENT_STOP_BIT,
+                                                           HA_CLIENT_FATAL_ERROR_BIT | HA_CLIENT_STOP_BIT |
+                                                           HA_CLIENT_HANDSHAKE_FAILED_BIT,
                                                        pdFALSE, pdFALSE,
                                                        pdMS_TO_TICKS(CONFIG_P4HOME_HA_CLIENT_HANDSHAKE_TIMEOUT_MS));
                 if ((bits & HA_CLIENT_STOP_BIT) != 0U || s_ctx.stop_requested) {
                     ha_client_stop_socket();
                     break;
                 }
-                if ((bits & HA_CLIENT_READY_BIT) != 0U) {
+                if ((bits & HA_CLIENT_FAILURE_BITS) != 0U) {
+                    taskENTER_CRITICAL(&s_ctx.lock);
+                    s_ctx.authenticated = false;
+                    s_ctx.auth_sent = false;
+                    ha_client_reset_subscription_locked();
+                    ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
+                    if (s_ctx.last_error[0] == '\0' || strcmp(s_ctx.last_error, "idle") == 0) {
+                        if ((bits & HA_CLIENT_AUTH_FAIL_BIT) != 0U) {
+                            ha_client_set_error_locked("auth_failed");
+                        } else if ((bits & HA_CLIENT_FATAL_ERROR_BIT) != 0U) {
+                            ha_client_set_error_locked("fatal_error");
+                        } else {
+                            ha_client_set_error_locked("handshake_failed");
+                        }
+                    }
+                    taskEXIT_CRITICAL(&s_ctx.lock);
+                    xEventGroupClearBits(s_ctx.event_group, HA_CLIENT_READY_BIT |
+                                                            HA_CLIENT_SUB_READY_BIT |
+                                                            HA_CLIENT_INITIAL_DONE_BIT);
+                    if ((bits & HA_CLIENT_FATAL_ERROR_BIT) != 0U) {
+                        break;
+                    }
+                } else if ((bits & HA_CLIENT_READY_BIT) != 0U) {
                     allow_one_shot_retry = false;
                     backoff_ms = CONFIG_P4HOME_HA_CLIENT_RECONNECT_BASE_MS;
                     EventBits_t sub_bits = xEventGroupWaitBits(s_ctx.event_group,
@@ -1258,8 +1379,6 @@ static void ha_client_worker(void *arg)
                     ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
                     ha_client_set_error_locked(subscription_error);
                     taskEXIT_CRITICAL(&s_ctx.lock);
-                } else if ((bits & HA_CLIENT_FATAL_ERROR_BIT) != 0U) {
-                    break;
                 } else {
                     taskENTER_CRITICAL(&s_ctx.lock);
                     ha_client_set_state_locked(HA_CLIENT_STATE_ERROR);
@@ -1434,12 +1553,18 @@ esp_err_t ha_client_wait_ready(uint32_t timeout_ms)
     ESP_RETURN_ON_FALSE(s_ctx.initialized && s_ctx.event_group != NULL, ESP_ERR_INVALID_STATE, TAG,
                         "ha client not initialized");
     EventBits_t bits = xEventGroupGetBits(s_ctx.event_group);
+    if ((bits & HA_CLIENT_FAILURE_BITS) != 0U) {
+        return ESP_FAIL;
+    }
     if ((bits & HA_CLIENT_READY_BIT) != 0U) {
         return ESP_OK;
     }
     bits = xEventGroupWaitBits(s_ctx.event_group,
-                               HA_CLIENT_READY_BIT | HA_CLIENT_AUTH_FAIL_BIT | HA_CLIENT_FATAL_ERROR_BIT,
+                               HA_CLIENT_READY_BIT | HA_CLIENT_FAILURE_BITS,
                                pdFALSE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
+    if ((bits & HA_CLIENT_FAILURE_BITS) != 0U) {
+        return ESP_FAIL;
+    }
     if ((bits & HA_CLIENT_READY_BIT) != 0U) {
         return ESP_OK;
     }
