@@ -24,7 +24,7 @@
 | 2 | Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作 | [Phase 2 归档](../archive/plans/agent/2026-08-15-agent-phase-2-p4-room-world-plan.md) |
 | 3 | Cat Object World | `completed` | sofa 等对象锚点与 Cat 交互动作 | [Phase 3 归档](../archive/plans/agent/2026-08-15-agent-phase-3-object-world-plan.md) |
 | 4 | Robot HA & Multi-role | `completed` | Robot 受限 HA 工具、Human/Robot 语义分割 | [Phase 4 归档](../archive/plans/agent/2026-08-15-agent-phase-4-ha-tool-plan.md) |
-| 5 | Role-aware Voice | `pending_real_environment` | 5A–5D 完成；5E 历史自动化实机通过，当前候选重跑与人工观察延期 | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
+| 5 | Role-aware Voice | `pending_real_environment` | 5A–5D 完成；5E 当前候选自动化实机通过，人工观察待完成 | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
 | 6 | Role-aware Memory | `completed` | 最终 review 通过；已通过门禁关闭，其余真实项由用户接受延期 | [Phase 6 归档](../archive/plans/agent/2026-08-15-agent-phase-6-memory-plan.md) |
 | 7 | Cat Autonomy | `completed` | 7A–7C 技术/实机门禁及用户最终 review 已通过 | [Phase 7 归档](../archive/plans/agent/2026-08-15-agent-phase-7-autonomy-plan.md) |
 
@@ -62,11 +62,10 @@ wake 与固定命令动作 marker。5B 已由 run `32627837273` 证明真实 P4 
 `32635742553` 已证明现场中文经真实 P4/VAD/固定 MLX STT 后只进入统一 Human Runtime，transcript
 哈希、SQLite 审计、Cat 零泄漏与原始音频不保留均满足门禁。Mac 系统扬声器只替代口播输入，P4
 startup tone 的独立可听人工观察仍明确待补，不能由 `tone_played` marker 冒充。5D 分角色 TTS、
-P4 播放与 barge-in 技术门禁已完成。5E 的历史 `phase5e_ui` run `32862092039`（commit
-`3edb229`）已自动证明真实模型/HA/STT 的读、低风险写入并恢复、Human 聊天和三次 UI ACK，且
-artifact 隐私审计通过、音频明确 deferred；后续 Voice 产品改动仍要求当前候选重跑。2026-08-28
-用户要求人工与真实环境验证先延期，因此当前候选实机、P4 UI 肉眼核对和扬声器可听观察仍为
-`pending_real_environment`，不解释为 Phase 5 已完成。
+P4 播放与 barge-in 技术门禁已完成。5E 当前候选 commit `8432641` 的 `phase5e_ui` run
+`33321298417` 已按 manifest-first 协议通过真实 P4、模型/HA/STT、读/写恢复/聊天、三次 UI ACK 与
+artifact 隐私门禁，音频明确 deferred。P4 UI 三轮文本、雨动画观感和扬声器可听仍待人工观察，
+因此保持 `pending_real_environment`，不解释为 Phase 5 已完成。
 
 Phase 6A–6E 本地实现和模拟门禁已完成：Memory contract/SQLite、确定性写入/冲突/级联删除、
 private 产品 recall、三种 visibility evaluator 和可重复 `pnpm gate:phase6` 均已通过。2026-08-24

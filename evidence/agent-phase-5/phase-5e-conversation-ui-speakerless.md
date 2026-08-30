@@ -1,8 +1,8 @@
 # Phase 5E Conversation UI Speakerless Closure
 
-日期：2026-08-28
+日期：2026-08-31
 
-状态：`historical_real_p4_automated_pass / current_candidate_rerun_pending / manual_checks_deferred`
+状态：`current_candidate_real_p4_automated_pass / manual_checks_pending`
 
 分支：`feature/agent-harness`
 
@@ -10,13 +10,14 @@
 
 ## 结论边界
 
-历史 commit `3edb229` 的 `phase5e_ui` run `32862092039` 已形成真实 P4 自动化证据：真实模型、HA、
-STT 的 Robot 只读、一次低风险写入并恢复、Human 聊天均完成，三次 Conversation UI 投递均收到
-P4 ACK，artifact 隐私审计通过，音频明确为 `deferred` 且没有打开 playback。
+当前 commit `8432641aa91474fd8245a61f11d6dc97f02f3c05` 的 `phase5e_ui` run
+`33321298417` 已形成真实 P4 自动化证据：真实模型、HA、STT 的 Robot 只读、一次低风险写入并恢复、
+Human 聊天均完成，三次 Conversation UI 投递均收到 P4 ACK，artifact 隐私审计通过，音频明确为
+`deferred` 且没有打开 playback。该结论替代历史 commit `3edb229` / run `32862092039` 作为当前候选
+自动化证据。
 
-该 run 早于后续 Voice 产品改动，不能证明当前候选。它也不证明用户肉眼看见三轮对话框文本，更不
-证明物理扬声器可听。2026-08-28 用户要求涉及人工验证的工作先延期，因此当前候选实机重跑、P4 UI
-肉眼核对和扬声器可听观察继续保持 pending。
+自动化 run 不证明用户肉眼看见三轮对话框文本，不证明修复后的雨动画观感，也不证明物理扬声器可听。
+因此 Phase 5 仍为 `pending_real_environment`，等待人工观察和用户最终 review。
 
 ## 已实现闭环
 
@@ -84,19 +85,66 @@ P4 ACK，artifact 隐私审计通过，音频明确为 `deferred` 且没有打�
   也不记为完整构建通过。
 
 Node `v24.19.0` 本地全量门禁通过：`pnpm typecheck` 通过，默认并发 `pnpm test` 为 `444/444`。Python
-contract 为 `100/100`，hardware harness 为 `51/51`；两个审计脚本 `py_compile` 和
+contract 为 `109/109`，hardware harness 为 `63/63`；两个审计脚本 `py_compile` 和
 `git diff --check` 通过。harness 输出仍有既有
 SQLite `ResourceWarning`，但测试退出码为 0。上述结果只证明源码边界和本地回归，不把真实 P4 或
 人工门禁标记为通过。
 
+## 2026-08-31 当前候选真实 P4 自动化证据
+
+在用户重新插拔 `/dev/cu.usbserial-210` 后，当前候选完成了 commit-bound 实机重跑。最终有效 run
+如下；前序诊断 run 只用于说明修复过程，不作为通过证据。
+
+| 项目 | 结果 |
+|---|---|
+| workflow run / attempt | `33321298417` / `1`，workflow 成功 |
+| commit / profile | `8432641aa91474fd8245a61f11d6dc97f02f3c05` / `phase5e_ui` |
+| 芯片 / 串口 | ESP32-P4 revision v1.0 / `/dev/cu.usbserial-210` |
+| monitor / capture | `900 s` / `1080 s` |
+| transport | `completed`，exit `0` |
+| app image | `3009792` bytes；SHA-256 `876c7460a9b0d711379551c3545dd44f8d8ae4c67714cdabaf8c0e2741b98873` |
+| manifest | schema `1`，`mode=artifact-only`，`verdict_owner=cloud-codex` |
+| 业务结果 | result schema `2`，`passed=true`；read/write/chat 均通过，write 已恢复 |
+| provider | STT `4` 次，其中 read 预期文本 mismatch `1` 次后受控重试；模型 `6` 次 |
+| UI / 音频 | 三次 `ui_delivery=completed`；三次 `audio_delivery=deferred` |
+| 审计 / 稳定性 | audit events `21`；power-on `1`、reset `1`、crash `0`；raw audio 未保留 |
+| artifact | 最终审计 `pass`；input driver status `0`；Agent harness status `0` |
+
+manifest-first 复核后，原始串口中的关键证据为：
+
+```text
+Chip is ESP32-P4 (revision v1.0)
+VERIFY:ha:initial_sync_ready:PASS
+VERIFY:phase5e:ui_conversation:PASS epoch=7602178 revision=2 stage=completed role=robot execution=completed
+VERIFY:phase5e:ui_applied:PASS epoch=7602178 revision=2
+VERIFY:phase5e:ui_conversation:PASS epoch=7602179 revision=2 stage=completed role=robot execution=completed
+VERIFY:phase5e:ui_applied:PASS epoch=7602179 revision=2
+VERIFY:phase5e:ui_conversation:PASS epoch=7602180 revision=2 stage=completed role=human execution=not_applicable
+VERIFY:phase5e:ui_applied:PASS epoch=7602180 revision=2
+VERIFY:phase5e:voice_ui_e2e:PASS interactions=3 stt_calls=4 model_calls=6 ui_applied=3 audio=deferred audit=persisted restored=yes raw_audio_retained=false
+VERIFY:phase5e:artifact_audit:PASS secrets=absent audio_payload=absent source=clean source_mode=archive process_argv=clean
+```
+
+下载后的 `monitor.log` SHA-256 为
+`64dcf6984bf675852d7dd07f4c1df9226e0de953c5d6c4b7a4fe2546958e45b2`，manifest SHA-256 为
+`2b06dbf7a538dc679c3d86674e0cb215812ffdc74ae2eca0614371552604e909`。
+
+首次业务交互高负载窗口出现一条 `VERIFY:ui:8fps:FAIL`，下一采样周期恢复，随后约 13 分钟持续为
+`PASS`，且没有 panic、Guru Meditation、额外 reset 或 crash。该瞬态单独披露，不表述为全程无抖动。
+P4 wake、VAD 和实体播放三项在 result 中仍严格保持 `hardware_pending/null`；本次 speakerless input
+driver 自动化不能替代真人唤醒时序或物理播放证明。
+
+前序 run `33313056968`（串口/端口环境失败）、`33316568299`（写路径终态等待超时）和
+`33318941758`（业务完成但旧 result schema 无法归因额外 STT 调用）均未被接受为通过。修复后的
+schema 对 mismatch、固定 provider failure code 和 expected kind 做严格守恒；未知类别仍 fail-closed。
+
 ## 仍待完成
 
-- 对当前候选提交触发 commit-bound `phase5e_ui` 真实 P4 run，按 manifest-first 顺序复核身份、flash、
-  原始 `VERIFY:`、Agent/SQLite/HA 终态、隐私、reset/crash 和 playback absence（按用户要求延期）。
-- 用户核对 P4 对话框三轮可见文本（人工验证，延期）。
-- 连接物理扬声器后核对 startup tone 与分角色播放可听输出（人工验证，延期）。
+- 用户核对 P4 对话框三轮可见文本（人工验证，待执行）。
+- 用户核对修复后的下雨动画是否形成连续降雨观感，不再表现为上下两处闪烁（人工验证，待执行）。
+- 连接物理扬声器后核对 startup tone 与分角色播放可听输出（人工验证，待硬件条件满足）。
 - 真实 P4 网络丢失、HA 服务重启与状态对账、真实 launchd KeepAlive/P4 感知 Agent 重连，以及
   P4/HA/Agent 长跑中的固定命令、触摸、P4 ↔ HA、Cat、heap/stack/watchdog/UI 连续性（延期）。
 - artifact 中 Agent duration 由运行方进程计时；schema 能验证范围、状态和内部一致性，但不能提供独立
-  可信时间源。P4 wake/VAD/physical playback 必须由当前候选真实 run 补证。
+  可信时间源。P4 wake/VAD/physical playback 仍须由针对这些阶段的实机路径补证。
 - 用户最终 review 通过后才能关闭 Phase 5；Phase 6、7 已完成并归档不改变这一边界。
