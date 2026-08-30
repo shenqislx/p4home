@@ -894,6 +894,14 @@ class Phase5eProfileTests(unittest.TestCase):
                 "stt_rejections_by_expected_kind": {
                     "read": 0, "write": 0, "chat": 0, "unexpected": 0,
                 },
+                "stt_non_mismatch_failures_by_expected_kind": {
+                    kind: {
+                        "cancelled": 0, "invalid_response": 0,
+                        "model_unavailable": 0, "process_error": 0,
+                        "timeout": 0, "unknown": 0,
+                    }
+                    for kind in ("read", "write", "chat", "unexpected")
+                },
                 "real_model_calls": 7, "audit_events": 6, "restored": True,
                 "read_passed": True, "write_passed": True, "chat_passed": True,
                 "ui_deliveries_completed": 3, "audio_delivery_deferred": True,
@@ -920,6 +928,37 @@ class Phase5eProfileTests(unittest.TestCase):
                 self.run_audit(command), 0,
                 "read/chat retries at the exact driver upper bound are valid",
             )
+            payload["stt_calls"] = 4
+            payload["stt_transcript_mismatches"] = 0
+            payload["stt_rejections_by_expected_kind"] = {
+                "read": 0, "write": 0, "chat": 0, "unexpected": 0,
+            }
+            for failure_code in (
+                "cancelled", "invalid_response", "model_unavailable",
+                "process_error", "timeout",
+            ):
+                payload["stt_non_mismatch_failures_by_expected_kind"]["read"][
+                    failure_code
+                ] = 1
+                result.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertEqual(
+                    self.run_audit(command), 0,
+                    f"bounded {failure_code} metadata explains the extra call",
+                )
+                payload["stt_non_mismatch_failures_by_expected_kind"]["read"][
+                    failure_code
+                ] = 0
+            payload["stt_non_mismatch_failures_by_expected_kind"]["read"][
+                "unknown"
+            ] = 1
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "unclassified exceptions must not explain a retry",
+            )
+            payload["stt_non_mismatch_failures_by_expected_kind"]["read"][
+                "unknown"
+            ] = 0
             payload["stt_calls"] = 5
             payload["stt_transcript_mismatches"] = 1
             payload["stt_rejections_by_expected_kind"] = {
@@ -940,6 +979,22 @@ class Phase5eProfileTests(unittest.TestCase):
                 self.run_audit(command), 0,
                 "read rejections beyond its retry budget must fail closed",
             )
+            payload["stt_calls"] = 6
+            payload["stt_transcript_mismatches"] = 2
+            payload["stt_rejections_by_expected_kind"] = {
+                "read": 2, "write": 0, "chat": 0, "unexpected": 0,
+            }
+            payload["stt_non_mismatch_failures_by_expected_kind"]["read"][
+                "process_error"
+            ] = 1
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "combined read mismatches and provider failures share one retry budget",
+            )
+            payload["stt_non_mismatch_failures_by_expected_kind"]["read"][
+                "process_error"
+            ] = 0
             for forbidden_kind in ("write", "unexpected"):
                 payload["stt_calls"] = 4
                 payload["stt_transcript_mismatches"] = 1
@@ -952,11 +1007,61 @@ class Phase5eProfileTests(unittest.TestCase):
                     self.run_audit(command), 0,
                     f"{forbidden_kind} rejections must fail closed",
                 )
+            for forbidden_kind in ("write", "unexpected"):
+                payload["stt_calls"] = 4
+                payload["stt_transcript_mismatches"] = 0
+                payload["stt_rejections_by_expected_kind"] = {
+                    "read": 0, "write": 0, "chat": 0, "unexpected": 0,
+                }
+                payload["stt_non_mismatch_failures_by_expected_kind"][forbidden_kind][
+                    "process_error"
+                ] = 1
+                result.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertNotEqual(
+                    self.run_audit(command), 0,
+                    f"{forbidden_kind} provider failures must fail closed",
+                )
+                payload["stt_non_mismatch_failures_by_expected_kind"][forbidden_kind][
+                    "process_error"
+                ] = 0
             payload["stt_rejections_by_expected_kind"] = {
                 "read": 0, "write": 0, "chat": 0,
             }
             result.write_text(json.dumps(payload), encoding="utf-8")
             self.assertNotEqual(self.run_audit(command), 0)
+            payload["stt_rejections_by_expected_kind"] = {
+                "read": 0, "write": 0, "chat": 0, "unexpected": 0,
+            }
+            payload["stt_non_mismatch_failures_by_expected_kind"]["read"] = {
+                "cancelled": 0, "invalid_response": 0,
+                "model_unavailable": 0, "process_error": True,
+                "timeout": 0, "unknown": 0,
+            }
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(self.run_audit(command), 0)
+            payload["stt_calls"] = 3
+            payload["stt_non_mismatch_failures_by_expected_kind"]["read"][
+                "process_error"
+            ] = 0
+            del payload["stt_non_mismatch_failures_by_expected_kind"]["read"]["unknown"]
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(self.run_audit(command), 0)
+            payload["stt_non_mismatch_failures_by_expected_kind"]["read"][
+                "unknown"
+            ] = 0
+            payload["stt_non_mismatch_failures_by_expected_kind"]["read"][
+                "extra"
+            ] = 0
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(self.run_audit(command), 0)
+            del payload["stt_non_mismatch_failures_by_expected_kind"]["read"][
+                "extra"
+            ]
+            payload["stt_non_mismatch_failures_by_expected_kind"]["read"] = {
+                "cancelled": 0, "invalid_response": 0,
+                "model_unavailable": 0, "process_error": 0,
+                "timeout": 0, "unknown": 0,
+            }
             payload["stt_rejections_by_expected_kind"] = {
                 "read": True, "write": 0, "chat": 0, "unexpected": 0,
             }
@@ -967,6 +1072,14 @@ class Phase5eProfileTests(unittest.TestCase):
             payload["stt_rejections_by_expected_kind"] = {
                 "read": 0, "write": 0, "chat": 0, "unexpected": 0,
             }
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            payload["stt_failure_message"] = "Bearer unit-test-secret-marker"
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "provider error messages are outside the exact result schema",
+            )
+            del payload["stt_failure_message"]
             result.write_text(json.dumps(payload), encoding="utf-8")
             payload = json.loads(result.read_text(encoding="utf-8"))
             payload["interaction_metrics"][0]["metrics"]["stages"]["p4_wake"][
@@ -995,6 +1108,9 @@ class Phase5eProfileTests(unittest.TestCase):
         result = source.split("await atomicJson(resultFile", 1)[1].split(
             "process.stdout.write", 1
         )[0]
+        failure_mapping = source.split(
+            "function boundedSttFailureCode", 1
+        )[1].split("async function atomicJson", 1)[0]
 
         self.assertIn("const transcriptRejectionsByExpectedKind = {", source)
         for expected_kind in ("read", "write", "chat", "unexpected"):
@@ -1008,6 +1124,17 @@ class Phase5eProfileTests(unittest.TestCase):
         )
         self.assertIn(
             "stt_rejections_by_expected_kind: transcriptRejectionsByExpectedKind",
+            result,
+        )
+        self.assertIn("const nonMismatchFailuresByExpectedKind = {", source)
+        self.assertIn("if (!transcriptMismatch)", measured)
+        self.assertIn("boundedSttFailureCode(error)", measured)
+        self.assertNotIn(".message", failure_mapping)
+        self.assertNotIn("String(error)", failure_mapping)
+        self.assertNotIn("error.message", result)
+        self.assertNotIn("failure_message", result)
+        self.assertIn(
+            "stt_non_mismatch_failures_by_expected_kind: nonMismatchFailuresByExpectedKind",
             result,
         )
 

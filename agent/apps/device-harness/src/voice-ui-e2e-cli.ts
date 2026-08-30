@@ -58,6 +58,44 @@ function captureMetricKey(value: {
   return `${value.session_id}:${value.stream_id}:${value.epoch}`;
 }
 
+type ExpectedSttKind = "read" | "write" | "chat" | "unexpected";
+type BoundedSttFailureCode =
+  | "cancelled"
+  | "invalid_response"
+  | "model_unavailable"
+  | "process_error"
+  | "timeout"
+  | "unknown";
+
+function expectedSttKind(acceptedTranscripts: number): ExpectedSttKind {
+  if (acceptedTranscripts === 0) return "read";
+  if (acceptedTranscripts === 1) return "write";
+  if (acceptedTranscripts === 2) return "chat";
+  return "unexpected";
+}
+
+function emptySttFailureCounts(): Record<BoundedSttFailureCode, number> {
+  return {
+    cancelled: 0,
+    invalid_response: 0,
+    model_unavailable: 0,
+    process_error: 0,
+    timeout: 0,
+    unknown: 0,
+  };
+}
+
+function boundedSttFailureCode(error: unknown): BoundedSttFailureCode {
+  if (!(error instanceof SttProviderError)) return "unknown";
+  switch (error.code) {
+    case "CANCELLED": return "cancelled";
+    case "INVALID_RESPONSE": return "invalid_response";
+    case "MODEL_UNAVAILABLE": return "model_unavailable";
+    case "PROCESS_ERROR": return "process_error";
+    case "TIMEOUT": return "timeout";
+  }
+}
+
 async function atomicJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.tmp`;
@@ -199,6 +237,12 @@ async function main(): Promise<void> {
       chat: 0,
       unexpected: 0,
     };
+    const nonMismatchFailuresByExpectedKind = {
+      read: emptySttFailureCounts(),
+      write: emptySttFailureCounts(),
+      chat: emptySttFailureCounts(),
+      unexpected: emptySttFailureCounts(),
+    };
     const pythonStt = new PythonSttProvider({
       python_executable: requiredEnvironment("P4HOME_STT_PYTHON"),
       worker_script: requiredEnvironment("P4HOME_STT_WORKER"),
@@ -210,10 +254,12 @@ async function main(): Promise<void> {
     const measuredStt: SttProvider = {
       async transcribe(request, options): Promise<SttFinalTranscript> {
         const started = performance.now();
+        let transcriptMismatch = false;
         try {
           const transcript = await pythonStt.transcribe(request, options);
           const kind = classifyPhase5ePrompt(transcript.text, prompts);
           if (kind === null || kind !== expectedKinds[acceptedTranscripts]) {
+            transcriptMismatch = true;
             transcriptMismatches++;
             if (acceptedTranscripts === 0) transcriptRejectionsByExpectedKind.read++;
             else if (acceptedTranscripts === 1) transcriptRejectionsByExpectedKind.write++;
@@ -225,6 +271,13 @@ async function main(): Promise<void> {
           }
           acceptedTranscripts++;
           return transcript;
+        } catch (error) {
+          if (!transcriptMismatch) {
+            const expectedKind = expectedSttKind(acceptedTranscripts);
+            const failureCode = boundedSttFailureCode(error);
+            nonMismatchFailuresByExpectedKind[expectedKind][failureCode]++;
+          }
+          throw error;
         } finally {
           const durationMs = performance.now() - started;
           sttDurations.push(durationMs);
@@ -339,6 +392,7 @@ async function main(): Promise<void> {
       stt_calls: sttDurations.length,
       stt_transcript_mismatches: transcriptMismatches,
       stt_rejections_by_expected_kind: transcriptRejectionsByExpectedKind,
+      stt_non_mismatch_failures_by_expected_kind: nonMismatchFailuresByExpectedKind,
       stt_total_ms: Math.round(sttDurations.reduce((sum, value) => sum + value, 0)),
       real_model_calls: realModelCalls,
       audit_events: auditEvents,

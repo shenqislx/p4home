@@ -34,6 +34,7 @@ UI_RESULT_KEYS = {
     "role_statuses", "voice_outcomes", "ui_delivery_statuses",
     "audio_delivery_statuses", "stt_provider_version", "stt_model_revision",
     "stt_calls", "stt_transcript_mismatches", "stt_rejections_by_expected_kind",
+    "stt_non_mismatch_failures_by_expected_kind",
     "stt_total_ms", "real_model_calls",
     "audit_events", "restored", "read_passed", "write_passed", "chat_passed",
     "ui_deliveries_completed", "audio_delivery_deferred",
@@ -62,10 +63,16 @@ STAGE_STATUSES = {
 UI_REQUIRED_INTERACTIONS = 3
 # The speakerless driver may retry the read and chat prompts twice each. The
 # write prompt is never replayed because its HA side effect may have crossed
-# the boundary. Every extra STT call must therefore be an explicitly rejected
-# transcript and the bounded total cannot exceed 3 + 2 + 2.
-UI_MAX_REJECTED_TRANSCRIPTS = 4
+# the boundary. Every extra STT call must therefore be attributed to either an
+# explicitly rejected transcript or a known provider terminal from a read/chat
+# attempt, and the bounded total cannot exceed 3 + 2 + 2. Unclassified
+# exceptions remain visible in the schema but can never satisfy the gate.
+UI_MAX_RETRY_FAILURES = 4
 UI_STT_REJECTION_KEYS = {"read", "write", "chat", "unexpected"}
+UI_STT_FAILURE_CODES = {
+    "cancelled", "invalid_response", "model_unavailable", "process_error",
+    "timeout", "unknown",
+}
 
 
 def bounded_counter(value: object) -> bool:
@@ -186,20 +193,32 @@ def ui_stt_attempts_valid(result: dict) -> bool:
     stt_calls = result.get("stt_calls")
     transcript_mismatches = result.get("stt_transcript_mismatches")
     rejections = result.get("stt_rejections_by_expected_kind")
+    failures = result.get("stt_non_mismatch_failures_by_expected_kind")
     if (not isinstance(rejections, dict) or set(rejections) != UI_STT_REJECTION_KEYS
             or not all(bounded_counter(value) for value in rejections.values())
+            or not isinstance(failures, dict) or set(failures) != UI_STT_REJECTION_KEYS
+            or any(
+                not isinstance(bucket, dict) or set(bucket) != UI_STT_FAILURE_CODES
+                or not all(bounded_counter(value) for value in bucket.values())
+                for bucket in failures.values()
+            )
             or not bounded_counter(stt_calls)
             or not bounded_counter(transcript_mismatches)):
         return False
     rejected = sum(rejections.values())
+    failed_by_kind = {
+        kind: sum(failures[kind].values()) for kind in UI_STT_REJECTION_KEYS
+    }
+    failed = sum(failed_by_kind.values())
     return (
-        rejections["read"] <= 2
-        and rejections["write"] == 0
-        and rejections["chat"] <= 2
-        and rejections["unexpected"] == 0
-        and rejected <= UI_MAX_REJECTED_TRANSCRIPTS
+        all(failures[kind]["unknown"] == 0 for kind in UI_STT_REJECTION_KEYS)
+        and rejections["read"] + failed_by_kind["read"] <= 2
+        and rejections["write"] + failed_by_kind["write"] == 0
+        and rejections["chat"] + failed_by_kind["chat"] <= 2
+        and rejections["unexpected"] + failed_by_kind["unexpected"] == 0
+        and rejected + failed <= UI_MAX_RETRY_FAILURES
         and transcript_mismatches == rejected
-        and stt_calls == UI_REQUIRED_INTERACTIONS + rejected
+        and stt_calls == UI_REQUIRED_INTERACTIONS + rejected + failed
     )
 
 
