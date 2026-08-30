@@ -156,6 +156,19 @@ static ha_client_state_ctx_t s_ctx = {
     .token_masked = {0},
 };
 
+static void ha_client_mark_initial_sync_done(bool snapshot_succeeded)
+{
+    xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_INITIAL_DONE_BIT);
+    taskENTER_CRITICAL(&s_ctx.lock);
+    const bool current_connection_ready = !s_ctx.stop_requested && s_ctx.ws_connected &&
+                                          s_ctx.authenticated && s_ctx.subscription_ready &&
+                                          s_ctx.state == HA_CLIENT_STATE_READY;
+    taskEXIT_CRITICAL(&s_ctx.lock);
+    if (snapshot_succeeded && current_connection_ready && ha_client_initial_sync_ready()) {
+        ESP_LOGW(TAG, "VERIFY:ha:initial_sync_ready:PASS");
+    }
+}
+
 static uint64_t ha_client_now_ms(void)
 {
     return (uint64_t)(esp_timer_get_time() / 1000ULL);
@@ -578,7 +591,10 @@ static void ha_client_handle_result(cJSON *root)
         s_ctx.subscription_ready = true;
         s_ctx.sub_state = HA_SUB_STATE_STEADY;
         taskEXIT_CRITICAL(&s_ctx.lock);
-        xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_SUB_READY_BIT | HA_CLIENT_INITIAL_DONE_BIT);
+        xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_SUB_READY_BIT);
+        // There is no current sender for GET_STATES and this response cannot
+        // prove that the configured initial whitelist was fetched in full.
+        ha_client_mark_initial_sync_done(false);
         return;
     }
 
@@ -964,15 +980,32 @@ static esp_err_t ha_client_fetch_one_initial_state(const char *base_url, const c
         err = ESP_ERR_TIMEOUT;
     }
 
-    if (err == ESP_OK && total > 0) {
-        cJSON *root = cJSON_ParseWithLength(body, (size_t)total);
-        if (root != NULL) {
+    if (err == ESP_OK && total <= 0) {
+        ESP_LOGW(TAG, "empty HA initial state response");
+        err = ESP_FAIL;
+    }
+
+    if (err == ESP_OK) {
+        cJSON *root = cJSON_ParseWithLengthOpts(body, (size_t)total + 1U, NULL, true);
+        cJSON *response_entity_id = cJSON_IsObject(root)
+                                        ? cJSON_GetObjectItemCaseSensitive(root, "entity_id")
+                                        : NULL;
+        cJSON *response_state = cJSON_IsObject(root)
+                                    ? cJSON_GetObjectItemCaseSensitive(root, "state")
+                                    : NULL;
+        const bool response_valid = cJSON_IsString(response_entity_id) &&
+                                    response_entity_id->valuestring != NULL &&
+                                    strcmp(response_entity_id->valuestring, entity_id) == 0 &&
+                                    cJSON_IsString(response_state) &&
+                                    response_state->valuestring != NULL &&
+                                    response_state->valuestring[0] != '\0';
+        if (response_valid) {
             ha_client_dispatch_state_change_from_result(root);
-            cJSON_Delete(root);
         } else {
-            ESP_LOGW(TAG, "failed to parse HA initial state entity=%s", entity_id);
+            ESP_LOGW(TAG, "invalid HA initial state response");
             err = ESP_FAIL;
         }
+        cJSON_Delete(root);
     }
 
     free(body);
@@ -987,7 +1020,7 @@ static void ha_client_fetch_initial_states(const char *base_url, const char *tok
         calloc(HA_CLIENT_MAX_INITIAL_ENTITIES, HA_CLIENT_ENTITY_ID_MAX_LEN);
     if (entities == NULL) {
         ESP_LOGW(TAG, "failed to allocate HA initial entity snapshot");
-        xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_INITIAL_DONE_BIT);
+        ha_client_mark_initial_sync_done(false);
         return;
     }
     size_t count = 0U;
@@ -1016,7 +1049,7 @@ static void ha_client_fetch_initial_states(const char *base_url, const char *tok
     ESP_LOGI(TAG, "HA initial whitelist states fetched ok=%" PRIu32 " requested=%u",
              ok_count, (unsigned)count);
     free(entities);
-    xEventGroupSetBits(s_ctx.event_group, HA_CLIENT_INITIAL_DONE_BIT);
+    ha_client_mark_initial_sync_done(count > 0U && ok_count == (uint32_t)count);
 }
 
 static esp_err_t ha_client_start_socket(const char *url, bool verify_tls)

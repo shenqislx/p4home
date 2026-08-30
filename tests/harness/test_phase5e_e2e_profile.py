@@ -209,6 +209,9 @@ class Phase5eProfileTests(unittest.TestCase):
             self.assertIn(marker, workflow)
         driver = UI_DRIVER.read_text(encoding="utf-8")
         self.assertIn('say("Hi ESP", "Samantha")', driver)
+        self.assertIn("HA_INITIAL_SYNC_READY_MARKER", driver)
+        self.assertIn("wait_for_ha_readiness(args.monitor_log)", driver)
+        self.assertNotIn("time.sleep(25)", driver)
         self.assertIn("write_attempt_not_completed_no_replay", driver)
         self.assertNotIn("PLAYBACK_MARKER", driver)
         harness = (
@@ -234,6 +237,190 @@ class Phase5eProfileTests(unittest.TestCase):
         self.assertIn("VERIFY:phase5e:ui_applied:PASS", voice_transport)
         finally_block = harness[harness.rindex("  } finally {"):]
         self.assertLess(finally_block.index("await runtime?.close()"), finally_block.index("restoreRobotState"))
+
+    def test_ui_driver_waits_for_exact_ha_readiness_before_three_rounds(self):
+        driver = self.load_driver(UI_DRIVER, "phase5e_ui_readiness_driver")
+        ha_client = (
+            ROOT / "firmware/components/ha_client/ha_client.c"
+        ).read_text(encoding="utf-8")
+        marker = 'ESP_LOGW(TAG, "VERIFY:ha:initial_sync_ready:PASS")'
+        self.assertIn(marker, ha_client)
+        self.assertIn(
+            "snapshot_succeeded && current_connection_ready && ha_client_initial_sync_ready()",
+            ha_client,
+        )
+        for condition in (
+            "!s_ctx.stop_requested",
+            "s_ctx.ws_connected",
+            "s_ctx.authenticated",
+            "s_ctx.subscription_ready",
+            "s_ctx.state == HA_CLIENT_STATE_READY",
+        ):
+            self.assertIn(condition, ha_client)
+        self.assertIn("ha_client_mark_initial_sync_done(false);", ha_client)
+        self.assertIn(
+            "ha_client_mark_initial_sync_done(count > 0U && ok_count == (uint32_t)count);",
+            ha_client,
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            prompt_file = root / "prompts.json"
+            progress_file = root / "progress.json"
+            monitor_log = root / "monitor.log"
+            status_file = root / "status"
+            prompts = {
+                "read": "private read",
+                "write": "private write",
+                "barge": "private barge",
+                "followup": "private followup",
+            }
+            prompt_file.write_text(
+                json.dumps({"schema_version": 1, "prompts": prompts}),
+                encoding="utf-8",
+            )
+            events: list[str] = []
+
+            def readiness(_monitor: pathlib.Path) -> None:
+                events.append("ready")
+
+            def repeatable(
+                _monitor: pathlib.Path,
+                _progress: pathlib.Path,
+                prompt: str,
+                target: int,
+            ) -> None:
+                events.append(f"round:{target}:{prompt}")
+
+            def write_once(_monitor: pathlib.Path, prompt: str) -> None:
+                events.append(f"round:2:{prompt}")
+
+            argv = [
+                str(UI_DRIVER),
+                "--prompt-file", str(prompt_file),
+                "--progress-file", str(progress_file),
+                "--monitor-log", str(monitor_log),
+                "--status-file", str(status_file),
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(driver, "wait_for_ha_readiness", side_effect=readiness),
+                mock.patch.object(driver, "speak_until_progress", side_effect=repeatable),
+                mock.patch.object(driver, "speak_interaction", side_effect=write_once),
+                mock.patch.object(driver, "wait_attempt", return_value=True),
+            ):
+                self.assertEqual(driver.main(), 0)
+
+            self.assertEqual(
+                events,
+                [
+                    "ready",
+                    "round:1:private read",
+                    "round:2:private write",
+                    "round:3:private barge",
+                ],
+            )
+            self.assertEqual(status_file.read_text(encoding="ascii"), "0\n")
+
+    def test_ha_initial_snapshot_success_is_strict_and_fail_closed(self):
+        ha_client = (
+            ROOT / "firmware/components/ha_client/ha_client.c"
+        ).read_text(encoding="utf-8")
+        fetch = ha_client.split(
+            "static esp_err_t ha_client_fetch_one_initial_state", 1
+        )[1].split("static void ha_client_fetch_initial_states", 1)[0]
+        fetch_all = ha_client.split(
+            "static void ha_client_fetch_initial_states", 1
+        )[1].split("static esp_err_t ha_client_start_socket", 1)[0]
+        get_states = ha_client.split(
+            "if (pending_type == HA_PENDING_GET_STATES)", 1
+        )[1].split("if (pending_type == HA_PENDING_CALL_SERVICE)", 1)[0]
+
+        self.assertIn("if (err == ESP_OK && total <= 0)", fetch)
+        self.assertIn("cJSON_ParseWithLengthOpts", fetch)
+        self.assertIn("cJSON_IsObject(root)", fetch)
+        self.assertIn("cJSON_IsString(response_entity_id)", fetch)
+        self.assertIn("strcmp(response_entity_id->valuestring, entity_id) == 0", fetch)
+        self.assertIn("cJSON_IsString(response_state)", fetch)
+        self.assertIn("response_state->valuestring[0] != '\\0'", fetch)
+        self.assertIn("if (response_valid)", fetch)
+        self.assertIn("err = ESP_FAIL", fetch)
+        self.assertLess(fetch.index("if (response_valid)"), fetch.index(
+            "ha_client_dispatch_state_change_from_result(root)"
+        ))
+
+        self.assertIn("ha_client_mark_initial_sync_done(false);", fetch_all)
+        self.assertIn("count > 0U && ok_count == (uint32_t)count", fetch_all)
+        self.assertIn("ha_client_mark_initial_sync_done(false);", get_states)
+        self.assertNotIn("ha_client_mark_initial_sync_done(true);", get_states)
+
+    def test_phase5e_drivers_require_device_readiness_marker_with_bounded_wait(self):
+        for index, path in enumerate((DRIVER, UI_DRIVER)):
+            with self.subTest(driver=path.name):
+                source = path.read_text(encoding="utf-8")
+                self.assertNotIn("time.sleep(25)", source)
+                driver = self.load_driver(path, f"phase5e_readiness_marker_{index}")
+                with tempfile.TemporaryDirectory() as temporary:
+                    monitor = pathlib.Path(temporary) / "monitor.log"
+                    monitor.write_text(
+                        "VERIFY:ha:initial_sync_ready:FAIL\n",
+                        encoding="utf-8",
+                    )
+                    with mock.patch.object(driver, "wait_until") as wait_mock:
+                        driver.wait_for_ha_readiness(monitor)
+                    predicate, timeout, reason = wait_mock.call_args.args
+                    self.assertFalse(predicate())
+                    monitor.write_text(
+                        "VERIFY:ha:initial_sync_ready:PASS\n",
+                        encoding="utf-8",
+                    )
+                    self.assertTrue(predicate())
+                    self.assertEqual(timeout, 300)
+                    self.assertEqual(reason, "ha_initial_sync_readiness_timeout")
+
+    def test_phase5e_driver_readiness_timeout_fails_before_voice_injection(self):
+        for index, path in enumerate((DRIVER, UI_DRIVER)):
+            with self.subTest(driver=path.name):
+                driver = self.load_driver(path, f"phase5e_readiness_timeout_driver_{index}")
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = pathlib.Path(temporary)
+                    prompt_file = root / "prompts.json"
+                    status_file = root / "status"
+                    prompt_file.write_text(
+                        json.dumps({
+                            "schema_version": 1,
+                            "prompts": {
+                                "read": "private read",
+                                "write": "private write",
+                                "barge": "private barge",
+                                "followup": "private followup",
+                            },
+                        }),
+                        encoding="utf-8",
+                    )
+                    argv = [
+                        str(path),
+                        "--prompt-file", str(prompt_file),
+                        "--progress-file", str(root / "progress.json"),
+                        "--monitor-log", str(root / "monitor.log"),
+                        "--status-file", str(status_file),
+                    ]
+                    with (
+                        mock.patch.object(sys, "argv", argv),
+                        mock.patch.object(
+                            driver,
+                            "wait_for_ha_readiness",
+                            side_effect=RuntimeError("ha_initial_sync_readiness_timeout"),
+                        ),
+                        mock.patch.object(driver, "open_capture") as capture_mock,
+                        mock.patch.object(driver, "say") as say_mock,
+                        redirect_stdout(io.StringIO()),
+                    ):
+                        self.assertEqual(driver.main(), 1)
+
+                    capture_mock.assert_not_called()
+                    say_mock.assert_not_called()
+                    self.assertEqual(status_file.read_text(encoding="ascii"), "1\n")
 
     def test_voice_drivers_retry_wake_without_replaying_prompt(self):
         for index, path in enumerate((DRIVER, UI_DRIVER)):

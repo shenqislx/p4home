@@ -10,6 +10,8 @@ import subprocess
 import time
 
 CAPTURE_MARKER = "voice_transport: capture opened epoch="
+HA_INITIAL_SYNC_READY_MARKER = "VERIFY:ha:initial_sync_ready:PASS"
+HA_READINESS_TIMEOUT_SECONDS = 300
 WAKE_ATTEMPTS = 3
 WAKE_RETRY_DELAY_SECONDS = 1
 
@@ -41,6 +43,14 @@ def wait_until(predicate, timeout: float, reason: str) -> None:
             return
         time.sleep(0.05)
     raise RuntimeError(reason)
+
+
+def wait_for_ha_readiness(monitor: pathlib.Path) -> None:
+    wait_until(
+        lambda: count_marker(monitor, HA_INITIAL_SYNC_READY_MARKER) > 0,
+        HA_READINESS_TIMEOUT_SECONDS,
+        "ha_initial_sync_readiness_timeout",
+    )
 
 
 def wait_attempt(
@@ -113,7 +123,9 @@ def main() -> int:
             "read", "write", "barge", "followup"
         }:
             raise RuntimeError("invalid_prompt_plan")
-        time.sleep(25)
+        # HA startup is intentionally delayed. Never inject a wake or private
+        # prompt before the exact device-side capture gate is ready.
+        wait_for_ha_readiness(args.monitor_log)
         speak_until_progress(args.monitor_log, args.progress_file, prompts["read"], 1)
 
         speak_interaction(args.monitor_log, prompts["write"])
