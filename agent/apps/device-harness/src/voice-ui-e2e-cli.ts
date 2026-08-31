@@ -103,6 +103,24 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
   await rename(temporary, path);
 }
 
+function settledProgressSnapshot(runtime: UnifiedVoiceRuntime): {
+  readonly schema_version: 1;
+  readonly completed_interactions: number;
+  readonly capture_attempts: number;
+} {
+  const pipelineResults = runtime.pipeline.results;
+  return {
+    schema_version: 1,
+    // A coordinator result is visible just before dispatch_final returns and
+    // the pipeline records its terminal result. Publishing that earlier count
+    // can make the next capture mistake the previous terminal for its failure.
+    completed_interactions: pipelineResults.filter(
+      (result) => result.outcome === "dispatched",
+    ).length,
+    capture_attempts: pipelineResults.length,
+  };
+}
+
 async function waitForResults(
   runtime: UnifiedVoiceRuntime,
   progressFile: string,
@@ -112,33 +130,30 @@ async function waitForResults(
 ): Promise<void> {
   const deadline = performance.now() + timeoutMs;
   let published = "";
-  while (runtime.coordinator.results.length < 3) {
+  while (true) {
     if (signal.aborted) throw new Error("voice_ui_e2e_harness_stopped");
-    const snapshot = {
-      schema_version: 1,
-      completed_interactions: runtime.coordinator.results.length,
-      capture_attempts: runtime.pipeline.results.length,
-    };
+    const snapshot = settledProgressSnapshot(runtime);
     const serialized = JSON.stringify(snapshot);
     if (serialized !== published) {
       await atomicJson(progressFile, snapshot);
       published = serialized;
     }
+    let inputDriverComplete = false;
     try {
       const inputStatus = (await readFile(inputDriverStatusFile, "ascii")).trim();
       if (inputStatus === "1") throw new Error("voice_ui_input_driver_failed");
       if (inputStatus !== "0") throw new Error("voice_ui_input_driver_status_invalid");
+      inputDriverComplete = true;
     } catch (error) {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
     }
+    // Publish the third settled interaction before accepting driver success.
+    // A missing status means the driver has not completed that handshake yet.
+    if (snapshot.completed_interactions >= 3 && inputDriverComplete) break;
     if (performance.now() >= deadline) throw new Error("voice_ui_e2e_result_timeout");
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  await atomicJson(progressFile, {
-    schema_version: 1,
-    completed_interactions: 3,
-    capture_attempts: runtime.pipeline.results.length,
-  });
+  await atomicJson(progressFile, settledProgressSnapshot(runtime));
 }
 
 async function main(): Promise<void> {

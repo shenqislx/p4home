@@ -556,6 +556,38 @@ class Phase5eProfileTests(unittest.TestCase):
                     else:
                         self.assertTrue(outcome)
 
+    def test_voice_ui_progress_requires_settled_pipeline_and_driver_success(self):
+        source = (
+            ROOT / "agent/apps/device-harness/src/voice-ui-e2e-cli.ts"
+        ).read_text(encoding="utf-8")
+        snapshot = source.split(
+            "function settledProgressSnapshot", 1
+        )[1].split("async function waitForResults", 1)[0]
+        wait = source.split("async function waitForResults", 1)[1].split(
+            "async function main", 1
+        )[0]
+
+        self.assertIn("const pipelineResults = runtime.pipeline.results", snapshot)
+        self.assertIn('result.outcome === "dispatched"', snapshot)
+        self.assertIn("capture_attempts: pipelineResults.length", snapshot)
+        self.assertNotIn("runtime.coordinator.results", snapshot)
+        self.assertIn("const snapshot = settledProgressSnapshot(runtime)", wait)
+        publish = "await atomicJson(progressFile, snapshot)"
+        status_read = 'await readFile(inputDriverStatusFile, "ascii")'
+        terminal = (
+            "if (snapshot.completed_interactions >= 3 && inputDriverComplete) break"
+        )
+        self.assertIn("let inputDriverComplete = false", wait)
+        self.assertIn("inputDriverComplete = true", wait)
+        self.assertIn(terminal, wait)
+        self.assertLess(wait.index(publish), wait.index(status_read))
+        self.assertLess(wait.index(status_read), wait.index(terminal))
+        self.assertNotIn("if (snapshot.completed_interactions >= 3) break", wait)
+        self.assertIn('inputStatus === "1"', wait)
+        self.assertIn('inputStatus !== "0"', wait)
+        self.assertIn('error.code === "ENOENT"', wait)
+        self.assertNotIn("runtime.coordinator.results.length", wait)
+
     def test_speakerless_ui_driver_stops_waiting_on_terminal_failed_attempt(self):
         driver = self.load_driver(UI_DRIVER, "phase5e_ui_terminal_attempt_driver")
         with mock.patch.object(driver, "progress_state", return_value=(1, 3)):
