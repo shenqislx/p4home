@@ -62,10 +62,11 @@ wake 与固定命令动作 marker。5B 已由 run `32627837273` 证明真实 P4 
 `32635742553` 已证明现场中文经真实 P4/VAD/固定 MLX STT 后只进入统一 Human Runtime，transcript
 哈希、SQLite 审计、Cat 零泄漏与原始音频不保留均满足门禁。Mac 系统扬声器只替代口播输入，P4
 startup tone 的独立可听人工观察仍明确待补，不能由 `tone_played` marker 冒充。5D 分角色 TTS、
-P4 播放与 barge-in 技术门禁已完成。5E 当前候选 commit `8432641` 的 `phase5e_ui` run
-`33321298417` 已按 manifest-first 协议通过真实 P4、模型/HA/STT、读/写恢复/聊天、三次 UI ACK 与
-artifact 隐私门禁，音频明确 deferred。P4 UI 三轮文本、雨动画观感和扬声器可听仍待人工观察，
-因此保持 `pending_real_environment`，不解释为 Phase 5 已完成。
+P4 播放与 barge-in 技术门禁已完成。5E 当前候选 commit `c9acbf8` 的 `phase5e_ui` run
+`33345080880` 已按 manifest-first 协议通过真实 P4、模型/HA/STT、读/写恢复/聊天、三次终态 UI
+delivery、六次 applied ACK 与 artifact 隐私门禁，音频明确 deferred。同 renderer 的雨动画观感已获
+用户确认通过；P4 UI 三轮文本和扬声器可听仍待人工观察，因此保持 `pending_real_environment`，
+不解释为 Phase 5 已完成。
 
 Phase 6A–6E 本地实现和模拟门禁已完成：Memory contract/SQLite、确定性写入/冲突/级联删除、
 private 产品 recall、三种 visibility evaluator 和可重复 `pnpm gate:phase6` 均已通过。2026-08-24

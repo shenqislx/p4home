@@ -772,9 +772,11 @@ Voice Protocol v1、自动化硬件、真实 wake 与固定命令动作门禁已
 后技术门禁关闭。5C 最终 run `32635742553` 已证明真实 P4 中文输入经固定 MLX STT 后只进入统一
 Human Runtime，transcript 哈希、SQLite 审计、Cat 零泄漏和原始音频不保留均满足门禁。P4 可听
 startup tone 人工观察待补；5D 分角色 TTS、播放与 barge-in 技术门禁已通过。5E 当前候选 commit
-`8432641` 的 `phase5e_ui` run `33321298417` 已按 manifest-first 协议通过真实 P4、模型/HA/STT、
-读/写恢复/聊天、三次 UI ACK 和 artifact 隐私门禁，音频明确 deferred。P4 UI 三轮文本、雨动画
-观感和扬声器可听仍待人工观察，因此保持 `pending_real_environment`，尚未打开默认 SR。
+`c9acbf8` 的 `phase5e_ui` run `33345080880` 已按 manifest-first 协议通过真实 P4、模型/HA/STT、
+读/写恢复/聊天、三次终态 UI delivery 和共六次 applied ACK、artifact 隐私门禁，音频明确 deferred。
+同 renderer 的雨动画观感
+已获用户确认通过；P4 UI 三轮文本和扬声器可听仍待人工观察，因此保持
+`pending_real_environment`，尚未打开默认 SR。
 
 ### Phase 6 — Memory
 

@@ -2,9 +2,11 @@
 
 > Status: `pending_real_environment`
 > Started: 2026-08-23
-> Current Gate: 5A–5D 技术门禁通过；5E 当前候选 run `33321298417`（commit `8432641`）已通过
-> 真实 P4 自动化门禁，读、写并恢复、Human 聊天、三次 UI ACK 和 artifact 审计均完成，音频明确
-> deferred。P4 UI 三轮文本、雨动画观感及扬声器可听仍待人工观察；Phase 6、7 已分别完成并归档。
+> Current Gate: 5A–5D 技术门禁通过；5E 当前候选 run `33345080880`（commit `c9acbf8`）已通过
+> 真实 P4 自动化门禁，读、写并恢复、Human 聊天、三次终态 UI delivery 和六次 applied ACK、
+> artifact 审计均完成，音频明确
+> deferred。雨动画的同 renderer 人工观感已通过；P4 UI 三轮文本及扬声器可听仍待人工观察；
+> Phase 6、7 已分别完成并归档。
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用
 
@@ -146,7 +148,7 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
 - [ ] 核对 Git、日志、SQLite、进程参数和 CI artifact 不含 token 或非 opt-in 原始音频；
   - [x] 本地 scanner/harness 覆盖 Git objects、process argv、SQLite、上传候选、最终 manifest、token、
     TLS 私钥、raw audio、symlink/权限及审计失败不上传；
-  - [x] 当前候选 run `33321298417` 的最终 workflow artifact 审计通过，凭据、原始音频、Git source
+  - [x] 当前候选 run `33345080880` 的最终 workflow artifact 审计通过，凭据、原始音频、Git source
     archive 和 process argv 均满足门禁；
 - [ ] 分别报告 wake/VAD/STT/Router/Human/Robot/Composer/TTS/播放和端到端延迟、丢帧、取消指标；
   - [x] `VoiceInteractionResult` schema v2 与 Phase 5E artifact schema v2 固定 11 个阶段，并将 Agent
@@ -173,13 +175,16 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
   - [x] 独立 `phase5e_ui` workflow profile、真实模型/HA/STT harness、一次性写入恢复、UI ACK、
     speakerless input driver、artifact 隐私审计和 manifest 字段已实现并通过本地静态/单元门禁；
   - [x] 历史 commit `3edb229` 的 run `32862092039` 已按 manifest-first 协议判定：真实模型/HA/STT、
-    读/写/恢复/聊天、三次 UI ACK、隐私审计均通过，`audio_delivery=deferred` 且没有打开 playback；
+    读/写/恢复/聊天、三次终态 UI delivery、隐私审计均通过，`audio_delivery=deferred` 且没有打开
+    playback；
     该 run 不覆盖其后的 Voice 产品改动，也不替代用户肉眼观察；
-  - [x] 当前候选 commit `8432641` 的 run `33321298417` 已按 manifest-first 协议判定通过：ESP32-P4
-    revision v1.0、flash image hash、transport、读/写恢复/聊天、三次 UI ACK、隐私审计及终态一致；
-    一次瞬态 UI 8 FPS FAIL 后持续恢复 PASS，且无 crash；
+  - [x] 当前候选 commit `c9acbf8` 的 run `33345080880` 已按 manifest-first 协议判定通过：ESP32-P4
+    revision v1.0、flash image hash、transport、读/写恢复/聊天、三次终态 UI delivery、六次 applied
+    ACK、隐私审计及终态一致；
+    三次交互高负载窗口各出现一次瞬态 UI 8 FPS FAIL，随后累计 123 次 PASS，且无 crash；
   - [ ] 用户核对 P4 对话框的三轮可见文本，人工观察不由串口 marker 代替；
-  - [ ] 用户核对修复后的下雨动画形成连续降雨观感，不再是上下两处闪烁。
+  - [x] 同一 LVGL/RGB565 host renderer 的 48 帧雨态预览已由用户确认形成连续降雨观感，不再是
+    上下两处闪烁；该人工结论不外推为 P4 面板摄像证明。
 
 2026-08-28 本地修复把 HA 初始同步 readiness 从 `voice_transport` 具体依赖改为由
 `board_support` 注入的通用 fail-closed probe，保持“HA 未就绪时只显示连接提示且不开始
@@ -190,9 +195,15 @@ capture/STT/LLM”的产品语义；同时把 5A 源码格式契约改为对空�
 1000-session soak；交叉 review 修复 Router fallback 指标失真，并撤回会误杀合法朗读内容的
 “完整 JSON 文本即 TTS 注入”规则。P4 专属阶段保持 `hardware_pending`，本地结果不替代真实环境。
 
-2026-08-31 当前候选实机 run `33321298417` 通过自动化门禁；其 result 对 STT mismatch/provider
-failure 做严格守恒，三轮 role/UI delivery 完成且音频 deferred。P4 wake/VAD/physical playback
-仍为 `hardware_pending`，自动 UI ACK 也不替代用户肉眼观察，因此 Phase 5 状态暂不关闭。
+2026-08-31 诊断 run `33343736267` 暴露 Agent 进度发布竞态：coordinator 结果可能先于 pipeline
+终态可见，导致输入驱动误读上一轮终态。commit `c9acbf8` 改为从同一个 settled pipeline snapshot
+原子计算完成数/尝试数，并要求三轮进度与输入驱动显式 status `0` 同时成立；源码修复经独立 review
+从发现提前退出 blocker 到复核 no blocker，本地 Agent 444/444、harness 64/64、contract 110/110
+与目标测试 4/4 均通过。
+
+修复后的当前候选实机 run `33345080880` 通过自动化门禁；其 result 对 STT mismatch/provider failure
+做严格守恒，三轮 role/UI delivery 完成且音频 deferred。P4 wake/VAD/physical playback 仍为
+`hardware_pending`，自动 UI ACK 也不替代用户肉眼观察，因此 Phase 5 状态暂不关闭。
 
 退出门禁：所有 5A–5E 技术门禁与真实环境证据通过，再交由用户最终 review。workflow 绿色只证明
 构建/烧录/采集/上传链完成；必须先核对 manifest，再用原始 `VERIFY:` marker、音频指标、HA/Agent

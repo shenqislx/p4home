@@ -99,11 +99,12 @@ wake 与固定命令动作已通过。5B 最终 run `32627837273` 证明真实 P
 `32635742553` 已证明现场中文经真实 P4/VAD/固定 MLX STT 后只进入统一 Human Runtime，审计完整、
 Cat 零泄漏且不保留原始音频；独立 review 后技术门禁关闭。5D 已完成固定 Kokoro TTS、分角色
 Composer 消费、有界 P4 playback、统一语音 assembly 与 barge-in/Cat cancellation，最终全量
-319/319 且第五轮 closure review 为 no findings。5E 当前候选 commit `8432641` 的 `phase5e_ui` run
-`33321298417` 已按 manifest-first 协议通过真实 ESP32-P4、模型/HA/STT 的读、低风险写入并恢复、
-Human 聊天、三次 UI ACK 和 artifact 隐私门禁，音频明确 deferred；一次瞬态 UI 8 FPS FAIL 后持续
-恢复 PASS，且无 crash。P4 UI 三轮文本、雨动画观感及 startup tone/分角色播放可听仍须人工观察，
-因此 M7.5 保持 `pending_real_environment`，默认 SR 仍关闭。
+319/319 且第五轮 closure review 为 no findings。5E 当前候选 commit `c9acbf8` 的 `phase5e_ui` run
+`33345080880` 已按 manifest-first 协议通过真实 ESP32-P4、模型/HA/STT 的读、低风险写入并恢复、
+Human 聊天、三次终态 UI delivery、六次 applied ACK 和 artifact 隐私门禁，音频明确 deferred；
+三次交互高负载窗口各有一次瞬态 UI 8 FPS FAIL，随后累计 123 次 PASS，且无 crash。同 renderer 的
+雨动画观感已获用户确认通过；P4 UI 三轮文本及 startup tone/分角色播放可听仍须人工观察，因此
+M7.5 保持 `pending_real_environment`，默认 SR 仍关闭。
 
 2026-08-24，Phase 6A–6D 依次完成 Memory Store、写入/冲突/删除策略、private 产品召回和三策略
 确定性 visibility 对照；6E 新增可重复 `pnpm gate:phase6` 并在 Node `v24.19.0` / pnpm `11.19.0`

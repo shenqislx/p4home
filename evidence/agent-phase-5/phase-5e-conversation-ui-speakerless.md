@@ -10,14 +10,17 @@
 
 ## 结论边界
 
-当前 commit `8432641aa91474fd8245a61f11d6dc97f02f3c05` 的 `phase5e_ui` run
-`33321298417` 已形成真实 P4 自动化证据：真实模型、HA、STT 的 Robot 只读、一次低风险写入并恢复、
-Human 聊天均完成，三次 Conversation UI 投递均收到 P4 ACK，artifact 隐私审计通过，音频明确为
-`deferred` 且没有打开 playback。该结论替代历史 commit `3edb229` / run `32862092039` 作为当前候选
-自动化证据。
+当前 commit `c9acbf872e931bd3a9f719622a1b6c9dac78ff0f` 的 `phase5e_ui` run
+`33345080880` 已形成真实 P4 自动化证据：真实模型、HA、STT 的 Robot 只读、一次低风险写入并恢复、
+Human 聊天均完成，三次终态 `ui_delivery` 均为 `completed`；monitor 共记录六次 `ui_applied` ACK，
+即每轮 thinking/revision1 与 completed/revision2 各一次，其中三次 revision2 为业务终态 ACK。
+artifact 隐私审计通过，音频明确为 `deferred` 且没有打开 playback。该结论替代 commit `8432641` /
+run `33321298417` 作为当前候选自动化证据；后者仍保留为历史成功记录。
 
-自动化 run 不证明用户肉眼看见三轮对话框文本，不证明修复后的雨动画观感，也不证明物理扬声器可听。
-因此 Phase 5 仍为 `pending_real_environment`，等待人工观察和用户最终 review。
+自动化 run 不证明用户肉眼看见三轮对话框文本，也不证明物理扬声器可听。修复后的雨动画已由同一
+LVGL/RGB565 host renderer 生成 48 帧循环预览，并于 2026-08-31 获用户肉眼确认通过；该结论是渲染
+观感验收，不冒充 P4 面板摄像证据。Phase 5 仍为 `pending_real_environment`，等待其余人工观察和
+用户最终 review。
 
 ## 已实现闭环
 
@@ -41,15 +44,15 @@ Human 聊天均完成，三次 Conversation UI 投递均收到 P4 ACK，artifact
 | monitor / capture | `900 s` / `1080 s` |
 | manifest | `passed=true`，`agent_harness_status=0` |
 | 业务路径 | read、write、chat 均 `completed`，write 已恢复 |
-| UI | 三次结构化 UI ACK 均 `completed`；`ui_applied` 三次；`voice_ui_e2e=PASS` |
+| UI | 三次终态 `ui_delivery=completed`；E2E 汇总按三轮业务记 `ui_applied=3`；`voice_ui_e2e=PASS` |
 | 音频 | 三次均 `deferred`；未出现 playback opened |
 | provider | STT 3 次、模型 6 次；未保留 raw audio |
 | 稳定性 | power-on 1、reset 1、crash 0 |
 | 隐私 | `artifact_audit=PASS` |
 
 串口中的 UI 对话文字 marker 因 LVGL 重绘共出现九次，不能按 marker 行数推导业务轮数；业务 JSON
-结果和三次匹配 UI ACK 才是自动化投递结论。自动 marker 只能证明 P4 UI 代码已应用更新，不能代替
-用户肉眼观察。
+的三次终态 `ui_delivery=completed` 与匹配的 `ui_applied` ACK 才共同构成自动化投递结论。自动 marker
+只能证明 P4 UI 代码已应用更新，不能代替用户肉眼观察。
 
 ## 2026-08-28 当前候选本地修复与 review
 
@@ -97,39 +100,40 @@ SQLite `ResourceWarning`，但测试退出码为 0。上述结果只证明源码
 
 | 项目 | 结果 |
 |---|---|
-| workflow run / attempt | `33321298417` / `1`，workflow 成功 |
-| commit / profile | `8432641aa91474fd8245a61f11d6dc97f02f3c05` / `phase5e_ui` |
+| workflow run / attempt | `33345080880` / `1`，workflow 成功 |
+| commit / profile | `c9acbf872e931bd3a9f719622a1b6c9dac78ff0f` / `phase5e_ui` |
 | 芯片 / 串口 | ESP32-P4 revision v1.0 / `/dev/cu.usbserial-210` |
 | monitor / capture | `900 s` / `1080 s` |
 | transport | `completed`，exit `0` |
-| app image | `3009792` bytes；SHA-256 `876c7460a9b0d711379551c3545dd44f8d8ae4c67714cdabaf8c0e2741b98873` |
+| app image | `3009792` bytes；SHA-256 `a2192b1307eb163a44c98577e97314a990411f19a459ade81ffe8ad0fbef5241` |
 | manifest | schema `1`，`mode=artifact-only`，`verdict_owner=cloud-codex` |
 | 业务结果 | result schema `2`，`passed=true`；read/write/chat 均通过，write 已恢复 |
-| provider | STT `4` 次，其中 read 预期文本 mismatch `1` 次后受控重试；模型 `6` 次 |
+| provider | STT `3` 次，mismatch 和其他 provider failure 均为 `0`；模型 `6` 次 |
 | UI / 音频 | 三次 `ui_delivery=completed`；三次 `audio_delivery=deferred` |
 | 审计 / 稳定性 | audit events `21`；power-on `1`、reset `1`、crash `0`；raw audio 未保留 |
 | artifact | 最终审计 `pass`；input driver status `0`；Agent harness status `0` |
 
-manifest-first 复核后，原始串口中的关键证据为：
+manifest-first 复核后，原始串口中的关键证据如下。为保持节选紧凑，下面只列三条 revision2 终态
+ACK；另有三条对应的 revision1 thinking ACK，完整 monitor 合计六条 `ui_applied`：
 
 ```text
 Chip is ESP32-P4 (revision v1.0)
 VERIFY:ha:initial_sync_ready:PASS
-VERIFY:phase5e:ui_conversation:PASS epoch=7602178 revision=2 stage=completed role=robot execution=completed
-VERIFY:phase5e:ui_applied:PASS epoch=7602178 revision=2
-VERIFY:phase5e:ui_conversation:PASS epoch=7602179 revision=2 stage=completed role=robot execution=completed
-VERIFY:phase5e:ui_applied:PASS epoch=7602179 revision=2
-VERIFY:phase5e:ui_conversation:PASS epoch=7602180 revision=2 stage=completed role=human execution=not_applicable
-VERIFY:phase5e:ui_applied:PASS epoch=7602180 revision=2
-VERIFY:phase5e:voice_ui_e2e:PASS interactions=3 stt_calls=4 model_calls=6 ui_applied=3 audio=deferred audit=persisted restored=yes raw_audio_retained=false
+VERIFY:phase5e:ui_conversation:PASS epoch=7864321 revision=2 stage=completed role=robot execution=completed
+VERIFY:phase5e:ui_applied:PASS epoch=7864321 revision=2
+VERIFY:phase5e:ui_conversation:PASS epoch=7864322 revision=2 stage=completed role=robot execution=completed
+VERIFY:phase5e:ui_applied:PASS epoch=7864322 revision=2
+VERIFY:phase5e:ui_conversation:PASS epoch=7864323 revision=2 stage=completed role=human execution=not_applicable
+VERIFY:phase5e:ui_applied:PASS epoch=7864323 revision=2
+VERIFY:phase5e:voice_ui_e2e:PASS interactions=3 stt_calls=3 model_calls=6 ui_applied=3 audio=deferred audit=persisted restored=yes raw_audio_retained=false
 VERIFY:phase5e:artifact_audit:PASS secrets=absent audio_payload=absent source=clean source_mode=archive process_argv=clean
 ```
 
 下载后的 `monitor.log` SHA-256 为
-`64dcf6984bf675852d7dd07f4c1df9226e0de953c5d6c4b7a4fe2546958e45b2`，manifest SHA-256 为
-`2b06dbf7a538dc679c3d86674e0cb215812ffdc74ae2eca0614371552604e909`。
+`fa64a510c4d89663bb7891a8eaaa928d52c6df39a559c24fa8ce009b65355941`，manifest SHA-256 为
+`02e05e1d4eb7acd1a543d34920337a9ba6bee28bff63868e90479c6425e30e82`。
 
-首次业务交互高负载窗口出现一条 `VERIFY:ui:8fps:FAIL`，下一采样周期恢复，随后约 13 分钟持续为
+三次业务交互高负载窗口各出现一条 `VERIFY:ui:8fps:FAIL`，其后均恢复；整个 artifact 共记录 123 条
 `PASS`，且没有 panic、Guru Meditation、额外 reset 或 crash。该瞬态单独披露，不表述为全程无抖动。
 P4 wake、VAD 和实体播放三项在 result 中仍严格保持 `hardware_pending/null`；本次 speakerless input
 driver 自动化不能替代真人唤醒时序或物理播放证明。
@@ -138,10 +142,19 @@ driver 自动化不能替代真人唤醒时序或物理播放证明。
 `33318941758`（业务完成但旧 result schema 无法归因额外 STT 调用）均未被接受为通过。修复后的
 schema 对 mismatch、固定 provider failure code 和 expected kind 做严格守恒；未知类别仍 fail-closed。
 
+run `33343736267`（commit `87aa79e`）在第一轮读完成后因进度快照竞态被输入驱动误判并取消，
+不作为通过证据。根因是 coordinator 结果可能早于 pipeline 终态可见，旧实现分别读取两者并发布了
+撕裂快照。commit `c9acbf8` 改为从同一个 settled pipeline snapshot 原子计算完成数与尝试数，并在
+三轮进度达成后继续等待输入驱动显式 status `0`。独立源码 review 先发现“第三轮进度后提前退出”
+blocker，修复后复核为 no blocker；本地 Agent 444/444、harness 64/64、contract 110/110、目标测试
+4/4 均通过。新 run 的 `progress.json` 为 `completed_interactions=3 / capture_attempts=3`，输入驱动和
+harness 状态均为 `0`，从真实 P4 路径闭合了该竞态修复。
+
 ## 仍待完成
 
 - 用户核对 P4 对话框三轮可见文本（人工验证，待执行）。
-- 用户核对修复后的下雨动画是否形成连续降雨观感，不再表现为上下两处闪烁（人工验证，待执行）。
+- [x] 修复后的下雨动画由同一 LVGL/RGB565 host renderer 生成 48 个连续雨态帧；用户于
+  2026-08-31 确认已形成连续降雨观感，不再表现为上下两处闪烁。该项不外推为 P4 面板摄像证明。
 - 连接物理扬声器后核对 startup tone 与分角色播放可听输出（人工验证，待硬件条件满足）。
 - 真实 P4 网络丢失、HA 服务重启与状态对账、真实 launchd KeepAlive/P4 感知 Agent 重连，以及
   P4/HA/Agent 长跑中的固定命令、触摸、P4 ↔ HA、Cat、heap/stack/watchdog/UI 连续性（延期）。
