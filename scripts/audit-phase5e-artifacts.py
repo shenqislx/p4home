@@ -20,6 +20,10 @@ RAW_FIELD = re.compile(
 VOICE_RESULT_KEYS = {
     "schema_version", "profile", "passed", "interactions", "stt_provider_version",
     "stt_model_revision", "stt_calls", "stt_transcript_mismatches", "stt_total_ms",
+    "stt_rejections_by_expected_kind", "stt_non_mismatch_failures_by_expected_kind",
+    "capture_attempts", "capture_failures_by_expected_kind",
+    "stt_accepted_capture_failures_by_expected_kind",
+    "stt_failed_capture_failures_by_expected_kind",
     "tts_provider_version", "tts_model_revision", "tts_calls", "tts_total_ms",
     "audit_events", "restored", "read_passed", "write_passed", "barge_in_passed",
     "followup_passed", "composition_audits_persisted", "playback_segments",
@@ -69,9 +73,20 @@ UI_REQUIRED_INTERACTIONS = 3
 # exceptions remain visible in the schema but can never satisfy the gate.
 UI_MAX_RETRY_FAILURES = 4
 UI_STT_REJECTION_KEYS = {"read", "write", "chat", "unexpected"}
-UI_STT_FAILURE_CODES = {
+STT_FAILURE_CODES = {
     "cancelled", "invalid_response", "model_unavailable", "process_error",
     "timeout", "unknown",
+}
+E2E_REQUIRED_INTERACTIONS = 4
+# The audio driver may retry read and barge twice, and may retry follow-up
+# three times because its first attempt reuses the capture that interrupted
+# barge playback. Write is intentionally never replayed after its HA side
+# effect may have crossed the boundary.
+E2E_MAX_RETRY_FAILURES = 7
+E2E_STT_EXPECTED_KEYS = {"read", "write", "barge", "followup", "unexpected"}
+E2E_CAPTURE_FAILURE_OUTCOMES = {
+    "cancelled", "dispatch_failed", "empty_transcript", "provider_error",
+    "silence", "stale", "timed_out", "too_long", "too_short",
 }
 
 
@@ -198,7 +213,7 @@ def ui_stt_attempts_valid(result: dict) -> bool:
             or not all(bounded_counter(value) for value in rejections.values())
             or not isinstance(failures, dict) or set(failures) != UI_STT_REJECTION_KEYS
             or any(
-                not isinstance(bucket, dict) or set(bucket) != UI_STT_FAILURE_CODES
+                not isinstance(bucket, dict) or set(bucket) != STT_FAILURE_CODES
                 or not all(bounded_counter(value) for value in bucket.values())
                 for bucket in failures.values()
             )
@@ -222,6 +237,136 @@ def ui_stt_attempts_valid(result: dict) -> bool:
     )
 
 
+def e2e_retry_attempts_valid(result: dict) -> bool:
+    stt_calls = result.get("stt_calls")
+    transcript_mismatches = result.get("stt_transcript_mismatches")
+    rejections = result.get("stt_rejections_by_expected_kind")
+    failures = result.get("stt_non_mismatch_failures_by_expected_kind")
+    capture_attempts = result.get("capture_attempts")
+    capture_failures = result.get("capture_failures_by_expected_kind")
+    accepted_failures = result.get("stt_accepted_capture_failures_by_expected_kind")
+    stt_failed_terminals = result.get("stt_failed_capture_failures_by_expected_kind")
+    if (not isinstance(rejections, dict) or set(rejections) != E2E_STT_EXPECTED_KEYS
+            or not all(bounded_counter(value) for value in rejections.values())
+            or not isinstance(failures, dict) or set(failures) != E2E_STT_EXPECTED_KEYS
+            or any(
+                not isinstance(bucket, dict) or set(bucket) != STT_FAILURE_CODES
+                or not all(bounded_counter(value) for value in bucket.values())
+                for bucket in failures.values()
+            )
+            or not isinstance(capture_failures, dict)
+            or set(capture_failures) != E2E_STT_EXPECTED_KEYS
+            or any(
+                not isinstance(bucket, dict)
+                or set(bucket) != E2E_CAPTURE_FAILURE_OUTCOMES
+                or not all(bounded_counter(value) for value in bucket.values())
+                for bucket in capture_failures.values()
+            )
+            or not isinstance(accepted_failures, dict)
+            or set(accepted_failures) != E2E_STT_EXPECTED_KEYS
+            or any(
+                not isinstance(bucket, dict)
+                or set(bucket) != E2E_CAPTURE_FAILURE_OUTCOMES
+                or not all(bounded_counter(value) for value in bucket.values())
+                for bucket in accepted_failures.values()
+            )
+            or not isinstance(stt_failed_terminals, dict)
+            or set(stt_failed_terminals) != E2E_STT_EXPECTED_KEYS
+            or any(
+                not isinstance(bucket, dict)
+                or set(bucket) != E2E_CAPTURE_FAILURE_OUTCOMES
+                or not all(bounded_counter(value) for value in bucket.values())
+                for bucket in stt_failed_terminals.values()
+            )
+            or not bounded_counter(stt_calls)
+            or not bounded_counter(transcript_mismatches)
+            or not bounded_counter(capture_attempts)):
+        return False
+
+    rejected = sum(rejections.values())
+    failed_by_kind = {
+        kind: sum(failures[kind].values()) for kind in E2E_STT_EXPECTED_KEYS
+    }
+    failed = sum(failed_by_kind.values())
+    capture_failed_by_kind = {
+        kind: sum(capture_failures[kind].values())
+        for kind in E2E_STT_EXPECTED_KEYS
+    }
+    capture_failed = sum(capture_failed_by_kind.values())
+    accepted_failed_by_kind = {
+        kind: sum(accepted_failures[kind].values())
+        for kind in E2E_STT_EXPECTED_KEYS
+    }
+    accepted_failed = sum(accepted_failed_by_kind.values())
+    stt_failed_terminal_by_kind = {
+        kind: sum(stt_failed_terminals[kind].values())
+        for kind in E2E_STT_EXPECTED_KEYS
+    }
+
+    # Every failed STT call settles as provider_error, timed_out, or stale.
+    # A successful STT call can settle non-dispatched only when dispatch fails
+    # or a newer capture makes the in-flight dispatch stale. Recording that
+    # latter partition by capture identity prevents an unexplained provider
+    # terminal from being used to forge retry conservation.
+    return (
+        all(failures[kind]["unknown"] == 0 for kind in E2E_STT_EXPECTED_KEYS)
+        and capture_failed_by_kind["read"] <= 2
+        and capture_failed_by_kind["write"] == 0
+        and capture_failed_by_kind["barge"] <= 2
+        and capture_failed_by_kind["followup"] <= 3
+        and capture_failed_by_kind["unexpected"] == 0
+        and capture_failed <= E2E_MAX_RETRY_FAILURES
+        and all(
+            accepted_failures[kind][outcome] <= capture_failures[kind][outcome]
+            for kind in E2E_STT_EXPECTED_KEYS
+            for outcome in E2E_CAPTURE_FAILURE_OUTCOMES
+        )
+        and all(
+            stt_failed_terminals[kind][outcome] <= capture_failures[kind][outcome]
+            for kind in E2E_STT_EXPECTED_KEYS
+            for outcome in E2E_CAPTURE_FAILURE_OUTCOMES
+        )
+        and all(
+            accepted_failures[kind][outcome]
+                + stt_failed_terminals[kind][outcome]
+            <= capture_failures[kind][outcome]
+            for kind in E2E_STT_EXPECTED_KEYS
+            for outcome in E2E_CAPTURE_FAILURE_OUTCOMES
+        )
+        and all(
+            accepted_failures[kind][outcome] == 0
+            for kind in E2E_STT_EXPECTED_KEYS
+            for outcome in E2E_CAPTURE_FAILURE_OUTCOMES - {"dispatch_failed", "stale"}
+        )
+        and all(
+            accepted_failures[kind]["dispatch_failed"]
+            == capture_failures[kind]["dispatch_failed"]
+            for kind in E2E_STT_EXPECTED_KEYS
+        )
+        and all(
+            stt_failed_terminals[kind][outcome] == 0
+            for kind in E2E_STT_EXPECTED_KEYS
+            for outcome in E2E_CAPTURE_FAILURE_OUTCOMES
+                - {"provider_error", "timed_out", "stale"}
+        )
+        and all(
+            capture_failures[kind][outcome]
+            == stt_failed_terminals[kind][outcome]
+            for kind in E2E_STT_EXPECTED_KEYS
+            for outcome in {"provider_error", "timed_out"}
+        )
+        and all(
+            rejections[kind] + failed_by_kind[kind]
+            == stt_failed_terminal_by_kind[kind]
+            for kind in E2E_STT_EXPECTED_KEYS
+        )
+        and transcript_mismatches == rejected
+        and stt_calls == E2E_REQUIRED_INTERACTIONS + rejected + failed + accepted_failed
+        and capture_attempts == E2E_REQUIRED_INTERACTIONS + capture_failed
+        and stt_calls <= capture_attempts
+    )
+
+
 def common_result_schema_valid(result: dict, profile: str) -> bool:
     stt_calls = result.get("stt_calls")
     stt_attempts_valid = (
@@ -229,8 +374,7 @@ def common_result_schema_valid(result: dict, profile: str) -> bool:
         if profile == "phase5e_ui"
         else (
             profile == "phase5e_e2e"
-            and stt_calls == 4
-            and result.get("stt_transcript_mismatches") == 0
+            and e2e_retry_attempts_valid(result)
         )
     )
     return (

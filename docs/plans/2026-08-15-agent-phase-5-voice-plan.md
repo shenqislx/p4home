@@ -5,9 +5,10 @@
 > Current Gate: 5A–5D 技术门禁通过；commit `85b55ec` 的 `phase5e_ui` run `33452154578` 已通过
 > 读、写并恢复、Human 聊天、三次终态 UI delivery、六次 applied ACK 和 artifact 审计，用户已肉眼
 > 确认三轮屏幕更新；`phase5a_voice` run `33454508895` 与用户听觉共同确认 SPK/J16 startup tone。
-> `phase5e_e2e` run `33450564511` 只部分证明实体播放和 barge-in，最终
-> `voice_e2e_result_timeout`。源码候选已完成独立 review 修正和 Node 24.19 本地全量门禁，仍待新提交
-> 实机重跑，因此完整分角色播放继续是阻断项，Phase 5 不关闭。Phase 6、7 已分别完成并归档。
+> `phase5e_e2e` 修复提交 `d39b69b` 的 run `33456284948` 已完成四轮分角色播放和
+> barge-in，用户确认功能符合要求；但旧 artifact schema 无法表达合法重试，workflow fail-closed，
+> 且语音响应明显偏慢。重试守恒和低延迟候选已完成实现/review，仍待新提交的实机复验，
+> Phase 5 不关闭。Phase 6、7 已分别完成并归档。
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用
 
@@ -186,10 +187,12 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
     串口 marker 代替；
   - [x] 同一 LVGL/RGB565 host renderer 的 48 帧雨态预览已由用户确认形成连续降雨观感，不再是
     上下两处闪烁；该人工结论不外推为 P4 面板摄像证明。
-  - [ ] `phase5e_e2e` run `33450564511` 的 workflow/transport/artifact audit 虽成功，但 audio driver 与
-    harness 均为 status `1`，业务以 `voice_e2e_result_timeout` 失败。人工确认至少一次回复可听、一次
-    新唤醒打断旧播放，但后续无声；源码修复和独立 review 已完成，Node 24.19 typecheck、Agent
-    `444/444`、hardware harness `67/67`、Phase 5E 专项 `31/31` 均通过，须从新 commit 实机重跑。
+  - [ ] `phase5e_e2e` 修复提交 `d39b69b` 的 run `33456284948` 中 audio driver/harness 均为 `0`，
+    四轮分角色播放、写入恢复和 barge-in 业务终态均 PASS，用户确认功能符合要求；但
+    `stt_calls=8 / capture_attempts=9` 的合法有界重试无法被旧 result schema 守恒，artifact audit
+    以 `result_schema` fail-closed。同时首轮约 `40.6 s`、热态约 `8.47 s`，用户确认响应明显偏慢。
+    候选修复增加重试分类守恒、ready 前顺序预热，并在语音后 `800 ms` 静音时提前收口；已完成
+    独立 review，仍须新 commit 实机复验 artifact、延迟和长句停顿。
 
 2026-08-28 本地修复把 HA 初始同步 readiness 从 `voice_transport` 具体依赖改为由
 `board_support` 注入的通用 fail-closed probe，保持“HA 未就绪时只显示连接提示且不开始
@@ -209,8 +212,9 @@ capture/STT/LLM”的产品语义；同时把 5A 源码格式契约改为对空�
 最新 `phase5e_ui` run `33452154578` 通过自动化门禁；其 result 对 STT mismatch/provider failure
 做严格守恒，三轮 role/UI delivery 完成且音频 deferred，用户另行完成 P4 屏幕肉眼确认。独立
 `phase5a_voice` run `33454508895` 与用户听觉完成 startup tone 物理确认。另一方面，
-`phase5e_e2e` run `33450564511` 的实体播放总门禁仍因结果超时失败；P4 wake/VAD/physical playback
-尚无一份完整 PASS result，因此 Phase 5 状态暂不关闭。详见
+`phase5e_e2e` run `33456284948` 已有完整业务 result 和人工播放/barge-in PASS，但其 artifact
+审计因旧 schema 不支持合法重试而失败，且用户不接受当前明显偏慢的响应速度。因此 Phase 5
+状态暂不关闭，需要从包含审计守恒和低延迟修复的新 commit 复验。详见
 [2026-09-01 manual hardware validation](../../evidence/agent-phase-5/phase-5-manual-hardware-validation-2026-09-01.md)。
 
 退出门禁：所有 5A–5E 技术门禁与真实环境证据通过，再交由用户最终 review。workflow 绿色只证明

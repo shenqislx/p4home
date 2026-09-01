@@ -178,11 +178,12 @@ artifact SHA-256：`monitor.log`
   2026-08-31 确认已形成连续降雨观感，不再表现为上下两处闪烁。该项不外推为 P4 面板摄像证明。
 - [x] 外接扬声器连接 `SPK/J16` 后，用户已在 `phase5a_voice` run `33454508895` 的唯一开机周期明确
   听到 startup tone；串口 marker 与人工听觉分开成立。
-- [ ] 修复 `phase5e_e2e` run `33450564511` 的 `voice_e2e_result_timeout` 并从新提交重跑；该 run
-  已人工确认至少一次回复可听和一次 barge-in，但后续无声，audio driver/harness status 均为 `1`，
-  不能判定完整分角色播放通过。源码候选已修复 settled progress、driver 状态握手、终态失败快速
-  重试与提示类型推进问题，经独立 review 修正 1 项 P1、2 项 P2；Node 24.19 typecheck、Agent
-  `444/444`、hardware harness `67/67` 和 Phase 5E 专项 `31/31` 均通过，仍待新提交实机重跑。
+- [ ] 后续 `phase5e_e2e` run `33456284948` 的 audio driver/harness 均为 `0`，四轮业务结果通过，
+  用户确认前两轮可听、第三轮成功打断、第四轮完整播放。但该 run 的旧 artifact schema
+  不支持 `stt_calls=8 / capture_attempts=9` 的合法有界重试，manifest 明确记录 audit `fail`；
+  用户同时反馈语音响应明显偏慢，首轮约 `40.6 s`、热态约 `8.47 s`。当前候选修复已加入
+  重试分类守恒、ready 前顺序预热和语音后 `800 ms` 静音提前收口，并经独立 review；
+  仍需新 commit 实机复验 artifact audit、响应延迟和长句停顿不截断。
 - 真实 P4 网络丢失、HA 服务重启与状态对账、真实 launchd KeepAlive/P4 感知 Agent 重连，以及
   P4/HA/Agent 长跑中的固定命令、触摸、P4 ↔ HA、Cat、heap/stack/watchdog/UI 连续性（延期）。
 - artifact 中 Agent duration 由运行方进程计时；schema 能验证范围、状态和内部一致性，但不能提供独立

@@ -34,6 +34,7 @@ import {
   type Phase5ePromptSet,
   type RunRoleInteractionResult,
   type UserTextInteraction,
+  type VoiceSttOutcome,
 } from "@p4home/runtime";
 import { SqliteAuditStore } from "@p4home/storage-sqlite";
 import { RobotHaClient, loadRobotHaRuntimeConfig } from "@p4home/transport-ha";
@@ -58,6 +59,7 @@ function captureMetricKey(value: {
   return `${value.session_id}:${value.stream_id}:${value.epoch}`;
 }
 
+type ExpectedSttKind = "read" | "write" | "barge" | "followup" | "unexpected";
 type BoundedSttFailureCode =
   | "cancelled"
   | "invalid_response"
@@ -65,6 +67,33 @@ type BoundedSttFailureCode =
   | "process_error"
   | "timeout"
   | "unknown";
+
+type CaptureFailureOutcome = Exclude<VoiceSttOutcome, "dispatched">;
+
+function emptySttFailureCounts(): Record<BoundedSttFailureCode, number> {
+  return {
+    cancelled: 0,
+    invalid_response: 0,
+    model_unavailable: 0,
+    process_error: 0,
+    timeout: 0,
+    unknown: 0,
+  };
+}
+
+function emptyCaptureFailureCounts(): Record<CaptureFailureOutcome, number> {
+  return {
+    cancelled: 0,
+    dispatch_failed: 0,
+    empty_transcript: 0,
+    provider_error: 0,
+    silence: 0,
+    stale: 0,
+    timed_out: 0,
+    too_long: 0,
+    too_short: 0,
+  };
+}
 
 function boundedSttFailureCode(error: unknown): BoundedSttFailureCode {
   if (!(error instanceof SttProviderError)) return "unknown";
@@ -217,6 +246,25 @@ async function main(): Promise<void> {
     const ttsDurations: number[] = [];
     const expectedKinds = ["read", "write", "barge", "followup"] as const;
     let transcriptMismatches = 0;
+    const transcriptRejectionsByExpectedKind: Record<ExpectedSttKind, number> = {
+      read: 0,
+      write: 0,
+      barge: 0,
+      followup: 0,
+      unexpected: 0,
+    };
+    const nonMismatchFailuresByExpectedKind: Record<
+      ExpectedSttKind, Record<BoundedSttFailureCode, number>
+    > = {
+      read: emptySttFailureCounts(),
+      write: emptySttFailureCounts(),
+      barge: emptySttFailureCounts(),
+      followup: emptySttFailureCounts(),
+      unexpected: emptySttFailureCounts(),
+    };
+    const sttExpectedKindByCapture = new Map<string, ExpectedSttKind>();
+    const acceptedSttCaptures = new Set<string>();
+    const failedSttCaptures = new Set<string>();
     const pythonStt = new PythonSttProvider({
       python_executable: requiredEnvironment("P4HOME_STT_PYTHON"),
       worker_script: requiredEnvironment("P4HOME_STT_WORKER"),
@@ -233,25 +281,41 @@ async function main(): Promise<void> {
         // expectation merely because STT succeeded: Role/TTS/playback can
         // still fail terminally and a safe read/chat retry must keep the same
         // expected prompt kind.
-        const expectedKind = expectedKinds[
+        const expectedKind: ExpectedSttKind = expectedKinds[
           runtime === null
             ? -1
             : settledProgressSnapshot(runtime).completed_interactions
         ] ?? "unexpected";
+        const captureKey = captureMetricKey(request);
+        if (sttExpectedKindByCapture.has(captureKey)) {
+          throw new SttProviderError(
+            "INVALID_RESPONSE", "Phase 5E capture identity was transcribed more than once",
+          );
+        }
+        sttExpectedKindByCapture.set(captureKey, expectedKind);
+        let transcriptMismatch = false;
         try {
           const transcript = await pythonStt.transcribe(request, options);
           const kind = classifyPhase5ePrompt(transcript.text, prompts);
           if (kind === null || kind !== expectedKind) {
+            transcriptMismatch = true;
             transcriptMismatches++;
+            transcriptRejectionsByExpectedKind[expectedKind]++;
             throw new SttProviderError(
               "INVALID_RESPONSE", "Phase 5E transcript did not match the expected holdout prompt",
             );
           }
+          acceptedSttCaptures.add(captureKey);
           return transcript;
         } catch (error) {
+          failedSttCaptures.add(captureKey);
+          const failureCode = boundedSttFailureCode(error);
+          if (!transcriptMismatch) {
+            nonMismatchFailuresByExpectedKind[expectedKind][failureCode]++;
+          }
           process.stdout.write(
             "HARNESS:phase5e:stt_attempt_failed "
-            + `expected=${expectedKind} code=${boundedSttFailureCode(error)}\n`,
+            + `expected=${expectedKind} code=${failureCode}\n`,
           );
           throw error;
         }
@@ -270,6 +334,10 @@ async function main(): Promise<void> {
       provider_version: TTS_PROVIDER_VERSION,
       timeout_ms: 120_000,
     });
+    // Move one-shot MLX import/model cold-start outside the human-visible
+    // interaction. Warm sequentially to avoid overlapping STT/TTS peaks.
+    await pythonStt.warmup({ signal: shutdown.signal });
+    await pythonTts.warmup({ signal: shutdown.signal });
     const measuredTts: TtsProvider = {
       async synthesize(request, options): Promise<TtsSynthesisResult> {
         const started = performance.now();
@@ -341,7 +409,59 @@ async function main(): Promise<void> {
     });
     // Fence every capture/Role/write before compensation. Otherwise a slow
     // original write could complete after restoration and leave target state.
-    await runtime.close();
+    const completedRuntime = runtime;
+    await completedRuntime.close();
+    const captureResults = completedRuntime.pipeline.results;
+    const captureFailuresByExpectedKind: Record<
+      ExpectedSttKind, Record<CaptureFailureOutcome, number>
+    > = {
+      read: emptyCaptureFailureCounts(),
+      write: emptyCaptureFailureCounts(),
+      barge: emptyCaptureFailureCounts(),
+      followup: emptyCaptureFailureCounts(),
+      unexpected: emptyCaptureFailureCounts(),
+    };
+    const acceptedSttCaptureFailuresByExpectedKind: Record<
+      ExpectedSttKind, Record<CaptureFailureOutcome, number>
+    > = {
+      read: emptyCaptureFailureCounts(),
+      write: emptyCaptureFailureCounts(),
+      barge: emptyCaptureFailureCounts(),
+      followup: emptyCaptureFailureCounts(),
+      unexpected: emptyCaptureFailureCounts(),
+    };
+    const failedSttCaptureFailuresByExpectedKind: Record<
+      ExpectedSttKind, Record<CaptureFailureOutcome, number>
+    > = {
+      read: emptyCaptureFailureCounts(),
+      write: emptyCaptureFailureCounts(),
+      barge: emptyCaptureFailureCounts(),
+      followup: emptyCaptureFailureCounts(),
+      unexpected: emptyCaptureFailureCounts(),
+    };
+    let dispatchedCaptures = 0;
+    const terminalCaptureKeys = new Set<string>();
+    for (const capture of captureResults) {
+      const captureKey = captureMetricKey(capture);
+      terminalCaptureKeys.add(captureKey);
+      const expectedKind: ExpectedSttKind = sttExpectedKindByCapture.get(captureKey)
+        ?? expectedKinds[dispatchedCaptures]
+        ?? "unexpected";
+      if (capture.outcome === "dispatched") dispatchedCaptures++;
+      else {
+        captureFailuresByExpectedKind[expectedKind][capture.outcome]++;
+        if (acceptedSttCaptures.has(captureKey)) {
+          acceptedSttCaptureFailuresByExpectedKind[expectedKind][capture.outcome]++;
+        }
+        if (failedSttCaptures.has(captureKey)) {
+          failedSttCaptureFailuresByExpectedKind[expectedKind][capture.outcome]++;
+        }
+      }
+    }
+    if (sttExpectedKindByCapture.size !== sttDurations.length
+        || [...sttExpectedKindByCapture.keys()].some((key) => !terminalCaptureKeys.has(key))) {
+      throw new Error("stt_capture_accounting_incomplete");
+    }
     runtime = null;
     const restore = await restoreRobotState(client, alias, initialState, 10_000, 2_000);
     restoredState = requirePhase5eRestoredState(restore, initialState);
@@ -376,7 +496,15 @@ async function main(): Promise<void> {
       stt_model_revision: STT_MODEL_REVISION,
       stt_calls: sttDurations.length,
       stt_transcript_mismatches: transcriptMismatches,
+      stt_rejections_by_expected_kind: transcriptRejectionsByExpectedKind,
+      stt_non_mismatch_failures_by_expected_kind: nonMismatchFailuresByExpectedKind,
       stt_total_ms: Math.round(sttDurations.reduce((sum, value) => sum + value, 0)),
+      capture_attempts: captureResults.length,
+      capture_failures_by_expected_kind: captureFailuresByExpectedKind,
+      stt_accepted_capture_failures_by_expected_kind:
+        acceptedSttCaptureFailuresByExpectedKind,
+      stt_failed_capture_failures_by_expected_kind:
+        failedSttCaptureFailuresByExpectedKind,
       tts_provider_version: TTS_PROVIDER_VERSION,
       tts_model_revision: TTS_MODEL_REVISION,
       tts_calls: ttsDurations.length,

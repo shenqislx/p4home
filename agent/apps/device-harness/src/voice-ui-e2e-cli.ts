@@ -266,6 +266,7 @@ async function main(): Promise<void> {
       provider_version: STT_PROVIDER_VERSION,
       timeout_ms: 120_000,
     });
+    await pythonStt.warmup({ signal: shutdown.signal });
     const measuredStt: SttProvider = {
       async transcribe(request, options): Promise<SttFinalTranscript> {
         const started = performance.now();

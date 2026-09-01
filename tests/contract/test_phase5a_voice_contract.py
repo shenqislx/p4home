@@ -281,8 +281,25 @@ class Phase5AVoiceContractTest(unittest.TestCase):
             "multinet_timeout",
             "deadline",
             "deadline_no_runtime",
+            "vad_silence",
         ):
             self.assertIn(f'"{outcome}"', runtime)
+
+        for expected in (
+            "#define SR_SERVICE_VAD_EARLY_END_MIN_MS 1200U",
+            "#define SR_SERVICE_VAD_TRAILING_SILENCE_MS 800U",
+            "s_capture_speech_seen = true;",
+            "s_capture_trailing_silence_samples = 0U;",
+            "s_capture_live_samples >= SR_SERVICE_VAD_EARLY_END_MIN_SAMPLES",
+            "s_capture_trailing_silence_samples >=",
+            "SR_SERVICE_VAD_TRAILING_SILENCE_SAMPLES",
+        ):
+            self.assertIn(expected, source)
+        detector = runtime.index("s_command_iface->detect(")
+        remote_offer = runtime.index("sr_service_preroll_drain_with_live(")
+        endpoint = runtime.index('sr_service_finish_command_window("vad_silence"')
+        self.assertLess(detector, remote_offer)
+        self.assertLess(detector, endpoint)
 
         finish = source.split(
             "static void sr_service_finish_command_window(const char *outcome,", 2

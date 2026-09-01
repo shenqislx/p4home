@@ -49,6 +49,17 @@ print(json.dumps({
 }, separators=(",", ":")))
 `;
 
+const MODEL_UNAVAILABLE_WORKER = `
+import json
+import sys
+json.loads(sys.stdin.readline())
+print(json.dumps({
+    "schema_version": 1,
+    "status": "error",
+    "error_code": "MODEL_UNAVAILABLE",
+}, separators=(",", ":")))
+`;
+
 function providerWithWorkerSequence(
   workers: readonly string[],
   timeoutMs: number,
@@ -161,6 +172,29 @@ test("timeout kills a real slow worker without poisoning the next invocation", a
   const result = await provider.transcribe(REQUEST);
   assert.equal(result.text, "打开客厅灯");
   assert.equal(children.length, 2);
+});
+
+test("STT warmup is one-time and leaves the next one-shot invocation healthy", async () => {
+  const { provider, children } = providerWithWorkerSequence(
+    [SUCCESS_WORKER, SUCCESS_WORKER],
+    5_000,
+  );
+  await Promise.all([provider.warmup(), provider.warmup()]);
+  await provider.warmup();
+  assert.equal(children.length, 1);
+  const result = await provider.transcribe(REQUEST);
+  assert.equal(result.text, "打开客厅灯");
+  assert.equal(children.length, 2);
+});
+
+test("STT warmup failure is cached and keeps readiness fail-closed", async () => {
+  const { provider, children } = providerWithWorkerSequence(
+    [MODEL_UNAVAILABLE_WORKER, SUCCESS_WORKER],
+    5_000,
+  );
+  await assert.rejects(provider.warmup(), SttProviderError);
+  await assert.rejects(provider.warmup(), SttProviderError);
+  assert.equal(children.length, 1);
 });
 
 test("STT worker response is identity-bound, Python 3.12-only and bounded", () => {

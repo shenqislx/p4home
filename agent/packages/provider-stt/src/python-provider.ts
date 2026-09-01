@@ -124,6 +124,7 @@ function validateWorkerResponse(value: unknown, request: SttTranscriptionRequest
 export class PythonSttProvider implements SttProvider {
   readonly #options: PythonSttProviderOptions;
   readonly #timeoutMs: number;
+  #warmupPromise: Promise<void> | null = null;
 
   public constructor(options: PythonSttProviderOptions) {
     if (!isAbsolute(options.python_executable) || !isAbsolute(options.worker_script)
@@ -261,6 +262,35 @@ export class PythonSttProvider implements SttProvider {
         ));
       }
     });
+  }
+
+  /**
+   * Prime the one-shot Python/MLX path before accepting live microphone audio.
+   * The synthetic PCM is bounded, contains only silence, and is zeroed as soon
+   * as the worker exits. The worker remains one-shot, so models are not kept
+   * resident and the normal per-request cancellation boundary is unchanged.
+   */
+  public warmup(options: SttTranscriptionOptions = {}): Promise<void> {
+    this.#warmupPromise ??= this.#runWarmup(options);
+    return this.#warmupPromise;
+  }
+
+  async #runWarmup(options: SttTranscriptionOptions): Promise<void> {
+    const pcm = new Uint8Array(STT_SAMPLE_RATE_HZ * 2);
+    try {
+      await this.transcribe({
+        session_id: "p4home-stt-warmup",
+        stream_id: 0,
+        epoch: 0,
+        pcm,
+        sample_rate_hz: STT_SAMPLE_RATE_HZ,
+        channels: STT_CHANNELS,
+        sample_bits: STT_SAMPLE_BITS,
+        language: "zh",
+      }, options);
+    } finally {
+      pcm.fill(0);
+    }
   }
 }
 

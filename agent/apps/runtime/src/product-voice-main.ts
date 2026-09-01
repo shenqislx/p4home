@@ -271,6 +271,11 @@ async function main(): Promise<void> {
       provider_version: TTS_PROVIDER_VERSION,
       timeout_ms: optionalInteger("P4HOME_TTS_TIMEOUT_MS", 120_000, 1_000, 120_000),
     });
+    // Fail closed before advertising readiness and shift one-shot MLX cold
+    // startup out of the first live interaction. Sequential warmup avoids
+    // retaining workers or overlapping the two model memory peaks.
+    await stt.warmup({ signal: shutdown.signal });
+    await tts.warmup({ signal: shutdown.signal });
     const ttsPipeline = new RoleAwareTtsPipeline(tts);
     runtime = new UnifiedVoiceRuntime({
       server: {

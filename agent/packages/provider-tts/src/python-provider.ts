@@ -147,6 +147,7 @@ function validateWorkerResponse(
 export class PythonTtsProvider {
   readonly #options: PythonTtsProviderOptions;
   readonly #timeoutMs: number;
+  #warmupPromise: Promise<void> | null = null;
 
   public constructor(options: PythonTtsProviderOptions) {
     if (!isAbsolute(options.python_executable) || !isAbsolute(options.worker_script)
@@ -280,6 +281,32 @@ export class PythonTtsProvider {
         ));
       }
     });
+  }
+
+  /**
+   * Prime the one-shot Python/MLX path before the first user response. The
+   * fixed text is non-user data and the generated PCM is immediately zeroed;
+   * no worker or model allocation remains resident after this call.
+   */
+  public warmup(options: TtsSynthesisOptions = {}): Promise<void> {
+    this.#warmupPromise ??= this.#runWarmup(options);
+    return this.#warmupPromise;
+  }
+
+  async #runWarmup(options: TtsSynthesisOptions): Promise<void> {
+    const result = await this.synthesize({
+      interaction_id: "p4home-tts-warmup",
+      assignment_id: "p4home-tts-warmup-human",
+      segment_index: 0,
+      role_id: "human",
+      text: "准备就绪。",
+      voice: TTS_ROLE_VOICES.human,
+      language: "zh",
+      sample_rate_hz: TTS_SAMPLE_RATE_HZ,
+      channels: TTS_CHANNELS,
+      sample_bits: TTS_SAMPLE_BITS,
+    }, options);
+    result.pcm.fill(0);
   }
 }
 

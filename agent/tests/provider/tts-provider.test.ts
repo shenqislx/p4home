@@ -137,6 +137,49 @@ test("abort during process spawn cannot be lost before listener registration", a
   assert.ok(performance.now() - started < 1_000);
 });
 
+test("TTS warmup is one-time and leaves the next one-shot invocation healthy", async () => {
+  let invocations = 0;
+  const tts = new PythonTtsProvider({
+    python_executable: "/usr/bin/python3",
+    worker_script: new URL("../fixtures/tts-worker-ok.py", import.meta.url).pathname,
+    model_path: "/private/tmp/p4home-tts-model",
+    model_revision: TTS_MODEL_REVISION,
+    provider_version: TTS_PROVIDER_VERSION,
+    timeout_ms: 1_000,
+    spawn_process: ((...args: Parameters<typeof spawn>) => {
+      invocations++;
+      return spawn(...args);
+    }) as typeof spawn,
+  });
+  await Promise.all([tts.warmup(), tts.warmup()]);
+  await tts.warmup();
+  assert.equal(invocations, 1);
+  const healthy = await tts.synthesize(REQUEST);
+  assert.equal(healthy.pcm.byteLength, 640);
+  assert.equal(invocations, 2);
+});
+
+test("TTS warmup failure is cached and keeps readiness fail-closed", async () => {
+  let invocations = 0;
+  const tts = new PythonTtsProvider({
+    python_executable: "/usr/bin/python3",
+    worker_script: new URL(
+      "../fixtures/tts-worker-model-unavailable.py", import.meta.url,
+    ).pathname,
+    model_path: "/private/tmp/p4home-tts-model",
+    model_revision: TTS_MODEL_REVISION,
+    provider_version: TTS_PROVIDER_VERSION,
+    timeout_ms: 1_000,
+    spawn_process: ((...args: Parameters<typeof spawn>) => {
+      invocations++;
+      return spawn(...args);
+    }) as typeof spawn,
+  });
+  await assert.rejects(tts.warmup(), TtsProviderError);
+  await assert.rejects(tts.warmup(), TtsProviderError);
+  assert.equal(invocations, 1);
+});
+
 test("Python source accumulator rejects a multi-chunk overrun before concatenation", () => {
   const output = execFileSync("/usr/bin/python3", [
     "-I",

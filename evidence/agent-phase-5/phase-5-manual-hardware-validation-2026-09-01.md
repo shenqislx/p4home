@@ -2,11 +2,11 @@
 
 日期：2026-09-01
 
-状态：`ui_manual_pass / startup_tone_manual_pass / role_playback_incomplete`
+状态：`ui_manual_pass / startup_tone_manual_pass / role_playback_manual_pass / latency_pending`
 
 分支：`feature/agent-harness`
 
-提交：`85b55ec9d282218baed14d685ddd5dc2d505562b`
+提交：`85b55ec9d282218baed14d685ddd5dc2d505562b` / `d39b69b97e34511e73ea512aaaeac49814bc8e88`
 
 ## 结论
 
@@ -14,8 +14,9 @@
 
 - P4 对话框三轮可见更新已经由用户肉眼确认通过；
 - 外接在 `SPK/J16` 的扬声器已由用户明确听到 Phase 5A 开机提示音；
-- `phase5e_e2e` 已证明 P4 至少一次可听回复和新唤醒打断旧播放，但完整多轮播放没有通过，最终
-  `voice_e2e_result_timeout`，因此 Phase 5 继续保持 `pending_real_environment`；
+- 修复后的 `phase5e_e2e` 已完成四次交互，用户确认前两次回复可听、第三次被新唤醒打断、
+  第四次完整播放；但该 run 因 artifact result schema 未表达合法重试而 fail-closed，且用户明确反馈
+  语音响应明显偏慢，因此 Phase 5 仍保持 `pending_real_environment`；
 - `phase5e_e2e` profile 不启用 Conversation UI 输出。该 run 中屏幕未更新不能判为 Conversation UI
   回归；UI 由独立 `phase5e_ui` run 和用户肉眼观察判定。
 
@@ -140,10 +141,65 @@ artifact SHA-256：
 这些本地结果只证明修复候选边界，不把既有失败 run 改写为通过；仍需从包含该修复的新 Git 提交执行
 实机 `phase5e_e2e`。
 
-## 5. 当前剩余项
+## 5. 修复后 E2E：功能与人工播放通过，产物审计和延迟未通过
 
-- 修复并从新提交重跑 `phase5e_e2e`，要求完整交互业务终态、audio driver 与 harness 均为 `0`；
-- 在同一有效 run 中再次由用户确认完整分角色回复可听，且 barge-in 后旧 epoch 不再恢复播放；
+commit `d39b69b97e34511e73ea512aaaeac49814bc8e88` 的 `phase5e_e2e` run `33456284948`
+完成四次交互，但 workflow conclusion 为 `failure`。必须分层判定，不能用业务 PASS 抵消
+artifact 审计失败：
+
+| 项目 | 结果 |
+|---|---|
+| workflow run / attempt | `33456284948` / `1`，workflow `failure` |
+| profile | `phase5e_e2e` |
+| 串口 | `/dev/cu.usbserial-210` |
+| monitor / capture | `600 s` / `780 s` |
+| transport | `completed`，exit `0` |
+| app image | `3009792` bytes；SHA-256 `57855c40eb1c02232349c5f2217335d76ebc1d2a16465cbecb03fa81fed5b022` |
+| 驱动 / harness | audio driver status `0`；Agent harness status `0` |
+| 业务结果 | `passed=true`；4 interactions；STT `8`；TTS `4`；playback segments `4` |
+| 稳定性 | power-on `1`、reset `1`、crash `0` |
+| artifact audit | `fail`；`VERIFY:phase5e:artifact_audit:FAIL reasons=result_schema` |
+
+人工观察：
+
+1. 前两次回复可听；
+2. 第三次旧播放被新唤醒打断；
+3. 第四次回复完整播放；
+4. 用户对上述功能路径给出“符合要求”，但同时明确指出“语音反应速度明显慢”。
+
+延迟指标显示两个独立瓶颈：
+
+- 首轮 capture open 到 playback open 约 `40.6 s`；其中 STT `18.415 s`、TTS `16.795 s`，
+  属于 MLX 模型冷启动；
+- 热态 write 轮约 `8.47 s`；其中 STT `1.349 s`、TTS `1.658 s`，固定 `5 s` 采集窗口仍是主要延迟；
+- barge 从首次采集到播放约 `16.6 s`，follow-up 约 `27.4 s`，包含有界识别失败重试；
+- result 中 `stt_calls=8`、`stt_transcript_mismatches=2`，而旧 auditor 只接受固定
+  `stt_calls=4 / mismatches=0`，这是审计失败的直接原因。
+
+artifact SHA-256：
+
+- `monitor.log`：`5cb26483d2d15f8ffa679322bbb1832f9b81c5e5ee0a9d43f21fc7eeb3930ea6`
+- `hardware-validation-manifest.json`：
+  `9a7399afe5293418e52f1fc5dd3efb9d2619f5bc90a73965f232df43abadb4ff`
+
+针对这两个未通过项，当前修复候选将冷启动顺序预热移到服务 ready 之前，并在已检测到语音后
+连续静音 `800 ms`时提前结束采集，`5 s` 仍作为噪声/连续语音的硬上限。同时 result 新增按
+expected kind 分类的 STT 拒绝、provider failure 和 capture terminal 守恒；写操作仍禁止重放，
+unknown/unexpected 或计数不守恒继续 fail-closed。这些只是已 review 的修复候选，仍须新 commit 的
+本地总门禁和实机复验，不回写 run `33456284948` 的 artifact 结论。
+
+最终交叉 review 另修复 1 项 P1：聚合计数可被不对应真实 STT 调用的伪造 terminal 字段绕过。
+修复后改为按 capture identity 守恒 accepted/failed STT 与 terminal outcome，并增加伪造、超限、
+write 重放等反例。主代理复验：harness `68/68`、聚焦合同 `41/41`、Agent `448/448`、
+TypeScript typecheck 和 `git diff --check` 全部通过。`sr_service.c` 单对象强制编译由独立 reviewer 确认通过；
+本地完整固件 target 仍被既有 ESP-Hosted 私密配置 guard 阻断，不属于本次回归。
+
+## 6. 当前剩余项
+
+- 完成低延迟和重试审计修复的本地总门禁、独立 review、提交和推送；
+- 从新提交重跑 `phase5e_e2e`，要求 workflow、artifact audit、完整交互业务终态、
+  audio driver 与 harness 全部通过，并重新量化 capture-open 到 playback-open；
+- 在同一有效 run 中由用户确认长句未被 `800 ms` 静音窗口误截断，且响应体感可接受；
 - 真实网络丢失、HA 重启/对账、launchd KeepAlive、P4 感知 Agent 重连和长跑连续性继续按既定决策
   延期，不冒充已验证；
 - 上述非延期阻断项通过后，再交由用户最终 review 关闭 Phase 5。

@@ -54,9 +54,11 @@ fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 r
 `phase5e_ui` run `33452154578` 已通过真实模型/HA/STT 的读、低风险写入并恢复、Human 聊天、三次
 终态 UI delivery、六次 P4 applied ACK 和 artifact 隐私审计，用户另行肉眼确认三轮屏幕均更新到
 最终内容；`phase5a_voice` run `33454508895` 与人工听觉共同确认外接 SPK/J16 startup tone。
-`phase5e_e2e` run `33450564511` 只部分证明回复可听和 barge-in，最终仍因
-`voice_e2e_result_timeout` 失败。源码候选已完成独立 review 修正与 Node 24.19 本地全量门禁，仍待
-新提交实机重跑；完整分角色播放是当前非延期阻断项。因此 Phase 5 继续保持
+`phase5e_e2e` run `33450564511` 曾因 `voice_e2e_result_timeout` 失败；修复提交 `d39b69b`
+的 run `33456284948` 已完成四次分角色播放和 barge-in，用户确认功能符合要求。但该 run
+因旧 artifact schema 无法守恒合法 STT 重试而 fail-closed，且用户明确反馈语音响应明显偏慢。
+重试审计守恒、模型 ready 前预热与 VAD 静音提前收口候选已完成源码实现和独立 review，仍待
+新提交实机重跑同时验证 artifact 与延迟。因此 Phase 5 继续保持
 `pending_real_environment`，默认 SR 仍关闭。2026-08-24 用户明确授权 Phase 6
 先完成编码、确定性测试与模拟验证。Phase 6A–6E
 本地门禁现已完成：Memory contract/SQLite、

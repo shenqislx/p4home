@@ -29,12 +29,22 @@ static const char *TAG = "sr_service";
 #define SR_SERVICE_RUNTIME_TASK_STACK_SIZE 6144
 #define SR_SERVICE_WAKE_DETECTED_HOLD_MS 1500
 #define SR_SERVICE_AWAKE_HOLD_MS 5000
+#define SR_SERVICE_VAD_EARLY_END_MIN_MS 1200U
+#define SR_SERVICE_VAD_TRAILING_SILENCE_MS 800U
 #define SR_SERVICE_CAPTURE_GATE_RETRY_MS 20
 #define SR_SERVICE_CAPTURE_GATE_MAX_WAIT_MS 3500
 #define SR_SERVICE_PREROLL_MS 800U
 #define SR_SERVICE_SAMPLE_RATE_HZ 16000U
 #define SR_SERVICE_PREROLL_SAMPLES \
     ((SR_SERVICE_SAMPLE_RATE_HZ * SR_SERVICE_PREROLL_MS) / 1000U)
+#define SR_SERVICE_VAD_EARLY_END_MIN_SAMPLES \
+    ((SR_SERVICE_SAMPLE_RATE_HZ * SR_SERVICE_VAD_EARLY_END_MIN_MS) / 1000U)
+#define SR_SERVICE_VAD_TRAILING_SILENCE_SAMPLES \
+    ((SR_SERVICE_SAMPLE_RATE_HZ * SR_SERVICE_VAD_TRAILING_SILENCE_MS) / 1000U)
+
+_Static_assert(SR_SERVICE_VAD_EARLY_END_MIN_MS + SR_SERVICE_VAD_TRAILING_SILENCE_MS <
+                   SR_SERVICE_AWAKE_HOLD_MS,
+               "VAD endpoint must remain below the hard command deadline");
 
 typedef enum {
     SR_SERVICE_COMMAND_ID_NONE = 0,
@@ -83,6 +93,9 @@ static size_t s_preroll_flush_target;
 static size_t s_preroll_flushed_current;
 static uint64_t s_preroll_started_at_us;
 static bool s_preroll_rearm_requested;
+static size_t s_capture_live_samples;
+static size_t s_capture_trailing_silence_samples;
+static bool s_capture_speech_seen;
 
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_preroll_signal_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -824,6 +837,9 @@ static void sr_service_runtime_task(void *parameter)
                     s_status.command_window_raw_peak = 0;
                     s_status.command_window_afe_peak = 0;
                 });
+                s_capture_live_samples = 0U;
+                s_capture_trailing_silence_samples = 0U;
+                s_capture_speech_seen = false;
                 sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_AWAKE,
                                            "wake detected hold elapsed");
                 const uint64_t capture_started_at_us = (uint64_t)esp_timer_get_time();
@@ -903,15 +919,6 @@ static void sr_service_runtime_task(void *parameter)
                                       (size_t)fetch_result->data_size / sizeof(int16_t));
         }
 
-        if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE && s_capture_active &&
-            s_capture_listener.offer_pcm != NULL && fetch_result->data != NULL &&
-            fetch_result->data_size > 0) {
-            sr_service_preroll_drain_with_live(
-                fetch_result->data,
-                (size_t)fetch_result->data_size / sizeof(int16_t),
-                (uint64_t)esp_timer_get_time());
-        }
-
         if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE &&
             s_command_iface != NULL && s_command_model_data != NULL && sr_status_command_set_ready_get()) {
             if (fetch_result->data != NULL && fetch_result->data_size > 0) {
@@ -984,6 +991,47 @@ static void sr_service_runtime_task(void *parameter)
                              mn_chunksize);
                 }
             }
+        }
+
+        /*
+         * Offer a frame to the remote transcript path only after the local
+         * fixed-command detector has had the opportunity to consume it. A
+         * detected local command closes the window above, so its decisive
+         * frame is not also offered to the remote transcription path.
+         */
+        if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE && s_capture_active &&
+            s_capture_listener.offer_pcm != NULL && fetch_result->data != NULL &&
+            fetch_result->data_size > 0) {
+            const size_t live_samples =
+                (size_t)fetch_result->data_size / sizeof(int16_t);
+            sr_service_preroll_drain_with_live(
+                fetch_result->data,
+                live_samples,
+                (uint64_t)esp_timer_get_time());
+            s_capture_live_samples += live_samples;
+            if (fetch_result->vad_state == VAD_SPEECH) {
+                s_capture_speech_seen = true;
+                s_capture_trailing_silence_samples = 0U;
+            } else if (s_capture_speech_seen) {
+                s_capture_trailing_silence_samples += live_samples;
+            }
+        }
+
+        /*
+         * The five-second awake deadline is a hard upper bound, not an
+         * endpointing policy. Once live speech has been observed, finish a
+         * transport capture after a bounded trailing-silence window. The
+         * local fixed-command detector above gets every frame first, and the
+         * hard deadline remains the fallback for noise or continuous speech.
+         */
+        if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE &&
+            s_capture_active && s_capture_speech_seen &&
+            s_capture_live_samples >= SR_SERVICE_VAD_EARLY_END_MIN_SAMPLES &&
+            s_capture_trailing_silence_samples >=
+                SR_SERVICE_VAD_TRAILING_SILENCE_SAMPLES) {
+            sr_service_finish_command_window("vad_silence",
+                                             "Voice capture ended after speech",
+                                             "vad trailing silence");
         }
 
         uint32_t iter_log;

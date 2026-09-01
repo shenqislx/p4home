@@ -180,7 +180,8 @@ class Phase5eProfileTests(unittest.TestCase):
         )[1].split("async function atomicJson", 1)[0]
         self.assertIn("HARNESS:phase5e:stt_attempt_failed", harness)
         self.assertIn("expected=${expectedKind}", harness)
-        self.assertIn("code=${boundedSttFailureCode(error)}", harness)
+        self.assertIn("const failureCode = boundedSttFailureCode(error)", harness)
+        self.assertIn("code=${failureCode}", harness)
         self.assertIn("settledProgressSnapshot(runtime).completed_interactions", harness)
         self.assertNotIn("acceptedTranscripts", harness)
         self.assertNotIn(".message", failure_mapping)
@@ -890,6 +891,46 @@ class Phase5eProfileTests(unittest.TestCase):
                 } for kind in ("read", "write", "barge", "followup")],
                 "stt_provider_version": "1", "stt_model_revision": "a" * 40,
                 "stt_calls": 4, "stt_transcript_mismatches": 0, "stt_total_ms": 1,
+                "stt_rejections_by_expected_kind": {
+                    "read": 0, "write": 0, "barge": 0, "followup": 0,
+                    "unexpected": 0,
+                },
+                "stt_non_mismatch_failures_by_expected_kind": {
+                    kind: {
+                        "cancelled": 0, "invalid_response": 0,
+                        "model_unavailable": 0, "process_error": 0,
+                        "timeout": 0, "unknown": 0,
+                    }
+                    for kind in ("read", "write", "barge", "followup", "unexpected")
+                },
+                "capture_attempts": 4,
+                "capture_failures_by_expected_kind": {
+                    kind: {
+                        "cancelled": 0, "dispatch_failed": 0,
+                        "empty_transcript": 0, "provider_error": 0,
+                        "silence": 0, "stale": 0, "timed_out": 0,
+                        "too_long": 0, "too_short": 0,
+                    }
+                    for kind in ("read", "write", "barge", "followup", "unexpected")
+                },
+                "stt_accepted_capture_failures_by_expected_kind": {
+                    kind: {
+                        "cancelled": 0, "dispatch_failed": 0,
+                        "empty_transcript": 0, "provider_error": 0,
+                        "silence": 0, "stale": 0, "timed_out": 0,
+                        "too_long": 0, "too_short": 0,
+                    }
+                    for kind in ("read", "write", "barge", "followup", "unexpected")
+                },
+                "stt_failed_capture_failures_by_expected_kind": {
+                    kind: {
+                        "cancelled": 0, "dispatch_failed": 0,
+                        "empty_transcript": 0, "provider_error": 0,
+                        "silence": 0, "stale": 0, "timed_out": 0,
+                        "too_long": 0, "too_short": 0,
+                    }
+                    for kind in ("read", "write", "barge", "followup", "unexpected")
+                },
                 "tts_provider_version": "1", "tts_model_revision": "b" * 40,
                 "tts_calls": 4, "tts_total_ms": 1, "audit_events": 8,
                 "restored": True, "read_passed": True, "write_passed": True,
@@ -908,15 +949,150 @@ class Phase5eProfileTests(unittest.TestCase):
                 "--audit-db", str(database), "--result", str(result),
             )
             self.assertEqual(self.run_audit(command), 0)
-            result_payload["stt_calls"] = 5
-            result_payload["stt_transcript_mismatches"] = 1
+            baseline_payload = json.loads(json.dumps(result_payload))
+
+            # Mirrors the bounded shape observed on real hardware: four
+            # successful interactions, four classified STT failures, and one
+            # additional pre-STT cancelled capture.
+            result_payload["stt_calls"] = 8
+            result_payload["stt_transcript_mismatches"] = 2
+            result_payload["stt_rejections_by_expected_kind"]["followup"] = 2
+            result_payload["stt_non_mismatch_failures_by_expected_kind"]["read"][
+                "cancelled"
+            ] = 2
+            result_payload["capture_attempts"] = 9
+            result_payload["capture_failures_by_expected_kind"]["read"][
+                "stale"
+            ] = 2
+            result_payload["capture_failures_by_expected_kind"]["barge"][
+                "cancelled"
+            ] = 1
+            result_payload["capture_failures_by_expected_kind"]["followup"][
+                "provider_error"
+            ] = 2
+            result_payload[
+                "stt_failed_capture_failures_by_expected_kind"
+            ]["read"]["stale"] = 2
+            result_payload[
+                "stt_failed_capture_failures_by_expected_kind"
+            ]["followup"]["provider_error"] = 2
             result.write_text(json.dumps(result_payload), encoding="utf-8")
+            self.assertEqual(
+                self.run_audit(command), 0,
+                "bounded classified retries must conserve STT and capture attempts",
+            )
+
+            dispatch_retry_payload = json.loads(json.dumps(baseline_payload))
+            dispatch_retry_payload["stt_calls"] = 5
+            dispatch_retry_payload["capture_attempts"] = 5
+            dispatch_retry_payload["capture_failures_by_expected_kind"]["read"][
+                "dispatch_failed"
+            ] = 1
+            dispatch_retry_payload[
+                "stt_accepted_capture_failures_by_expected_kind"
+            ]["read"]["dispatch_failed"] = 1
+            result.write_text(json.dumps(dispatch_retry_payload), encoding="utf-8")
+            self.assertEqual(
+                self.run_audit(command), 0,
+                "a bounded safe dispatch retry must conserve its successful STT call",
+            )
+
+            stale_dispatch_payload = json.loads(json.dumps(baseline_payload))
+            stale_dispatch_payload["stt_calls"] = 5
+            stale_dispatch_payload["capture_attempts"] = 5
+            stale_dispatch_payload["capture_failures_by_expected_kind"]["read"][
+                "stale"
+            ] = 1
+            stale_dispatch_payload[
+                "stt_accepted_capture_failures_by_expected_kind"
+            ]["read"]["stale"] = 1
+            result.write_text(json.dumps(stale_dispatch_payload), encoding="utf-8")
+            self.assertEqual(
+                self.run_audit(command), 0,
+                "a newer capture may stale an accepted STT dispatch before terminalization",
+            )
+
+            invalid_payload = json.loads(json.dumps(result_payload))
+            invalid_payload["stt_calls"] = 9
+            result.write_text(json.dumps(invalid_payload), encoding="utf-8")
             self.assertNotEqual(
                 self.run_audit(command), 0,
-                "the audio profile has no transcript retry contract",
+                "an unexplained STT call must fail closed",
             )
-            result_payload["stt_calls"] = 4
-            result_payload["stt_transcript_mismatches"] = 0
+            invalid_payload = json.loads(json.dumps(result_payload))
+            invalid_payload["stt_non_mismatch_failures_by_expected_kind"]["read"][
+                "unknown"
+            ] = 1
+            invalid_payload["stt_calls"] = 9
+            result.write_text(json.dumps(invalid_payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "unclassified STT failures must not explain retries",
+            )
+            invalid_payload = json.loads(json.dumps(result_payload))
+            invalid_payload["capture_attempts"] = 10
+            result.write_text(json.dumps(invalid_payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "every extra capture must have a classified terminal",
+            )
+            invalid_payload = json.loads(json.dumps(baseline_payload))
+            invalid_payload["capture_attempts"] = 5
+            invalid_payload["capture_failures_by_expected_kind"]["read"][
+                "provider_error"
+            ] = 1
+            result.write_text(json.dumps(invalid_payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "an unexplained provider terminal must not forge a retry",
+            )
+            invalid_payload = json.loads(json.dumps(dispatch_retry_payload))
+            invalid_payload[
+                "stt_accepted_capture_failures_by_expected_kind"
+            ]["read"]["dispatch_failed"] = 0
+            invalid_payload["stt_calls"] = 4
+            result.write_text(json.dumps(invalid_payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "a successful STT dispatch failure must be identity-accounted",
+            )
+            invalid_payload = json.loads(json.dumps(baseline_payload))
+            invalid_payload["stt_calls"] = 5
+            invalid_payload["capture_attempts"] = 5
+            invalid_payload["stt_non_mismatch_failures_by_expected_kind"]["read"][
+                "process_error"
+            ] = 1
+            invalid_payload["capture_failures_by_expected_kind"]["read"][
+                "silence"
+            ] = 1
+            result.write_text(json.dumps(invalid_payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "a pre-STT capture terminal cannot explain a provider failure",
+            )
+            invalid_payload = json.loads(json.dumps(baseline_payload))
+            invalid_payload["capture_attempts"] = 8
+            invalid_payload["capture_failures_by_expected_kind"]["followup"][
+                "silence"
+            ] = 4
+            result.write_text(json.dumps(invalid_payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "follow-up capture failures beyond the driver budget must fail closed",
+            )
+            invalid_payload = json.loads(json.dumps(baseline_payload))
+            invalid_payload["capture_attempts"] = 5
+            invalid_payload["capture_failures_by_expected_kind"]["write"][
+                "silence"
+            ] = 1
+            result.write_text(json.dumps(invalid_payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "write capture failures imply a forbidden write replay",
+            )
+
+            result_payload = baseline_payload
+            result.write_text(json.dumps(result_payload), encoding="utf-8")
             result_payload["interactions"][0]["metrics"]["stages"]["stt"]["attempts"] = 0
             result.write_text(json.dumps(result_payload), encoding="utf-8")
             self.assertNotEqual(self.run_audit(command), 0)
@@ -1221,6 +1397,65 @@ class Phase5eProfileTests(unittest.TestCase):
             payload["unexpected"] = "field"
             result.write_text(json.dumps(payload), encoding="utf-8")
             self.assertNotEqual(self.run_audit(command), 0)
+
+    def test_voice_e2e_result_conserves_classified_retries(self):
+        source = (
+            ROOT / "agent/apps/device-harness/src/voice-e2e-cli.ts"
+        ).read_text(encoding="utf-8")
+        measured = source.split(
+            "const measuredStt: SttProvider", 1
+        )[1].split("const pythonTts", 1)[0]
+        capture_accounting = source.split(
+            "const captureResults = completedRuntime.pipeline.results", 1
+        )[1].split("runtime = null", 1)[0]
+        result = source.split("await atomicJson(resultFile", 1)[1].split(
+            "process.stdout.write", 1
+        )[0]
+
+        self.assertIn("const transcriptRejectionsByExpectedKind", source)
+        self.assertIn("const nonMismatchFailuresByExpectedKind", source)
+        self.assertIn("const sttExpectedKindByCapture", source)
+        self.assertIn("const acceptedSttCaptures", source)
+        self.assertIn("const failedSttCaptures", source)
+        self.assertLess(
+            source.index("await completedRuntime.close()"),
+            source.index("const captureResults = completedRuntime.pipeline.results"),
+        )
+        self.assertIn("let transcriptMismatch = false", measured)
+        self.assertLess(
+            measured.index("transcriptRejectionsByExpectedKind[expectedKind]++"),
+            measured.index(
+                '"INVALID_RESPONSE", "Phase 5E transcript did not match the expected holdout prompt"'
+            ),
+        )
+        self.assertIn("if (!transcriptMismatch)", measured)
+        self.assertIn("nonMismatchFailuresByExpectedKind[expectedKind]", measured)
+        self.assertIn(
+            "captureFailuresByExpectedKind[expectedKind][capture.outcome]++",
+            capture_accounting,
+        )
+        self.assertIn(
+            "acceptedSttCaptureFailuresByExpectedKind[expectedKind][capture.outcome]++",
+            capture_accounting,
+        )
+        self.assertIn(
+            "failedSttCaptureFailuresByExpectedKind[expectedKind][capture.outcome]++",
+            capture_accounting,
+        )
+        self.assertIn("sttExpectedKindByCapture.get(captureKey)", capture_accounting)
+        self.assertIn(
+            'if (capture.outcome === "dispatched") dispatchedCaptures++',
+            capture_accounting,
+        )
+        for field in (
+            "stt_rejections_by_expected_kind: transcriptRejectionsByExpectedKind",
+            "stt_non_mismatch_failures_by_expected_kind: nonMismatchFailuresByExpectedKind",
+            "capture_attempts: captureResults.length",
+            "capture_failures_by_expected_kind: captureFailuresByExpectedKind",
+            "stt_accepted_capture_failures_by_expected_kind:",
+            "stt_failed_capture_failures_by_expected_kind:",
+        ):
+            self.assertIn(field, result)
 
     def test_voice_ui_result_attributes_rejections_before_dispatch(self):
         source = (
