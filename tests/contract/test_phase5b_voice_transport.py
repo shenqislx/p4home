@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 VOICE_SOURCE = ROOT / "firmware/components/voice_transport/voice_transport.c"
+VOICE_CREDIT_POLICY = ROOT / "firmware/components/voice_transport/voice_credit_policy.h"
 PLAYBACK_SOURCE = ROOT / "firmware/components/voice_transport/voice_playback_receiver.c"
 VOICE_HEADER = ROOT / "firmware/components/voice_transport/include/voice_transport.h"
 VOICE_KCONFIG = ROOT / "firmware/components/voice_transport/Kconfig.projbuild"
@@ -135,7 +140,9 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         ):
             self.assertIn(marker, firmware)
         self.assertIn("outstanding_sequences", firmware)
-        self.assertIn("s_voice.outstanding_sequences[ack_index] != ack", firmware)
+        self.assertIn("outstanding_sequences[ack_index] != ack", (
+            ROOT / "firmware/components/voice_transport/voice_credit_policy.h"
+        ).read_text(encoding="utf-8"))
         end_capture = firmware[firmware.index("static void voice_end_capture("):
                                firmware.index("static void voice_worker(")]
         self.assertNotIn("xQueueReceive", end_capture)
@@ -158,23 +165,31 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
             ROOT / "agent/packages/contracts/src/voice-protocol.ts"
         ).read_text(encoding="utf-8"))
 
-    def test_late_credit_after_completed_capture_is_narrowly_ignored(self) -> None:
+    def test_late_terminal_credit_is_narrowly_consumed_without_reopening_credit(self) -> None:
         firmware = VOICE_SOURCE.read_text(encoding="utf-8")
+        policy = VOICE_CREDIT_POLICY.read_text(encoding="utf-8")
         credit = firmware[
             firmware.index('} else if (strcmp(type->valuestring, "credit") == 0) {'):
             firmware.index('} else if (strcmp(type->valuestring, "session.closed") == 0) {')
         ]
 
-        # A normal terminal response can overtake already queued flow-control
-        # callbacks at the ESP client. The exact just-completed capture may
-        # consume those acknowledgements, but no credit is reopened.
-        self.assertIn("late_terminal_credit = s_voice.session_state == VOICE_SESSION_IDLE", credit)
-        self.assertIn("s_voice.end_requested && s_voice.eos_sent", credit)
-        self.assertIn("(!s_voice.eos_sent || ack < s_voice.final_sequence)", credit)
-        self.assertIn("(int64_t)ack > s_voice.last_ack_sequence", credit)
-        self.assertIn("ack_index < s_voice.outstanding_frames", credit)
-        self.assertIn("if (!late_terminal_credit) {", credit)
+        # Agent sends credits for non-EOS frames before session.closed, while
+        # ESP callbacks can observe them either waiting for close or just after
+        # close. Both terminal windows consume the exact acknowledgement but
+        # never reopen capture credit.
+        self.assertIn("voice_credit_decide(", credit)
+        self.assertIn("s_voice.session_state, s_voice.end_requested, s_voice.eos_sent", credit)
+        self.assertIn("voice_control_identity_matches_locked(&control_identity)", credit)
+        self.assertIn("s_voice.outstanding_sequences, s_voice.outstanding_frames", credit)
+        self.assertIn("if (credit_mode == VOICE_CREDIT_ACTIVE) {", credit)
+        self.assertNotIn("available_credit += grant", credit[credit.index(
+            "if (credit_mode == VOICE_CREDIT_TERMINAL)"
+        ):credit.index("if (credit_mode == VOICE_CREDIT_ACTIVE)")])
         self.assertIn("DIAG:voice:late_terminal_credit", credit)
+        self.assertIn(
+            'terminal_credit_after_close ? "closed_idle" : "waiting_close"',
+            credit,
+        )
         self.assertRegex(
             credit,
             r"if \(!valid\) \{\s*voice_metric_protocol_error\(\);\s*"
@@ -195,13 +210,14 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
             credit,
         )
 
-        # EOS acknowledgements stay invalid even during the short interval in
-        # which eos_sent is true but the worker has not entered WAITING_CLOSE.
-        self.assertRegex(
-            credit,
-            r"\(active_credit \|\| late_terminal_credit\) &&\s*"
-            r"\(!s_voice\.eos_sent \|\| ack < s_voice\.final_sequence\)",
-        )
+        # EOS acknowledgements stay invalid. READY without a completed EOS is
+        # the only non-terminal state that can use the normal credit path;
+        # OPENING and unrelated IDLE sessions remain protocol errors.
+        self.assertIn("session_state == VOICE_SESSION_READY", policy)
+        self.assertIn("session_state == VOICE_SESSION_WAITING_CLOSE", policy)
+        self.assertIn("session_state == VOICE_SESSION_IDLE", policy)
+        self.assertIn("end_requested && eos_sent", policy)
+        self.assertIn("eos_sent && ack >= final_sequence", policy)
 
         # Session state changes can race websocket callbacks, so the parsed
         # identity is checked again while the credit state is locked.
@@ -212,6 +228,106 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         self.assertIn("identity->session_id", identity_match)
         self.assertIn("identity->stream_id == s_voice.stream_id", identity_match)
         self.assertIn("identity->epoch == s_voice.epoch", identity_match)
+
+    def test_voice_credit_policy_state_matrix(self) -> None:
+        compiler = shutil.which("cc")
+        if compiler is None:
+            self.skipTest("C compiler unavailable")
+        source = textwrap.dedent(
+            r"""
+            #include <assert.h>
+            #include <stdbool.h>
+            #include <stdint.h>
+            #include "voice_credit_policy.h"
+
+            static void expect(voice_credit_mode_t expected, uint32_t acknowledged,
+                               bool identity, voice_session_state_t state,
+                               bool end_requested, bool eos_sent, uint32_t final_sequence,
+                               uint32_t available, const uint32_t *outstanding,
+                               uint32_t outstanding_count, int64_t last_ack,
+                               uint32_t ack, uint32_t grant)
+            {
+                const voice_credit_decision_t decision = voice_credit_decide(
+                    identity, state, end_requested, eos_sent, final_sequence,
+                    available, outstanding, outstanding_count, last_ack,
+                    ack, grant, 16U);
+                assert(decision.mode == expected);
+                assert(decision.acknowledged == acknowledged);
+            }
+
+            int main(void)
+            {
+                const uint32_t outstanding[] = {10U, 11U};
+
+                /* Normal READY credit conserves the negotiated window and
+                 * supports cumulative acknowledgement. */
+                expect(VOICE_CREDIT_ACTIVE, 1U, true, VOICE_SESSION_READY,
+                       false, false, 0U, 14U, outstanding, 2U, 9, 10U, 1U);
+                expect(VOICE_CREDIT_ACTIVE, 2U, true, VOICE_SESSION_READY,
+                       false, false, 0U, 14U, outstanding, 2U, 9, 11U, 1U);
+                expect(VOICE_CREDIT_INVALID, 0U, true, VOICE_SESSION_READY,
+                       false, false, 0U, 15U, outstanding, 2U, 9, 10U, 1U);
+                expect(VOICE_CREDIT_INVALID, 0U, true, VOICE_SESSION_READY,
+                       false, false, 0U, UINT32_MAX, outstanding, 2U, 9, 10U, 1U);
+
+                /* Exact pre-EOS credits are terminal only while waiting for
+                 * close or in the just-closed IDLE state. Grant size remains
+                 * bounded, but it is not applied to available credit. */
+                expect(VOICE_CREDIT_TERMINAL, 1U, true, VOICE_SESSION_WAITING_CLOSE,
+                       true, true, 12U, 16U, outstanding, 2U, 9, 10U, 16U);
+                expect(VOICE_CREDIT_TERMINAL, 2U, true, VOICE_SESSION_IDLE,
+                       true, true, 12U, 16U, outstanding, 2U, 9, 11U, 1U);
+
+                /* Fail closed for identity/state/window/ack violations. */
+                expect(VOICE_CREDIT_INVALID, 0U, false, VOICE_SESSION_WAITING_CLOSE,
+                       true, true, 12U, 0U, outstanding, 2U, 9, 10U, 1U);
+                expect(VOICE_CREDIT_INVALID, 0U, true, VOICE_SESSION_OPENING,
+                       true, true, 12U, 0U, outstanding, 2U, 9, 10U, 1U);
+                expect(VOICE_CREDIT_INVALID, 0U, true, VOICE_SESSION_IDLE,
+                       false, false, 12U, 0U, outstanding, 2U, 9, 10U, 1U);
+                expect(VOICE_CREDIT_INVALID, 0U, true, VOICE_SESSION_WAITING_CLOSE,
+                       true, true, 10U, 0U, outstanding, 2U, 9, 10U, 1U);
+                expect(VOICE_CREDIT_INVALID, 0U, true, VOICE_SESSION_WAITING_CLOSE,
+                       true, true, 12U, 0U, outstanding, 2U, 10, 10U, 1U);
+                expect(VOICE_CREDIT_INVALID, 0U, true, VOICE_SESSION_WAITING_CLOSE,
+                       true, true, 12U, 0U, outstanding, 2U, 9, 8U, 1U);
+                expect(VOICE_CREDIT_INVALID, 0U, true, VOICE_SESSION_WAITING_CLOSE,
+                       true, true, 12U, 0U, outstanding, 2U, 9, 10U, 0U);
+                expect(VOICE_CREDIT_INVALID, 0U, true, VOICE_SESSION_WAITING_CLOSE,
+                       true, true, 12U, 0U, outstanding, 2U, 9, 10U, 17U);
+
+                /* A fresh READY session still uses only its current identity. */
+                expect(VOICE_CREDIT_ACTIVE, 1U, true, VOICE_SESSION_READY,
+                       false, false, 0U, 14U, outstanding, 2U, 9, 10U, 1U);
+                expect(VOICE_CREDIT_INVALID, 0U, false, VOICE_SESSION_READY,
+                       false, false, 0U, 14U, outstanding, 2U, 9, 10U, 1U);
+                return 0;
+            }
+            """
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            source_path = temporary_path / "voice_credit_policy_test.c"
+            executable = temporary_path / "voice_credit_policy_test"
+            source_path.write_text(source, encoding="utf-8")
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c11",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-I",
+                    str(VOICE_CREDIT_POLICY.parent),
+                    str(source_path),
+                    "-o",
+                    str(executable),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run([str(executable)], check=True)
 
     def test_websocket_control_frames_do_not_reconnect_the_voice_channel(self) -> None:
         firmware = VOICE_SOURCE.read_text(encoding="utf-8")

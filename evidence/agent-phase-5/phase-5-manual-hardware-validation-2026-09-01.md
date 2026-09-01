@@ -6,7 +6,7 @@
 
 分支：`feature/agent-harness`
 
-提交：`85b55ec9d282218baed14d685ddd5dc2d505562b` / `d39b69b97e34511e73ea512aaaeac49814bc8e88` / `e004870f0810e1d9e31f9148bf4fac5f177d6d3e`
+提交：`85b55ec9d282218baed14d685ddd5dc2d505562b` / `d39b69b97e34511e73ea512aaaeac49814bc8e88` / `e004870f0810e1d9e31f9148bf4fac5f177d6d3e` / `8b96022145283dce76917a11f48b56ef8707e7a2`
 
 ## 结论
 
@@ -20,6 +20,9 @@
 - 低延迟和审计修复提交 `e004870` 的 run `33460199737` 已使 artifact 审计通过并观察到 VAD
   `vad_silence` 提前收口，但三次 read STT 均被迟到 credit 引发的重连取消，业务结果失败；本轮
   没有播放，不能请求或记录人工听觉通过；
+- 首次迟到 credit 修复提交 `8b96022` 的 run `33461779715` 再次以相同时序失败，证明只覆盖关闭后
+  IDLE 不足；pre-EOS credit 实际在 `WAITING_CLOSE` 窗口触发异步重连。补充修复已通过独立 review
+  和原生 C 状态矩阵，仍待新提交实机验证；
 - `phase5e_e2e` profile 不启用 Conversation UI 输出。该 run 中屏幕未更新不能判为 Conversation UI
   回归；UI 由独立 `phase5e_ui` run 和用户肉眼观察判定。
 
@@ -197,7 +200,7 @@ write 重放等反例。主代理复验：harness `68/68`、聚焦合同 `41/41`
 TypeScript typecheck 和 `git diff --check` 全部通过。`sr_service.c` 单对象强制编译由独立 reviewer 确认通过；
 本地完整固件 target 仍被既有 ESP-Hosted 私密配置 guard 阻断，不属于本次回归。
 
-## 6. 低延迟候选首次复验：审计通过，业务因迟到 credit 竞态失败
+## 6. 低延迟候选复验：审计通过，业务因 terminal credit 竞态失败
 
 commit `e004870f0810e1d9e31f9148bf4fac5f177d6d3e` 的 `phase5e_e2e` run
 `33460199737` workflow 为 `success`，但这只表示构建、刷写、采集、审计和上传链完成；manifest
@@ -215,17 +218,31 @@ commit `e004870f0810e1d9e31f9148bf4fac5f177d6d3e` 的 `phase5e_e2e` run
 | artifact audit | `pass`；未保留原始音频，源码/进程参数扫描通过 |
 | 稳定性 | power-on `1`、reset `1`、crash `0` |
 
-原始证据显示正常 EOS 后 Agent 已关闭会话，随后同一会话先前排队的 credit 抵达固件。旧逻辑在
-session 已回到 IDLE 时将其视为协议错误并主动重连；Agent 的同设备断连处理随即取消进行中的 STT。
-连接反复重建又引发后续超时与 TLS reset。这与 VAD 阈值本身无关，也不能从 workflow 绿色推导
-语音功能通过。
+该 run 初步显示 terminal credit 与 `session.closed` 附近发生竞态。首次修复只允许关闭后 IDLE
+消费迟到 credit；提交 `8b96022145283dce76917a11f48b56ef8707e7a2` 的复验 run
+`33461779715` 再次出现三轮 `vad_silence`、capture PASS 后约 `200–300 ms` 重连，Agent 三次
+`cancelled`，由此确认 pre-EOS credit 在固件已进入 `WAITING_CLOSE`、尚未处理 `session.closed`
+时到达。旧逻辑先置异步 reconnect，随后到达的 `session.closed` 仍可打印 capture PASS，但 worker
+最终执行重连并触发 Agent 同设备断连处理，取消进行中的 STT。这与 VAD 阈值本身无关，也不能从
+workflow 绿色推导语音功能通过。
 
-修复严格限定为：identity 必须匹配；仅正常 EOS 后的 IDLE + end requested + EOS sent；ACK 严格
+run `33461779715` 的分层结果：workflow `success`、transport `completed/0`、artifact audit
+`pass`、power-on/reset/crash `1/1/0`，但 audio driver/harness 均为 `1`，业务终态为
+`VERIFY:phase5e:voice_e2e:FAIL reason=voice_e2e_audio_driver_failed`，没有 playback。app image 为
+`3010368` bytes，SHA-256
+`284fe2032062e5be041d859211505c0580093c34ae5741bd187a6082f4ec79ed`。artifact SHA-256：
+
+- `monitor.log`：`ea79fd3493f1ee003adf32382facd19a2a7f94562222ece3be0afb16efa33617`
+- `hardware-validation-manifest.json`：
+  `940d6e2c156eafa19dc00423bdbb79aea85a32d9becdb862d84a2336b00ac45a`
+
+最终修复严格限定为：identity 必须匹配；仅正常 EOS 后的 WAITING_CLOSE 或保留终态字段的 IDLE；ACK 严格
 递增、命中 outstanding 且早于最终 EOS；grant 有界。命中的迟到 credit 只消费 outstanding，绝不
 增加 available credit；未知/跨 epoch/重复/EOS ACK 继续 protocol error + reconnect。独立 review
-另关闭 EOS ACK 在 READY 短窗口被接收和 identity 校验 TOCTOU 两项 blocker。主代理复验 Phase 5B
-`14/14`、全部合同 `111/111`、harness `68/68`、`git diff --check`；reviewer 使用本次 run 的真实
-ESP-IDF 编译参数单对象编译通过。完整组件 target 仍被既有 ESP-Hosted 私有配置 guard 阻断。
+将该判定抽为固件实际调用的纯 C 策略，增加 READY/WAITING_CLOSE/IDLE 和全部拒绝分支的原生状态
+矩阵，并加固 READY 额度守恒的无符号溢出边界。主代理复验 Phase 5B `15/15`、全部合同
+`112/112`、harness `68/68`、`git diff --check`；reviewer 使用本次 run 的真实 ESP-IDF 编译参数
+单对象编译通过。完整组件 target 仍被既有 ESP-Hosted 私有配置 guard 阻断。
 
 artifact SHA-256：
 
@@ -237,7 +254,7 @@ artifact SHA-256：
 
 ## 7. 当前剩余项
 
-- 提交并推送迟到 credit 竞态修复；
+- 提交并推送覆盖 WAITING_CLOSE 的 terminal credit 竞态修复；
 - 从新提交重跑 `phase5e_e2e`，要求 artifact audit、完整交互业务终态、
   audio driver 与 harness 全部通过，并重新量化 capture-open 到 playback-open；
 - 在同一有效 run 中由用户确认长句未被 `800 ms` 静音窗口误截断，且响应体感可接受；

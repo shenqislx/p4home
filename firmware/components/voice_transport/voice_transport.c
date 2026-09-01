@@ -1,4 +1,5 @@
 #include "voice_transport.h"
+#include "voice_credit_policy.h"
 
 #include <ctype.h>
 #include <inttypes.h>
@@ -59,13 +60,6 @@ static const char *TAG = "voice_transport";
 #ifndef CONFIG_P4HOME_VOICE_RECONNECT_TIMEOUT_MS
 #define CONFIG_P4HOME_VOICE_RECONNECT_TIMEOUT_MS 10000
 #endif
-
-typedef enum {
-    VOICE_SESSION_IDLE = 0,
-    VOICE_SESSION_OPENING,
-    VOICE_SESSION_READY,
-    VOICE_SESSION_WAITING_CLOSE,
-} voice_session_state_t;
 
 typedef struct {
     uint8_t bytes[VOICE_PROTOCOL_HEADER_BYTES + VOICE_PROTOCOL_FRAME_PAYLOAD_BYTES];
@@ -680,45 +674,39 @@ static void voice_handle_control(const char *text, size_t length)
     } else if (strcmp(type->valuestring, "credit") == 0) {
         uint32_t ack, grant;
         uint32_t terminal_final_sequence = 0U;
-        bool late_terminal_credit = false;
+        voice_credit_mode_t credit_mode = VOICE_CREDIT_INVALID;
+        bool terminal_credit_after_close = false;
         bool valid = voice_json_uint32(
                          cJSON_GetObjectItemCaseSensitive(root, "ack_sequence"), &ack) &&
                      voice_json_uint32(
                          cJSON_GetObjectItemCaseSensitive(root, "grant_frames"), &grant);
         taskENTER_CRITICAL(&s_voice.lock);
         if (valid) {
-            const bool active_credit = s_voice.session_state == VOICE_SESSION_READY;
-            /* A queued credit callback can arrive after session.closed. Only
-             * consume an exact unacked pre-EOS sequence from the just-completed
+            /* Credits for pre-EOS frames are sent before session.closed on the
+             * Agent socket, but their ESP callbacks can run after the worker
+             * entered WAITING_CLOSE or after session.closed moved it to IDLE.
+             * Only consume an exact unacked pre-EOS sequence from that terminal
              * identity; never reopen the credit window. */
-            late_terminal_credit = s_voice.session_state == VOICE_SESSION_IDLE &&
-                                   s_voice.end_requested && s_voice.eos_sent;
-            if (late_terminal_credit) terminal_final_sequence = s_voice.final_sequence;
-            valid = voice_control_identity_matches_locked(&control_identity) &&
-                    (active_credit || late_terminal_credit) &&
-                    (!s_voice.eos_sent || ack < s_voice.final_sequence) && grant > 0U &&
-                    grant <= VOICE_TRANSPORT_MAX_INFLIGHT_FRAMES &&
-                    (int64_t)ack > s_voice.last_ack_sequence;
-        }
-        if (valid) {
-            uint32_t ack_index = 0U;
-            while (ack_index < s_voice.outstanding_frames &&
-                   s_voice.outstanding_sequences[ack_index] != ack) {
-                ack_index++;
+            const voice_credit_decision_t decision = voice_credit_decide(
+                voice_control_identity_matches_locked(&control_identity),
+                s_voice.session_state, s_voice.end_requested, s_voice.eos_sent,
+                s_voice.final_sequence, s_voice.available_credit,
+                s_voice.outstanding_sequences, s_voice.outstanding_frames,
+                s_voice.last_ack_sequence, ack, grant,
+                VOICE_TRANSPORT_MAX_INFLIGHT_FRAMES);
+            credit_mode = decision.mode;
+            valid = credit_mode != VOICE_CREDIT_INVALID;
+            if (credit_mode == VOICE_CREDIT_TERMINAL) {
+                terminal_final_sequence = s_voice.final_sequence;
+                terminal_credit_after_close = s_voice.session_state == VOICE_SESSION_IDLE;
             }
-            const uint32_t acknowledged = ack_index + 1U;
-            valid = ack_index < s_voice.outstanding_frames &&
-                    (late_terminal_credit ||
-                     s_voice.available_credit + grant +
-                             s_voice.outstanding_frames - acknowledged <=
-                         VOICE_TRANSPORT_MAX_INFLIGHT_FRAMES);
             if (valid) {
                 s_voice.last_ack_sequence = (int64_t)ack;
                 memmove(s_voice.outstanding_sequences,
-                        s_voice.outstanding_sequences + acknowledged,
-                        (s_voice.outstanding_frames - acknowledged) * sizeof(uint32_t));
-                s_voice.outstanding_frames -= acknowledged;
-                if (!late_terminal_credit) {
+                        s_voice.outstanding_sequences + decision.acknowledged,
+                        (s_voice.outstanding_frames - decision.acknowledged) * sizeof(uint32_t));
+                s_voice.outstanding_frames -= decision.acknowledged;
+                if (credit_mode == VOICE_CREDIT_ACTIVE) {
                     s_voice.available_credit += grant;
                     s_voice.metrics.available_credit = s_voice.available_credit;
                 }
@@ -728,11 +716,12 @@ static void voice_handle_control(const char *text, size_t length)
         if (!valid) {
             voice_metric_protocol_error();
             voice_request_reconnect();
-        } else if (late_terminal_credit) {
+        } else if (credit_mode == VOICE_CREDIT_TERMINAL) {
             ESP_LOGW(TAG,
-                     "DIAG:voice:late_terminal_credit ack=%" PRIu32
+                     "DIAG:voice:late_terminal_credit state=%s ack=%" PRIu32
                      " final=%" PRIu32,
-                     ack, terminal_final_sequence);
+                     terminal_credit_after_close ? "closed_idle" : "waiting_close", ack,
+                     terminal_final_sequence);
         }
     } else if (strcmp(type->valuestring, "session.closed") == 0) {
         const cJSON *status = cJSON_GetObjectItemCaseSensitive(root, "status");
