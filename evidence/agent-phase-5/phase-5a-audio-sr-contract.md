@@ -162,7 +162,7 @@ speech frame、合格 frame 与 MultiNet detect call。`DIAG:` 与 `VERIFY:` 前
 动作递增 `command_action_count` 后，app_main 才会输出 `VERIFY:phase5a:fixed_command:PASS`。该候选
 在提交、推送和新硬件 artifact 前不改变 Phase 5A 判定。
 
-### 最终自动化候选：PASS；P4 可听播放人工观察：暂缓（缺少外接扬声器）
+### 2026-08-24 自动化候选：PASS；当时的 P4 可听观察因缺少外接扬声器暂缓
 
 - commit：`d2841de76ad49eb51fdcd6fee32e00d742bc43d6`；run：`32615794192`；workflow
   conclusion：`success`；profile：`phase5a_voice`；串口：`/dev/cu.usbserial-210`；capture：180 秒；
@@ -188,3 +188,25 @@ speech frame、合格 frame 与 MultiNet detect call。`DIAG:` 与 `VERIFY:` 前
   `speaker_ready=yes`、`tone_played=yes` 与 `VERIFY:audio:tone_played:PASS`，只证明 codec 数字写入
   路径返回成功。进一步核对后确认开发板 `SPK/J16` 未连接外接扬声器，因此该结果既不能判定物理
   输出 PASS，也不能据此判定固件播放 FAIL。人工可听项保持打开，待外接扬声器到货后再次现场确认。
+
+### 2026-09-01 startup tone 人工听觉门禁：PASS
+
+- commit：`85b55ec9d282218baed14d685ddd5dc2d505562b`；run：`33454508895`；workflow
+  conclusion：`success`；profile：`phase5a_voice`；串口：`/dev/cu.usbserial-210`；monitor/capture：
+  `180/180` 秒；
+- manifest-first 复核确认 app `3008864` bytes、SHA-256
+  `b43b91b9a54a9d0afd6648bb22f3cb97c350eaf26366bda6169970a701ef61aa`，main stack `12288`，
+  Phase 5A/SR/audio selftest enabled，Agent transport disabled；
+- 唯一开机周期内，原始串口各出现一次 `VERIFY:audio:speaker:PASS`、
+  `VERIFY:audio:tone_played:PASS`、`VERIFY:phase5a:profile:PASS` 和
+  `VERIFY:phase5a:pcm_contract:PASS`；power-on/reset 为 `1/1`，无 crash、panic、watchdog 或额外复位；
+- 外接扬声器已接在 `SPK/J16` 两端，用户在预先通知的有效启动监听窗口明确反馈“听到”。该人工听觉
+  与数字 marker 分开记录，现共同判定 startup tone 物理输出 PASS；
+- 180 秒中出现 1 次瞬态 UI 8 FPS FAIL，随后累计 19 次 PASS；该波动单独披露，不改写音频门禁；
+- artifact SHA-256：`monitor.log`
+  `298fcb1cd0ead6c01546a47599515631f25be4b681c894585003dfae5a5e46a7`；manifest
+  `e5e11a02e603b4be39848e99eed2f71cec15067f2dd6af07cac404cfb576f1fa`。
+
+本次只关闭 5A startup tone 人工项，不自动证明 Phase 5E 完整分角色回复稳定播放；后者仍以
+`phase5e_e2e` 独立门禁判定。完整现场记录见
+[Phase 5 Manual Hardware Validation — 2026-09-01](./phase-5-manual-hardware-validation-2026-09-01.md)。

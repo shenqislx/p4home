@@ -58,6 +58,25 @@ function captureMetricKey(value: {
   return `${value.session_id}:${value.stream_id}:${value.epoch}`;
 }
 
+type BoundedSttFailureCode =
+  | "cancelled"
+  | "invalid_response"
+  | "model_unavailable"
+  | "process_error"
+  | "timeout"
+  | "unknown";
+
+function boundedSttFailureCode(error: unknown): BoundedSttFailureCode {
+  if (!(error instanceof SttProviderError)) return "unknown";
+  switch (error.code) {
+    case "CANCELLED": return "cancelled";
+    case "INVALID_RESPONSE": return "invalid_response";
+    case "MODEL_UNAVAILABLE": return "model_unavailable";
+    case "PROCESS_ERROR": return "process_error";
+    case "TIMEOUT": return "timeout";
+  }
+}
+
 async function atomicJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.tmp`;
@@ -65,34 +84,55 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
   await rename(temporary, path);
 }
 
+function settledProgressSnapshot(runtime: UnifiedVoiceRuntime): {
+  readonly schema_version: 1;
+  readonly completed_interactions: number;
+  readonly capture_attempts: number;
+} {
+  const pipelineResults = runtime.pipeline.results;
+  return {
+    schema_version: 1,
+    // The coordinator records a result just before dispatch_final settles.
+    // Only a terminal dispatched pipeline result is safe for the input driver
+    // to use as permission to begin the next capture.
+    completed_interactions: pipelineResults.filter(
+      (result) => result.outcome === "dispatched",
+    ).length,
+    capture_attempts: pipelineResults.length,
+  };
+}
+
 async function waitForResults(
   runtime: UnifiedVoiceRuntime,
   progressFile: string,
+  audioDriverStatusFile: string,
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<void> {
   const deadline = performance.now() + timeoutMs;
   let published = "";
-  while (runtime.coordinator.results.length < 4) {
+  while (true) {
     if (signal.aborted) throw new Error("voice_e2e_harness_stopped");
-    const snapshot = {
-      schema_version: 1,
-      completed_interactions: runtime.coordinator.results.length,
-      capture_attempts: runtime.pipeline.results.length,
-    };
+    const snapshot = settledProgressSnapshot(runtime);
     const serialized = JSON.stringify(snapshot);
     if (serialized !== published) {
       await atomicJson(progressFile, snapshot);
       published = serialized;
     }
+    let audioDriverComplete = false;
+    try {
+      const audioStatus = (await readFile(audioDriverStatusFile, "ascii")).trim();
+      if (audioStatus === "1") throw new Error("voice_e2e_audio_driver_failed");
+      if (audioStatus !== "0") throw new Error("voice_e2e_audio_driver_status_invalid");
+      audioDriverComplete = true;
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    }
+    if (snapshot.completed_interactions >= 4 && audioDriverComplete) break;
     if (performance.now() >= deadline) throw new Error("voice_e2e_result_timeout");
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  await atomicJson(progressFile, {
-    schema_version: 1,
-    completed_interactions: 4,
-    capture_attempts: runtime.pipeline.results.length,
-  });
+  await atomicJson(progressFile, settledProgressSnapshot(runtime));
 }
 
 async function main(): Promise<void> {
@@ -109,6 +149,9 @@ async function main(): Promise<void> {
   const resultFile = requiredEnvironment("P4HOME_HARNESS_RESULT_FILE");
   const promptFile = requiredEnvironment("P4HOME_PHASE5E_PROMPT_FILE");
   const progressFile = requiredEnvironment("P4HOME_PHASE5E_PROGRESS_FILE");
+  const audioDriverStatusFile = requiredEnvironment(
+    "P4HOME_PHASE5E_AUDIO_STATUS_FILE",
+  );
   const alias = process.env.P4HOME_PHASE4C_ALIAS?.trim() || "study_ceiling_light";
   const haUrl = requiredEnvironment("P4HOME_PHASE4C_HA_URL");
   const config = await loadRobotHaRuntimeConfig({
@@ -153,7 +196,7 @@ async function main(): Promise<void> {
       read: "请查看书房灯状态",
       write: writeAction === "turn_on" ? "请把书房灯打开" : "请把书房灯关闭",
       barge: "你好，请介绍一下你自己",
-      followup: "你好还在吗",
+      followup: "你好，请继续介绍一下你自己",
     };
     const deterministic = createPhase5eDeterministicProvider({
       prompts,
@@ -173,7 +216,6 @@ async function main(): Promise<void> {
     const sttDurationByCapture = new Map<string, number>();
     const ttsDurations: number[] = [];
     const expectedKinds = ["read", "write", "barge", "followup"] as const;
-    let acceptedTranscripts = 0;
     let transcriptMismatches = 0;
     const pythonStt = new PythonSttProvider({
       python_executable: requiredEnvironment("P4HOME_STT_PYTHON"),
@@ -186,17 +228,32 @@ async function main(): Promise<void> {
     const measuredStt: SttProvider = {
       async transcribe(request, options): Promise<SttFinalTranscript> {
         const started = performance.now();
+        // A transcript is accepted for the interaction that has not yet
+        // produced a settled dispatched pipeline result. Do not advance this
+        // expectation merely because STT succeeded: Role/TTS/playback can
+        // still fail terminally and a safe read/chat retry must keep the same
+        // expected prompt kind.
+        const expectedKind = expectedKinds[
+          runtime === null
+            ? -1
+            : settledProgressSnapshot(runtime).completed_interactions
+        ] ?? "unexpected";
         try {
           const transcript = await pythonStt.transcribe(request, options);
           const kind = classifyPhase5ePrompt(transcript.text, prompts);
-          if (kind === null || kind !== expectedKinds[acceptedTranscripts]) {
+          if (kind === null || kind !== expectedKind) {
             transcriptMismatches++;
             throw new SttProviderError(
               "INVALID_RESPONSE", "Phase 5E transcript did not match the expected holdout prompt",
             );
           }
-          acceptedTranscripts++;
           return transcript;
+        } catch (error) {
+          process.stdout.write(
+            "HARNESS:phase5e:stt_attempt_failed "
+            + `expected=${expectedKind} code=${boundedSttFailureCode(error)}\n`,
+          );
+          throw error;
         }
         finally {
           const durationMs = performance.now() - started;
@@ -268,7 +325,9 @@ async function main(): Promise<void> {
     });
     await writeFile(readyFile, "ready\n", { mode: 0o600 });
     process.stdout.write("HARNESS:voice_e2e_server:READY raw_audio_retained=false\n");
-    await waitForResults(runtime, progressFile, 720_000, shutdown.signal);
+    await waitForResults(
+      runtime, progressFile, audioDriverStatusFile, 720_000, shutdown.signal,
+    );
     await runtime.pipeline.drain();
 
     const voiceResults = runtime.coordinator.results;

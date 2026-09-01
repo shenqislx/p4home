@@ -170,6 +170,26 @@ class Phase5eProfileTests(unittest.TestCase):
         harness = (ROOT / "agent/apps/device-harness/src/voice-e2e-cli.ts").read_text(encoding="utf-8")
         self.assertIn("VERIFY:phase5e:voice_e2e:PASS", harness)
         self.assertIn(
+            'requiredEnvironment(\n    "P4HOME_PHASE5E_AUDIO_STATUS_FILE",',
+            harness,
+        )
+        self.assertIn('throw new Error("voice_e2e_audio_driver_failed")', harness)
+        self.assertIn("你好，请继续介绍一下你自己", harness)
+        failure_mapping = harness.split(
+            "function boundedSttFailureCode", 1
+        )[1].split("async function atomicJson", 1)[0]
+        self.assertIn("HARNESS:phase5e:stt_attempt_failed", harness)
+        self.assertIn("expected=${expectedKind}", harness)
+        self.assertIn("code=${boundedSttFailureCode(error)}", harness)
+        self.assertIn("settledProgressSnapshot(runtime).completed_interactions", harness)
+        self.assertNotIn("acceptedTranscripts", harness)
+        self.assertNotIn(".message", failure_mapping)
+        self.assertNotIn("String(error)", failure_mapping)
+        e2e_harness = workflow.split(
+            'if [[ "$VALIDATION_PROFILE" == "phase5e_e2e" ]]', 1
+        )[1].split("HARNESS_ENTRYPOINT=apps/device-harness/src/voice-e2e-cli.ts", 1)[0]
+        self.assertIn("export P4HOME_PHASE5E_AUDIO_STATUS_FILE", e2e_harness)
+        self.assertIn(
             "VERIFY:phase5e:artifact_audit:PASS",
             AUDIT.read_text(encoding="utf-8"),
         )
@@ -551,10 +571,39 @@ class Phase5eProfileTests(unittest.TestCase):
                     mock.patch.object(driver.time, "sleep"),
                 ):
                     outcome = driver.wait_attempt(pathlib.Path("progress.json"), 1, timeout=1)
-                    if path == UI_DRIVER:
-                        self.assertEqual(outcome, driver.ATTEMPT_COMPLETED)
-                    else:
-                        self.assertTrue(outcome)
+                    self.assertEqual(outcome, driver.ATTEMPT_COMPLETED)
+
+    def test_voice_e2e_progress_requires_settled_pipeline_and_driver_success(self):
+        source = (
+            ROOT / "agent/apps/device-harness/src/voice-e2e-cli.ts"
+        ).read_text(encoding="utf-8")
+        snapshot = source.split(
+            "function settledProgressSnapshot", 1
+        )[1].split("async function waitForResults", 1)[0]
+        wait = source.split("async function waitForResults", 1)[1].split(
+            "async function main", 1
+        )[0]
+
+        self.assertIn("const pipelineResults = runtime.pipeline.results", snapshot)
+        self.assertIn('result.outcome === "dispatched"', snapshot)
+        self.assertIn("capture_attempts: pipelineResults.length", snapshot)
+        self.assertNotIn("runtime.coordinator.results", snapshot)
+        self.assertIn("const snapshot = settledProgressSnapshot(runtime)", wait)
+        publish = "await atomicJson(progressFile, snapshot)"
+        status_read = 'await readFile(audioDriverStatusFile, "ascii")'
+        terminal = (
+            "if (snapshot.completed_interactions >= 4 && audioDriverComplete) break"
+        )
+        self.assertIn("let audioDriverComplete = false", wait)
+        self.assertIn("audioDriverComplete = true", wait)
+        self.assertIn(terminal, wait)
+        self.assertLess(wait.index(publish), wait.index(status_read))
+        self.assertLess(wait.index(status_read), wait.index(terminal))
+        self.assertNotIn("if (snapshot.completed_interactions >= 4) break", wait)
+        self.assertIn('audioStatus === "1"', wait)
+        self.assertIn('audioStatus !== "0"', wait)
+        self.assertIn('error.code === "ENOENT"', wait)
+        self.assertNotIn("runtime.coordinator.results.length", wait)
 
     def test_voice_ui_progress_requires_settled_pipeline_and_driver_success(self):
         source = (
@@ -588,30 +637,73 @@ class Phase5eProfileTests(unittest.TestCase):
         self.assertIn('error.code === "ENOENT"', wait)
         self.assertNotIn("runtime.coordinator.results.length", wait)
 
-    def test_speakerless_ui_driver_stops_waiting_on_terminal_failed_attempt(self):
-        driver = self.load_driver(UI_DRIVER, "phase5e_ui_terminal_attempt_driver")
-        with mock.patch.object(driver, "progress_state", return_value=(1, 3)):
-            self.assertEqual(
-                driver.wait_attempt(
-                    pathlib.Path("progress.json"), 2, attempts_before=2, timeout=420
-                ),
-                driver.ATTEMPT_TERMINAL_FAILED,
-            )
+    def test_voice_drivers_stop_waiting_on_terminal_failed_attempt(self):
+        for index, path in enumerate((DRIVER, UI_DRIVER)):
+            with self.subTest(driver=path.name):
+                driver = self.load_driver(path, f"phase5e_terminal_attempt_driver_{index}")
+                with mock.patch.object(driver, "progress_state", return_value=(1, 3)):
+                    self.assertEqual(
+                        driver.wait_attempt(
+                            pathlib.Path("progress.json"),
+                            2,
+                            attempts_before=2,
+                            timeout=420,
+                        ),
+                        driver.ATTEMPT_TERMINAL_FAILED,
+                    )
 
-    def test_speakerless_ui_driver_never_replays_an_unsettled_timeout(self):
-        driver = self.load_driver(UI_DRIVER, "phase5e_ui_unsettled_timeout_driver")
-        with (
-            mock.patch.object(driver, "progress_state", return_value=(0, 0)),
-            mock.patch.object(driver, "speak_interaction") as speak_mock,
-            mock.patch.object(
-                driver, "wait_attempt", return_value=driver.ATTEMPT_TIMED_OUT
-            ),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "interaction_attempt_timeout_no_replay"):
-                driver.speak_until_progress(
-                    pathlib.Path("monitor.log"), pathlib.Path("progress.json"), "private", 1
-                )
-        speak_mock.assert_called_once()
+    def test_voice_drivers_never_replay_an_unsettled_timeout(self):
+        for index, path in enumerate((DRIVER, UI_DRIVER)):
+            with self.subTest(driver=path.name):
+                driver = self.load_driver(path, f"phase5e_unsettled_timeout_driver_{index}")
+                with (
+                    mock.patch.object(driver, "progress_state", return_value=(0, 0)),
+                    mock.patch.object(driver, "speak_interaction") as speak_mock,
+                    mock.patch.object(
+                        driver, "wait_attempt", return_value=driver.ATTEMPT_TIMED_OUT
+                    ),
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError, "interaction_attempt_timeout_no_replay"
+                    ):
+                        driver.speak_until_progress(
+                            pathlib.Path("monitor.log"),
+                            pathlib.Path("progress.json"),
+                            "private",
+                            1,
+                        )
+                speak_mock.assert_called_once()
+
+    def test_voice_e2e_progress_parser_rejects_non_integer_or_inconsistent_state(self):
+        driver = self.load_driver(DRIVER, "phase5e_strict_progress_driver")
+        invalid_states = (
+            {"schema_version": True, "completed_interactions": 0, "capture_attempts": 0},
+            {"schema_version": 1, "completed_interactions": True, "capture_attempts": 1},
+            {"schema_version": 1, "completed_interactions": 2, "capture_attempts": 1},
+            {"schema_version": 2, "completed_interactions": 0, "capture_attempts": 0},
+        )
+        with tempfile.TemporaryDirectory() as raw_root:
+            path = pathlib.Path(raw_root) / "progress.json"
+            for state in invalid_states:
+                with self.subTest(state=state):
+                    path.write_text(json.dumps(state), encoding="utf-8")
+                    self.assertEqual(driver.progress_state(path), (-1, -1))
+            path.write_text(json.dumps({
+                "schema_version": 1,
+                "completed_interactions": 2,
+                "capture_attempts": 3,
+            }), encoding="utf-8")
+            self.assertEqual(driver.progress_state(path), (2, 3))
+
+    def test_voice_e2e_status_publish_is_atomic_and_bounded(self):
+        driver = self.load_driver(DRIVER, "phase5e_atomic_status_driver")
+        with tempfile.TemporaryDirectory() as raw_root:
+            path = pathlib.Path(raw_root) / "audio-driver-status"
+            driver.write_status(path, 0)
+            self.assertEqual(path.read_text(encoding="ascii"), "0\n")
+            self.assertFalse(path.with_name(f"{path.name}.tmp").exists())
+            with self.assertRaisesRegex(ValueError, "invalid_status"):
+                driver.write_status(path, 2)
 
     def test_workflow_keeps_business_verdict_out_of_transport_assertion(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")

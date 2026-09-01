@@ -2,11 +2,12 @@
 
 > Status: `pending_real_environment`
 > Started: 2026-08-23
-> Current Gate: 5A–5D 技术门禁通过；5E 当前候选 run `33345080880`（commit `c9acbf8`）已通过
-> 真实 P4 自动化门禁，读、写并恢复、Human 聊天、三次终态 UI delivery 和六次 applied ACK、
-> artifact 审计均完成，音频明确
-> deferred。雨动画的同 renderer 人工观感已通过；P4 UI 三轮文本及扬声器可听仍待人工观察；
-> Phase 6、7 已分别完成并归档。
+> Current Gate: 5A–5D 技术门禁通过；commit `85b55ec` 的 `phase5e_ui` run `33452154578` 已通过
+> 读、写并恢复、Human 聊天、三次终态 UI delivery、六次 applied ACK 和 artifact 审计，用户已肉眼
+> 确认三轮屏幕更新；`phase5a_voice` run `33454508895` 与用户听觉共同确认 SPK/J16 startup tone。
+> `phase5e_e2e` run `33450564511` 只部分证明实体播放和 barge-in，最终
+> `voice_e2e_result_timeout`。源码候选已完成独立 review 修正和 Node 24.19 本地全量门禁，仍待新提交
+> 实机重跑，因此完整分角色播放继续是阻断项，Phase 5 不关闭。Phase 6、7 已分别完成并归档。
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用
 
@@ -62,12 +63,12 @@ P4 固定离线命令、触摸、HA 与 UI 主链。
   重复释放和 owner 抢占；
 - [x] 建立 P4 host contract/fake 测试，覆盖 PCM 几何、frame 顺序、丢帧、过期 epoch、所有权竞争和
   固定命令优先级；本纵切不连接真实 STT/TTS；
-- [ ] 通过专用 P4 profile 验证真实非零 PCM、AFE 持续 feed/fetch、真实 wake、固定离线命令、speaker
+- [x] 通过专用 P4 profile 验证真实非零 PCM、AFE 持续 feed/fetch、真实 wake、固定离线命令、speaker
   播放、资源/栈/看门狗和 UI 8 FPS；人工听觉或口令观察与自动 marker 分开报告。
   - [x] manifest、P4/flash、codec write、麦克风、AFE、wake、固定命令动作、资源/栈/看门狗与 UI；
-  - [ ] P4 startup tone 的独立可听人工观察（2026-08-24 直接本地重测时用户未听到，随后确认
-    `SPK/J16` 未连接外接扬声器；当前缺少物理输出设备，待扬声器到货后重新确认。数字写入 marker
-    不能替代输出证明，Mac 扬声器仅替代口播输入）。
+  - [x] P4 startup tone 的独立可听人工观察：2026-09-01 `phase5a_voice` run `33454508895` 的同一
+    唯一开机周期内，串口 `VERIFY:audio:tone_played:PASS`，用户从接在 `SPK/J16` 两端的外接扬声器
+    明确听到提示音；数字 marker 与人工听觉分层成立。
 
 退出门禁：Voice Protocol v1 与 PCM/所有权边界冻结；真实 P4 可稳定 wake、采集、AFE、固定命令和
 播放，默认配置不受影响；尚未向 Agent 节点传输音频。
@@ -148,7 +149,7 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
 - [ ] 核对 Git、日志、SQLite、进程参数和 CI artifact 不含 token 或非 opt-in 原始音频；
   - [x] 本地 scanner/harness 覆盖 Git objects、process argv、SQLite、上传候选、最终 manifest、token、
     TLS 私钥、raw audio、symlink/权限及审计失败不上传；
-  - [x] 当前候选 run `33345080880` 的最终 workflow artifact 审计通过，凭据、原始音频、Git source
+  - [x] 当前候选 run `33452154578` 的最终 workflow artifact 审计通过，凭据、原始音频、Git source
     archive 和 process argv 均满足门禁；
 - [ ] 分别报告 wake/VAD/STT/Router/Human/Robot/Composer/TTS/播放和端到端延迟、丢帧、取消指标；
   - [x] `VoiceInteractionResult` schema v2 与 Phase 5E artifact schema v2 固定 11 个阶段，并将 Agent
@@ -169,7 +170,7 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
 - [x] 增加默认 Human-only 的常驻装配与 `product_human` 固件 profile；该模式不读取 HA 凭据、不构造
   Robot HA 客户端，Robot/混合路由 fail-closed 为 Human 澄清，并以稳定私有 identity 取代 workflow
   临时凭据；真人手动聊天、重启恢复和 UI 肉眼观察仍待部署后验证；
-- [ ] 在无扬声器条件下先完成真实 P4 的聊天、HA 只读、低风险写入/恢复三条路径，要求
+- [x] 在无扬声器条件下先完成真实 P4 的聊天、HA 只读、低风险写入/恢复三条路径，要求
   `role_execution=completed`、`ui_delivery=completed`，并把 `audio_delivery=deferred` 单独披露；
   串口 `VERIFY:`、Agent/SQLite 审计、HA state_changed 与用户可见 UI 观察必须相互一致。
   - [x] 独立 `phase5e_ui` workflow profile、真实模型/HA/STT harness、一次性写入恢复、UI ACK、
@@ -178,13 +179,17 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
     读/写/恢复/聊天、三次终态 UI delivery、隐私审计均通过，`audio_delivery=deferred` 且没有打开
     playback；
     该 run 不覆盖其后的 Voice 产品改动，也不替代用户肉眼观察；
-  - [x] 当前候选 commit `c9acbf8` 的 run `33345080880` 已按 manifest-first 协议判定通过：ESP32-P4
+  - [x] 当前候选 commit `85b55ec` 的 run `33452154578` 已按 manifest-first 协议判定通过：ESP32-P4
     revision v1.0、flash image hash、transport、读/写恢复/聊天、三次终态 UI delivery、六次 applied
-    ACK、隐私审计及终态一致；
-    三次交互高负载窗口各出现一次瞬态 UI 8 FPS FAIL，随后累计 123 次 PASS，且无 crash；
-  - [ ] 用户核对 P4 对话框的三轮可见文本，人工观察不由串口 marker 代替；
+    ACK、隐私审计及终态一致；5 次瞬态 UI 8 FPS FAIL 后累计 119 次 PASS，且无 crash；
+  - [x] 用户已核对 P4 对话框三轮可见文本，确认每轮均从处理中更新到最终内容；该人工观察不由
+    串口 marker 代替；
   - [x] 同一 LVGL/RGB565 host renderer 的 48 帧雨态预览已由用户确认形成连续降雨观感，不再是
     上下两处闪烁；该人工结论不外推为 P4 面板摄像证明。
+  - [ ] `phase5e_e2e` run `33450564511` 的 workflow/transport/artifact audit 虽成功，但 audio driver 与
+    harness 均为 status `1`，业务以 `voice_e2e_result_timeout` 失败。人工确认至少一次回复可听、一次
+    新唤醒打断旧播放，但后续无声；源码修复和独立 review 已完成，Node 24.19 typecheck、Agent
+    `444/444`、hardware harness `67/67`、Phase 5E 专项 `31/31` 均通过，须从新 commit 实机重跑。
 
 2026-08-28 本地修复把 HA 初始同步 readiness 从 `voice_transport` 具体依赖改为由
 `board_support` 注入的通用 fail-closed probe，保持“HA 未就绪时只显示连接提示且不开始
@@ -201,9 +206,12 @@ capture/STT/LLM”的产品语义；同时把 5A 源码格式契约改为对空�
 从发现提前退出 blocker 到复核 no blocker，本地 Agent 444/444、harness 64/64、contract 110/110
 与目标测试 4/4 均通过。
 
-修复后的当前候选实机 run `33345080880` 通过自动化门禁；其 result 对 STT mismatch/provider failure
-做严格守恒，三轮 role/UI delivery 完成且音频 deferred。P4 wake/VAD/physical playback 仍为
-`hardware_pending`，自动 UI ACK 也不替代用户肉眼观察，因此 Phase 5 状态暂不关闭。
+最新 `phase5e_ui` run `33452154578` 通过自动化门禁；其 result 对 STT mismatch/provider failure
+做严格守恒，三轮 role/UI delivery 完成且音频 deferred，用户另行完成 P4 屏幕肉眼确认。独立
+`phase5a_voice` run `33454508895` 与用户听觉完成 startup tone 物理确认。另一方面，
+`phase5e_e2e` run `33450564511` 的实体播放总门禁仍因结果超时失败；P4 wake/VAD/physical playback
+尚无一份完整 PASS result，因此 Phase 5 状态暂不关闭。详见
+[2026-09-01 manual hardware validation](../../evidence/agent-phase-5/phase-5-manual-hardware-validation-2026-09-01.md)。
 
 退出门禁：所有 5A–5E 技术门禁与真实环境证据通过，再交由用户最终 review。workflow 绿色只证明
 构建/烧录/采集/上传链完成；必须先核对 manifest，再用原始 `VERIFY:` marker、音频指标、HA/Agent
@@ -212,7 +220,7 @@ capture/STT/LLM”的产品语义；同时把 5A 源码格式契约改为对空�
 ## 9. 完成定义
 
 - [ ] 本地唤醒到 Human 对话与 Robot 家控闭环稳定完成；
-- [ ] 无扬声器时，final transcript 与确定性 Composer 结果可在 P4 UI 对话框显示；UI 投递失败不
+- [x] 无扬声器时，final transcript 与确定性 Composer 结果可在 P4 UI 对话框显示；UI 投递失败不
   冒充 HA/Role 执行失败，Role 执行成功也不冒充 UI 已显示；
 - [ ] Router、上下文、Tool 权限、Composer 文本和 TTS 播放不串角色；
 - [ ] barge-in、timeout、断线、迟到数据和进程恢复均有确定性终态；

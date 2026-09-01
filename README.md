@@ -50,12 +50,14 @@ Phase 4 已完成并归档。用户另行明确授权启动 Phase 5；5A 的 Voi
 wake 与固定命令动作门禁已通过；5B 最终 run `32627837273` 已证明真实 P4 PCM 有界抵达 Agent
 fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 review 后技术门禁关闭。5C 最终 run
 `32635742553` 已证明真实 P4 中文输入经固定 STT 后只进入统一 Human Runtime，审计完整且 Cat 零
-泄漏；2026-08-24 确认开发板 `SPK/J16` 未连接外接扬声器，5A 人工可听验证暂缓至扬声器到货，
-数字播放 marker 不替代该输出证明。5D 分角色 TTS、播放与 barge-in 技术门禁已通过；5E 历史
-`phase5e_ui` run `32862092039` 已自动证明真实模型/HA/STT 的读、低风险写入并恢复、Human 聊天和
-三次 UI ACK，artifact 隐私审计通过且音频明确 deferred。后续 Voice 产品改动仍需当前候选实机
-重跑；2026-08-28 用户要求真实环境与人工验证延期，因此 P4 UI 肉眼核对、扬声器可听观察和当前
-候选总门禁继续保持 `pending_real_environment`，默认 SR 仍关闭。2026-08-24 用户明确授权 Phase 6
+泄漏；5D 分角色 TTS、播放与 barge-in 技术门禁已通过。2026-09-01，commit `85b55ec` 的
+`phase5e_ui` run `33452154578` 已通过真实模型/HA/STT 的读、低风险写入并恢复、Human 聊天、三次
+终态 UI delivery、六次 P4 applied ACK 和 artifact 隐私审计，用户另行肉眼确认三轮屏幕均更新到
+最终内容；`phase5a_voice` run `33454508895` 与人工听觉共同确认外接 SPK/J16 startup tone。
+`phase5e_e2e` run `33450564511` 只部分证明回复可听和 barge-in，最终仍因
+`voice_e2e_result_timeout` 失败。源码候选已完成独立 review 修正与 Node 24.19 本地全量门禁，仍待
+新提交实机重跑；完整分角色播放是当前非延期阻断项。因此 Phase 5 继续保持
+`pending_real_environment`，默认 SR 仍关闭。2026-08-24 用户明确授权 Phase 6
 先完成编码、确定性测试与模拟验证。Phase 6A–6E
 本地门禁现已完成：Memory contract/SQLite、
 确定性写入与删除、private 产品召回、三种 visibility 策略对照和 `pnpm gate:phase6` 均有本地证据。
