@@ -82,6 +82,12 @@ typedef struct {
 } voice_ui_ack_t;
 
 typedef struct {
+    const char *session_id;
+    uint32_t stream_id;
+    uint32_t epoch;
+} voice_control_identity_t;
+
+typedef struct {
     bool initialized;
     bool enabled;
     volatile bool running;
@@ -486,17 +492,38 @@ static bool voice_json_uint32(const cJSON *item, uint32_t *value)
     return true;
 }
 
-static bool voice_control_identity_valid(const cJSON *root)
+static bool voice_control_identity_parse(const cJSON *root,
+                                         voice_control_identity_t *identity)
 {
     uint32_t version, stream, epoch;
     const cJSON *session = cJSON_GetObjectItemCaseSensitive(root, "session_id");
-    return voice_json_uint32(cJSON_GetObjectItemCaseSensitive(root, "protocol_version"), &version) &&
-           version == VOICE_PROTOCOL_VERSION && cJSON_IsString(session) &&
-           strcmp(session->valuestring, s_voice.session_id_hex) == 0 &&
-           voice_json_uint32(cJSON_GetObjectItemCaseSensitive(root, "stream_id"), &stream) &&
-           stream == s_voice.stream_id &&
-           voice_json_uint32(cJSON_GetObjectItemCaseSensitive(root, "epoch"), &epoch) &&
-           epoch == s_voice.epoch;
+    if (identity == NULL ||
+        !voice_json_uint32(cJSON_GetObjectItemCaseSensitive(root, "protocol_version"), &version) ||
+        version != VOICE_PROTOCOL_VERSION || !cJSON_IsString(session) ||
+        !voice_json_uint32(cJSON_GetObjectItemCaseSensitive(root, "stream_id"), &stream) ||
+        !voice_json_uint32(cJSON_GetObjectItemCaseSensitive(root, "epoch"), &epoch)) {
+        return false;
+    }
+    identity->session_id = session->valuestring;
+    identity->stream_id = stream;
+    identity->epoch = epoch;
+    return true;
+}
+
+static bool voice_control_identity_matches_locked(const voice_control_identity_t *identity)
+{
+    return identity != NULL && strcmp(identity->session_id, s_voice.session_id_hex) == 0 &&
+           identity->stream_id == s_voice.stream_id && identity->epoch == s_voice.epoch;
+}
+
+static bool voice_control_identity_valid(const cJSON *root,
+                                         voice_control_identity_t *identity)
+{
+    if (!voice_control_identity_parse(root, identity)) return false;
+    taskENTER_CRITICAL(&s_voice.lock);
+    const bool valid = voice_control_identity_matches_locked(identity);
+    taskEXIT_CRITICAL(&s_voice.lock);
+    return valid;
 }
 
 static bool voice_ui_stage(const char *value, conversation_stage_t *stage)
@@ -622,7 +649,8 @@ static void voice_handle_control(const char *text, size_t length)
         cJSON_Delete(root);
         return;
     }
-    if (!voice_control_identity_valid(root)) {
+    voice_control_identity_t control_identity;
+    if (!voice_control_identity_valid(root, &control_identity)) {
         cJSON_Delete(root);
         voice_metric_protocol_error();
         voice_request_reconnect();
@@ -634,7 +662,9 @@ static void voice_handle_control(const char *text, size_t length)
         const bool fields_valid = voice_json_uint32(
             cJSON_GetObjectItemCaseSensitive(root, "initial_credit_frames"), &credit);
         taskENTER_CRITICAL(&s_voice.lock);
-        const bool valid = fields_valid && s_voice.session_state == VOICE_SESSION_OPENING &&
+        const bool valid = fields_valid &&
+                           voice_control_identity_matches_locked(&control_identity) &&
+                           s_voice.session_state == VOICE_SESSION_OPENING &&
                            credit > 0U && credit <= VOICE_TRANSPORT_MAX_INFLIGHT_FRAMES;
         if (valid) {
             s_voice.available_credit = credit;
@@ -649,13 +679,24 @@ static void voice_handle_control(const char *text, size_t length)
         }
     } else if (strcmp(type->valuestring, "credit") == 0) {
         uint32_t ack, grant;
+        uint32_t terminal_final_sequence = 0U;
+        bool late_terminal_credit = false;
         bool valid = voice_json_uint32(
                          cJSON_GetObjectItemCaseSensitive(root, "ack_sequence"), &ack) &&
                      voice_json_uint32(
                          cJSON_GetObjectItemCaseSensitive(root, "grant_frames"), &grant);
         taskENTER_CRITICAL(&s_voice.lock);
         if (valid) {
-            valid = s_voice.session_state == VOICE_SESSION_READY && grant > 0U &&
+            const bool active_credit = s_voice.session_state == VOICE_SESSION_READY;
+            /* A queued credit callback can arrive after session.closed. Only
+             * consume an exact unacked pre-EOS sequence from the just-completed
+             * identity; never reopen the credit window. */
+            late_terminal_credit = s_voice.session_state == VOICE_SESSION_IDLE &&
+                                   s_voice.end_requested && s_voice.eos_sent;
+            if (late_terminal_credit) terminal_final_sequence = s_voice.final_sequence;
+            valid = voice_control_identity_matches_locked(&control_identity) &&
+                    (active_credit || late_terminal_credit) &&
+                    (!s_voice.eos_sent || ack < s_voice.final_sequence) && grant > 0U &&
                     grant <= VOICE_TRANSPORT_MAX_INFLIGHT_FRAMES &&
                     (int64_t)ack > s_voice.last_ack_sequence;
         }
@@ -667,22 +708,31 @@ static void voice_handle_control(const char *text, size_t length)
             }
             const uint32_t acknowledged = ack_index + 1U;
             valid = ack_index < s_voice.outstanding_frames &&
-                    s_voice.available_credit + grant + s_voice.outstanding_frames - acknowledged <=
-                        VOICE_TRANSPORT_MAX_INFLIGHT_FRAMES;
+                    (late_terminal_credit ||
+                     s_voice.available_credit + grant +
+                             s_voice.outstanding_frames - acknowledged <=
+                         VOICE_TRANSPORT_MAX_INFLIGHT_FRAMES);
             if (valid) {
                 s_voice.last_ack_sequence = (int64_t)ack;
                 memmove(s_voice.outstanding_sequences,
                         s_voice.outstanding_sequences + acknowledged,
                         (s_voice.outstanding_frames - acknowledged) * sizeof(uint32_t));
                 s_voice.outstanding_frames -= acknowledged;
-                s_voice.available_credit += grant;
-                s_voice.metrics.available_credit = s_voice.available_credit;
+                if (!late_terminal_credit) {
+                    s_voice.available_credit += grant;
+                    s_voice.metrics.available_credit = s_voice.available_credit;
+                }
             }
         }
         taskEXIT_CRITICAL(&s_voice.lock);
         if (!valid) {
             voice_metric_protocol_error();
             voice_request_reconnect();
+        } else if (late_terminal_credit) {
+            ESP_LOGW(TAG,
+                     "DIAG:voice:late_terminal_credit ack=%" PRIu32
+                     " final=%" PRIu32,
+                     ack, terminal_final_sequence);
         }
     } else if (strcmp(type->valuestring, "session.closed") == 0) {
         const cJSON *status = cJSON_GetObjectItemCaseSensitive(root, "status");
@@ -693,7 +743,9 @@ static void voice_handle_control(const char *text, size_t length)
                                                         root, "dropped_frames"),
                                                     &dropped);
         taskENTER_CRITICAL(&s_voice.lock);
-        const bool valid = fields_valid && s_voice.session_state == VOICE_SESSION_WAITING_CLOSE &&
+        const bool valid = fields_valid &&
+                           voice_control_identity_matches_locked(&control_identity) &&
+                           s_voice.session_state == VOICE_SESSION_WAITING_CLOSE &&
                            dropped == s_voice.session_dropped_frames;
 #if CONFIG_P4HOME_PHASE5B_VALIDATION
         const uint32_t epoch = s_voice.epoch;

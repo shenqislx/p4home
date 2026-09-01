@@ -21,7 +21,9 @@ artifact 隐私审计通过，音频明确为 `deferred` 且没有打开 playbac
 自动化 run 本身不证明用户肉眼看见三轮对话框文本；本轮由用户另行完成目视确认。它也不证明物理
 扬声器可听。修复后的雨动画已由同一
 LVGL/RGB565 host renderer 生成 48 帧循环预览，并于 2026-08-31 获用户肉眼确认通过；该结论是渲染
-观感验收，不冒充 P4 面板摄像证据。`phase5e_e2e` 的完整实体播放仍失败，因此 Phase 5 继续为
+观感验收，不冒充 P4 面板摄像证据。后续 `phase5e_e2e` run `33456284948` 曾完成功能播放但
+artifact 审计失败且响应偏慢；低延迟提交 `e004870` 的 run `33460199737` artifact 审计通过，
+但迟到 credit 引发重连并取消 STT，完整实体播放仍未形成新闭环，因此 Phase 5 继续为
 `pending_real_environment`。
 
 ## 已实现闭环
@@ -182,8 +184,10 @@ artifact SHA-256：`monitor.log`
   用户确认前两轮可听、第三轮成功打断、第四轮完整播放。但该 run 的旧 artifact schema
   不支持 `stt_calls=8 / capture_attempts=9` 的合法有界重试，manifest 明确记录 audit `fail`；
   用户同时反馈语音响应明显偏慢，首轮约 `40.6 s`、热态约 `8.47 s`。当前候选修复已加入
-  重试分类守恒、ready 前顺序预热和语音后 `800 ms` 静音提前收口，并经独立 review；
-  仍需新 commit 实机复验 artifact audit、响应延迟和长句停顿不截断。
+  重试分类守恒、ready 前顺序预热和语音后 `800 ms` 静音提前收口，并经独立 review。
+  `e004870` 的 run `33460199737` 已使 artifact audit 通过且三次 VAD 提前收口生效，但正常 EOS 后
+  迟到 credit 被误判触发重连，三次 STT 均 cancelled、无 playback。对应竞态修复已完成独立
+  review，仍需新 commit 实机复验业务闭环、响应延迟和长句停顿不截断。
 - 真实 P4 网络丢失、HA 服务重启与状态对账、真实 launchd KeepAlive/P4 感知 Agent 重连，以及
   P4/HA/Agent 长跑中的固定命令、触摸、P4 ↔ HA、Cat、heap/stack/watchdog/UI 连续性（延期）。
 - artifact 中 Agent duration 由运行方进程计时；schema 能验证范围、状态和内部一致性，但不能提供独立

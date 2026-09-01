@@ -57,8 +57,10 @@ fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 r
 `phase5e_e2e` run `33450564511` 曾因 `voice_e2e_result_timeout` 失败；修复提交 `d39b69b`
 的 run `33456284948` 已完成四次分角色播放和 barge-in，用户确认功能符合要求。但该 run
 因旧 artifact schema 无法守恒合法 STT 重试而 fail-closed，且用户明确反馈语音响应明显偏慢。
-重试审计守恒、模型 ready 前预热与 VAD 静音提前收口候选已完成源码实现和独立 review，仍待
-新提交实机重跑同时验证 artifact 与延迟。因此 Phase 5 继续保持
+重试审计守恒、模型 ready 前预热与 VAD 静音提前收口已提交为 `e004870`。run `33460199737`
+证明 artifact 审计通过且 VAD 已由固定 `5 s` 改为语音后静音提前收口，但同一已结束会话的迟到
+credit 被固件误判后触发重连，三次 STT 均被取消，业务门禁失败。该协议竞态的窄化修复已完成
+独立 review 和本地门禁，仍待新提交实机重跑验证业务闭环与延迟。因此 Phase 5 继续保持
 `pending_real_environment`，默认 SR 仍关闭。2026-08-24 用户明确授权 Phase 6
 先完成编码、确定性测试与模拟验证。Phase 6A–6E
 本地门禁现已完成：Memory contract/SQLite、

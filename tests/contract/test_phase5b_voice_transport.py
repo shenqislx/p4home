@@ -158,6 +158,61 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
             ROOT / "agent/packages/contracts/src/voice-protocol.ts"
         ).read_text(encoding="utf-8"))
 
+    def test_late_credit_after_completed_capture_is_narrowly_ignored(self) -> None:
+        firmware = VOICE_SOURCE.read_text(encoding="utf-8")
+        credit = firmware[
+            firmware.index('} else if (strcmp(type->valuestring, "credit") == 0) {'):
+            firmware.index('} else if (strcmp(type->valuestring, "session.closed") == 0) {')
+        ]
+
+        # A normal terminal response can overtake already queued flow-control
+        # callbacks at the ESP client. The exact just-completed capture may
+        # consume those acknowledgements, but no credit is reopened.
+        self.assertIn("late_terminal_credit = s_voice.session_state == VOICE_SESSION_IDLE", credit)
+        self.assertIn("s_voice.end_requested && s_voice.eos_sent", credit)
+        self.assertIn("(!s_voice.eos_sent || ack < s_voice.final_sequence)", credit)
+        self.assertIn("(int64_t)ack > s_voice.last_ack_sequence", credit)
+        self.assertIn("ack_index < s_voice.outstanding_frames", credit)
+        self.assertIn("if (!late_terminal_credit) {", credit)
+        self.assertIn("DIAG:voice:late_terminal_credit", credit)
+        self.assertRegex(
+            credit,
+            r"if \(!valid\) \{\s*voice_metric_protocol_error\(\);\s*"
+            r"voice_request_reconnect\(\);",
+        )
+
+        # Identity validation still fences unknown sessions before the credit
+        # branch, so this exception cannot accept a cross-epoch acknowledgement.
+        identity_check = firmware.index(
+            "if (!voice_control_identity_valid(root, &control_identity))"
+        )
+        credit_branch = firmware.index(
+            '} else if (strcmp(type->valuestring, "credit") == 0) {'
+        )
+        self.assertLess(identity_check, credit_branch)
+        self.assertIn(
+            "voice_control_identity_matches_locked(&control_identity)",
+            credit,
+        )
+
+        # EOS acknowledgements stay invalid even during the short interval in
+        # which eos_sent is true but the worker has not entered WAITING_CLOSE.
+        self.assertRegex(
+            credit,
+            r"\(active_credit \|\| late_terminal_credit\) &&\s*"
+            r"\(!s_voice\.eos_sent \|\| ack < s_voice\.final_sequence\)",
+        )
+
+        # Session state changes can race websocket callbacks, so the parsed
+        # identity is checked again while the credit state is locked.
+        identity_match = firmware[
+            firmware.index("static bool voice_control_identity_matches_locked("):
+            firmware.index("static bool voice_control_identity_valid(")
+        ]
+        self.assertIn("identity->session_id", identity_match)
+        self.assertIn("identity->stream_id == s_voice.stream_id", identity_match)
+        self.assertIn("identity->epoch == s_voice.epoch", identity_match)
+
     def test_websocket_control_frames_do_not_reconnect_the_voice_channel(self) -> None:
         firmware = VOICE_SOURCE.read_text(encoding="utf-8")
         event_handler = firmware[firmware.index("static void voice_ws_event("):

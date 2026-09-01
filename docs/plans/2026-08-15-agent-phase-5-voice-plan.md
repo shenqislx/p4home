@@ -7,7 +7,9 @@
 > 确认三轮屏幕更新；`phase5a_voice` run `33454508895` 与用户听觉共同确认 SPK/J16 startup tone。
 > `phase5e_e2e` 修复提交 `d39b69b` 的 run `33456284948` 已完成四轮分角色播放和
 > barge-in，用户确认功能符合要求；但旧 artifact schema 无法表达合法重试，workflow fail-closed，
-> 且语音响应明显偏慢。重试守恒和低延迟候选已完成实现/review，仍待新提交的实机复验，
+> 且语音响应明显偏慢。重试守恒和低延迟候选已提交为 `e004870`；run `33460199737` 的 artifact
+> 审计通过且 VAD 提前收口生效，但迟到 credit 触发重连并取消三次 STT，业务门禁失败。对应
+> 协议竞态修复已完成实现/review，仍待新提交的实机复验，
 > Phase 5 不关闭。Phase 6、7 已分别完成并归档。
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用
@@ -192,7 +194,10 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
     `stt_calls=8 / capture_attempts=9` 的合法有界重试无法被旧 result schema 守恒，artifact audit
     以 `result_schema` fail-closed。同时首轮约 `40.6 s`、热态约 `8.47 s`，用户确认响应明显偏慢。
     候选修复增加重试分类守恒、ready 前顺序预热，并在语音后 `800 ms` 静音时提前收口；已完成
-    独立 review，仍须新 commit 实机复验 artifact、延迟和长句停顿。
+    独立 review。commit `e004870` 的 run `33460199737` 已确认 artifact audit `pass` 与 VAD
+    `vad_silence` 提前收口，但三次 read STT 均因正常 EOS 后迟到 credit 引发的重连而被取消，
+    audio driver/harness 均为 `1`。迟到 credit 的 fail-closed 窄化修复已经独立 review，仍须新
+    commit 实机复验完整业务、延迟和长句停顿。
 
 2026-08-28 本地修复把 HA 初始同步 readiness 从 `voice_transport` 具体依赖改为由
 `board_support` 注入的通用 fail-closed probe，保持“HA 未就绪时只显示连接提示且不开始
@@ -214,7 +219,9 @@ capture/STT/LLM”的产品语义；同时把 5A 源码格式契约改为对空�
 `phase5a_voice` run `33454508895` 与用户听觉完成 startup tone 物理确认。另一方面，
 `phase5e_e2e` run `33456284948` 已有完整业务 result 和人工播放/barge-in PASS，但其 artifact
 审计因旧 schema 不支持合法重试而失败，且用户不接受当前明显偏慢的响应速度。因此 Phase 5
-状态暂不关闭，需要从包含审计守恒和低延迟修复的新 commit 复验。详见
+状态暂不关闭。`e004870` 的首次复验 `33460199737` 已让 artifact 审计和 VAD 提前收口成立，
+但暴露迟到 credit 导致重连/STT 取消的固件竞态；该竞态已本地修复并独立 review，仍需从新
+commit 复验。详见
 [2026-09-01 manual hardware validation](../../evidence/agent-phase-5/phase-5-manual-hardware-validation-2026-09-01.md)。
 
 退出门禁：所有 5A–5E 技术门禁与真实环境证据通过，再交由用户最终 review。workflow 绿色只证明
