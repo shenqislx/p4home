@@ -12,7 +12,10 @@
 > 首次竞态修复提交 `8b96022` 的 run `33461779715` 仍复现取消，进而确认 credit 在
 > `WAITING_CLOSE` 窗口到达。覆盖 WAITING_CLOSE/刚关闭 IDLE 的修复提交 `cbd0f39` 已由 run
 > `33463393866` 完成实机复验：artifact、driver/harness、四轮业务、恢复和 barge-in 全部通过，
-> 端到端为 `7.55–8.16 s`；仍待用户确认体感和长停顿句，
+> 端到端为 `7.55–8.16 s`。模型计时提交 `6821b24` 的最终 `phase5e_ui` run `33526540788`
+> 进一步完成三轮真实 P4/STT/Qwen/HA/UI 与审计：Qwen 首轮冷加载 `10.928 s`，热态 write/chat
+> 模型阶段 `2.001 s / 1.703 s`，STT `1.338–1.785 s`，UI ACK `145–247 ms`。首次响应慢的
+> 主因已确认是 Qwen 冷加载；P4 wake/VAD 收口仍为 `hardware_pending`，仍待优化和长停顿句确认，
 > Phase 5 不关闭。Phase 6、7 已分别完成并归档。
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用

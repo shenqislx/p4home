@@ -2,11 +2,11 @@
 
 日期：2026-09-01
 
-状态：`ui_manual_pass / startup_tone_manual_pass / role_playback_manual_pass / latency_pending`
+状态：`ui_manual_pass / startup_tone_manual_pass / role_playback_manual_pass / latency_measured_optimization_pending`
 
 分支：`feature/agent-harness`
 
-提交：`85b55ec9d282218baed14d685ddd5dc2d505562b` / `d39b69b97e34511e73ea512aaaeac49814bc8e88` / `e004870f0810e1d9e31f9148bf4fac5f177d6d3e` / `8b96022145283dce76917a11f48b56ef8707e7a2` / `cbd0f39cd484673d02ecfd75d9a4012c0ff5b2fd`
+提交：`85b55ec9d282218baed14d685ddd5dc2d505562b` / `d39b69b97e34511e73ea512aaaeac49814bc8e88` / `e004870f0810e1d9e31f9148bf4fac5f177d6d3e` / `8b96022145283dce76917a11f48b56ef8707e7a2` / `cbd0f39cd484673d02ecfd75d9a4012c0ff5b2fd` / `6821b24b4619071f4b5c0db8dd6f72ee0d0e5523` / `8a7ddf9865b4a53f14748cc90ff9fecbfff87a36`
 
 ## 结论
 
@@ -24,6 +24,9 @@
   IDLE 不足；pre-EOS credit 实际在 `WAITING_CLOSE` 窗口触发异步重连。补充修复已通过独立 review
   和原生 C 状态矩阵；提交 `cbd0f39` 的 run `33463393866` 已自动化实机通过，当前只剩响应体感
   和长停顿句人工确认；
+- body-free 模型计时的最终 run `33526540788` 已完成真实三轮闭环并通过审计。首轮 Qwen 冷加载
+  `10.928 s` 是首次语言交互慢的主因；热态模型仍需 `1.703–2.001 s`，STT 为
+  `1.338–1.785 s`。P4 wake/VAD 收口还没有单独计时，不能把 Agent 侧合计冒充完整端到端；
 - `phase5e_e2e` profile 不启用 Conversation UI 输出。该 run 中屏幕未更新不能判为 Conversation UI
   回归；UI 由独立 `phase5e_ui` run 和用户肉眼观察判定。
 
@@ -299,8 +302,10 @@ artifact SHA-256：
 - 用户已确认 run `33463393866` 四轮实际可听、打断与 follow-up 功能符合要求，但明确判定语音响应
   明显偏慢；延迟验收未通过；
 - 通过人工长停顿句确认未被 `800 ms` 静音窗口误截断；
-- 用真实 Qwen 的 `phase5e_ui` 重新采集 load、prompt eval、generation 与 Agent request wall time，
-  再决定 Qwen 预热/保活、流式回复、增量 TTS 和 VAD 参数；
+- 根据已采集的真实 Qwen cold/warm 数据决定预热/保活、流式回复、增量 TTS 和 VAD 参数，并在改动后
+  重新跑同一门禁；
+- 为 P4 wake 与 VAD/录音收口增加可审计计时；当前 artifact 对二者仍明确标记
+  `hardware_pending`，不能解释用户感知的全部等待；
 - 真实网络丢失、HA 重启/对账、launchd KeepAlive、P4 感知 Agent 重连和长跑连续性继续按既定决策
   延期，不冒充已验证；
 - 上述非延期阻断项通过后，再交由用户最终 review 关闭 Phase 5。
@@ -333,5 +338,67 @@ cancel 竞态、unsafe integer、额外字段注入和 Python `bool == int` 审�
   `feccd718b35f1d63012d6e486ed36942b40b2e1d4e15eee5a84f539cdfc6946e`；manifest
   `77e031861b010818d9ee6c1bfea41bc1f662ab9bafaec17451a683e07bde4401`。
 
-下一次实机尝试必须先恢复串口 termios 可配置状态；在此之前不重复触发 workflow，也不把缺失的
-Qwen 延迟数据推断为性能通过或失败。
+串口重插后，用 ESP-IDF Python 直接打开 `/dev/cu.usbserial-210` 已通过，后续 run 证明 transport
+恢复。缺失的 Qwen 延迟数据已由下一节的最终 run 补齐。
+
+## 10. 真实 Qwen 延迟观测：自动化通过，冷加载瓶颈确认
+
+恢复串口后的 run `33520673420` 绑定提交 `8a7ddf9865b4a53f14748cc90ff9fecbfff87a36`，
+workflow、烧录和 1080 秒采集成功，但 manifest 为 `agent_harness_status=1`、
+`agent_hardware_result=null`，原始终态为：
+
+```text
+VERIFY:phase5e:voice_ui_e2e:FAIL reason=listen EADDRINUSE: address already in use 0.0.0.0:9443
+```
+
+第二次 9443 run `33524815381` 在同一错误再次出现后主动取消，避免继续无效采集。主机实际权限的
+`socket.bind(("0.0.0.0", 9443))` 同样得到 `Errno 48`，而 9444 立即通过；结合既有 Tailscale
+Serve 配置，确认是网络扩展占用 9443 且 `lsof` 不显示，不是 harness 重复 bind，也与模型计时改动
+无关。未修改 Tailscale endpoint；workflow 已支持同一端口同时写入固件 URI 和 harness 监听，改用
+9444 即可。subagent 复核相关 Phase 5B/5E profile 测试 `37/37` 通过，工作树无源码改动。
+
+最终 run `33526540788` 使用 `agent_port=9444`，按 manifest-first 协议完整通过：
+
+| 项目 | 结果 |
+|---|---|
+| commit / profile | `8a7ddf9865b4a53f14748cc90ff9fecbfff87a36` / `phase5e_ui` |
+| workflow / transport | `success`；`completed`，exit `0` |
+| serial / monitor / capture | `/dev/cu.usbserial-210`；`900 s / 1080 s` |
+| driver / harness / result | `0 / 0 / passed=true`；schema v3 |
+| 业务 | read、write/restore、chat 全部 completed；STT `3`；真实模型调用 `6` |
+| UI / audio | 三次终态 delivery completed；六次 applied ACK；audio deferred |
+| 审计 / 稳定性 | artifact `pass`；power-on/reset/crash `1/1/0`；raw audio 未保留 |
+
+分轮 Agent 侧计时：
+
+| 轮次 | STT | Qwen request 合计 | Qwen load | prompt eval | generation | UI ACK | 可计量阶段合计 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| read（冷） | `1.338 s` | `15.282 s` | `10.928 s` | `3.512 s` | `0.742 s` | `0.187 s` | `16.807 s` |
+| write（热） | `1.785 s` | `2.001 s` | `0.019 s` | `1.225 s` | `0.721 s` | `0.247 s` | `4.033 s` |
+| chat（热） | `1.383 s` | `1.703 s` | `0.018 s` | `0.479 s` | `1.160 s` | `0.145 s` | `3.231 s` |
+
+六次模型调用总 request wall time 为 `18.986 s`；Ollama 总计 load `10.965 s`、prompt eval
+`5.216 s`、generation `2.623 s`。首个模型请求单独为 `14.112 s`，其中 load `10.918 s`；其余
+五次请求均为 `0.649–1.170 s`。因此：
+
+1. 首次对话显著慢主要来自 Qwen 冷加载，现已用服务端 load duration 直接证明；
+2. 热态语言阶段仍由两次串行模型调用组成，合计约 `1.7–2.0 s`；STT 另需约 `1.3–1.8 s`；
+3. UI ACK 仅 `145–247 ms`，不是主要瓶颈；
+4. 表中合计不含 P4 wake、VAD/录音收口、speaker/TTS/playback；当前 profile 音频明确 deferred，
+   `p4_wake/p4_vad/p4_playback` 仍为 `hardware_pending`，不能据此宣称完整语音端到端已优化通过。
+
+原始关键终态：
+
+```text
+VERIFY:phase5e:voice_ui_e2e:PASS interactions=3 stt_calls=3 model_calls=6 ui_applied=3 audio=deferred audit=persisted restored=yes raw_audio_retained=false
+VERIFY:phase5e:artifact_audit:PASS secrets=absent audio_payload=absent source=clean source_mode=archive process_argv=clean
+```
+
+artifact SHA-256：
+
+- run `33520673420`：`monitor.log`
+  `862ad3e8da6507cce1d7c24a22423052c176802e7fdd653ebc9e4619ff467830`；manifest
+  `fbbc39cf540b73451d395c96def27a1942815a7b557a289f25e2c4492f84b697`；
+- run `33526540788`：`monitor.log`
+  `06c18c1029b4ba4d0e36cddbe034066f7140f2abdcc88c2f47fef2b7dff2b4ab`；manifest
+  `c0b15dfff653b6189a78d24fbde5483e420bfe8ea56f2eebce49ed53ae2317f5`。

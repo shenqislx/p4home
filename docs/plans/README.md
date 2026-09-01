@@ -24,7 +24,7 @@
 | 2 | Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作 | [Phase 2 归档](../archive/plans/agent/2026-08-15-agent-phase-2-p4-room-world-plan.md) |
 | 3 | Cat Object World | `completed` | sofa 等对象锚点与 Cat 交互动作 | [Phase 3 归档](../archive/plans/agent/2026-08-15-agent-phase-3-object-world-plan.md) |
 | 4 | Robot HA & Multi-role | `completed` | Robot 受限 HA 工具、Human/Robot 语义分割 | [Phase 4 归档](../archive/plans/agent/2026-08-15-agent-phase-4-ha-tool-plan.md) |
-| 5 | Role-aware Voice | `pending_real_environment` | 5A–5D 完成；5E 当前候选自动化实机通过，人工观察待完成 | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
+| 5 | Role-aware Voice | `pending_real_environment` | 技术/实机与既定人工功能观察通过；真实延迟已量化，优化与长停顿句确认待完成 | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
 | 6 | Role-aware Memory | `completed` | 最终 review 通过；已通过门禁关闭，其余真实项由用户接受延期 | [Phase 6 归档](../archive/plans/agent/2026-08-15-agent-phase-6-memory-plan.md) |
 | 7 | Cat Autonomy | `completed` | 7A–7C 技术/实机门禁及用户最终 review 已通过 | [Phase 7 归档](../archive/plans/agent/2026-08-15-agent-phase-7-autonomy-plan.md) |
 
@@ -60,13 +60,13 @@ standalone/UI 与矛盾证据判定；用户也已独立确认物理灯态变化
 wake 与固定命令动作 marker。5B 已由 run `32627837273` 证明真实 P4 PCM 有界抵达 Agent fake sink、
 丢帧 0、HA/固定命令与稳态 UI 主链不回归，并在最终独立 review 后关闭技术门禁。5C 最终 run
 `32635742553` 已证明现场中文经真实 P4/VAD/固定 MLX STT 后只进入统一 Human Runtime，transcript
-哈希、SQLite 审计、Cat 零泄漏与原始音频不保留均满足门禁。Mac 系统扬声器只替代口播输入，P4
-startup tone 的独立可听人工观察仍明确待补，不能由 `tone_played` marker 冒充。5D 分角色 TTS、
-P4 播放与 barge-in 技术门禁已完成。5E 当前候选 commit `c9acbf8` 的 `phase5e_ui` run
-`33345080880` 已按 manifest-first 协议通过真实 P4、模型/HA/STT、读/写恢复/聊天、三次终态 UI
-delivery、六次 applied ACK 与 artifact 隐私门禁，音频明确 deferred。同 renderer 的雨动画观感已获
-用户确认通过；P4 UI 三轮文本和扬声器可听仍待人工观察，因此保持 `pending_real_environment`，
-不解释为 Phase 5 已完成。
+哈希、SQLite 审计、Cat 零泄漏与原始音频不保留均满足门禁。Mac 系统扬声器只替代口播输入；P4
+startup tone 已由外接 SPK/J16 的独立人工听觉确认，不由 `tone_played` marker 冒充。5D 分角色 TTS、
+P4 播放与 barge-in 技术门禁已完成，P4 UI 三轮文本、startup tone、分角色播放和 barge-in 的既定
+人工功能观察也已通过。模型计时提交 `6821b24` 的 `phase5e_ui` run `33526540788` 按
+manifest-first 协议通过真实 P4/STT/Qwen/HA/UI 与 artifact 审计，并确认首轮 Qwen 冷加载
+`10.928 s` 是首次响应慢的主因；热态模型 `1.703–2.001 s`，STT `1.338–1.785 s`。响应优化、
+P4 wake/VAD 收口计时和长停顿句人工确认仍待完成，因此保持 `pending_real_environment`。
 
 Phase 6A–6E 本地实现和模拟门禁已完成：Memory contract/SQLite、确定性写入/冲突/级联删除、
 private 产品 recall、三种 visibility evaluator 和可重复 `pnpm gate:phase6` 均已通过。2026-08-24

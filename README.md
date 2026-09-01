@@ -66,8 +66,13 @@ fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 r
 capture-open 到 playback-open 为 `7.55–8.16 s`。用户随后确认语音功能符合要求，但明确判定响应
 明显偏慢；人工长停顿句是否被 `800 ms` 静音窗口误截断仍待确认。提交
 `6821b24` 已补齐真实 Qwen request/load/prompt/eval/generation 的 body-free 计时与 fail-closed
-artifact 审计。首次两轮 `phase5e_ui` run `33507758927`、`33508472447` 均在 flash 前因串口
-`termios EINVAL` 判为 `infra-fail`，尚未产生 Qwen 数据，恢复串口后仍需复验。因此 Phase 5 继续保持
+artifact 审计。首次两轮 `phase5e_ui` run `33507758927`、`33508472447` 在 flash 前因串口
+`termios EINVAL` 判为 `infra-fail`；恢复串口后，`33520673420` 证明 transport 正常，但 9443 被
+Tailscale Serve 占用而未进入业务。改用已预检可绑定的 9444 后，run `33526540788` 完整通过真实
+P4、STT、Qwen、HA、三轮 UI 与 artifact 审计。首轮模型调用合计 `15.282 s`，其中 Qwen 冷加载
+`10.928 s`；热态 write/chat 模型阶段分别为 `2.001 s / 1.703 s`，STT 为
+`1.338–1.785 s`，UI ACK 为 `145–247 ms`。因此首次语言交互慢的主因已确认是 Qwen 冷加载；
+P4 wake/VAD 收口仍未拆分，响应优化与长停顿句人工确认未关闭。Phase 5 继续保持
 `pending_real_environment`，默认 SR 仍关闭。2026-08-24 用户明确授权 Phase 6
 先完成编码、确定性测试与模拟验证。Phase 6A–6E
 本地门禁现已完成：Memory contract/SQLite、

@@ -771,12 +771,12 @@ Voice Protocol v1、自动化硬件、真实 wake 与固定命令动作门禁已
 证明真实 P4 PCM 有界抵达 Agent fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 review
 后技术门禁关闭。5C 最终 run `32635742553` 已证明真实 P4 中文输入经固定 MLX STT 后只进入统一
 Human Runtime，transcript 哈希、SQLite 审计、Cat 零泄漏和原始音频不保留均满足门禁。P4 可听
-startup tone 人工观察待补；5D 分角色 TTS、播放与 barge-in 技术门禁已通过。5E 当前候选 commit
-`c9acbf8` 的 `phase5e_ui` run `33345080880` 已按 manifest-first 协议通过真实 P4、模型/HA/STT、
-读/写恢复/聊天、三次终态 UI delivery 和共六次 applied ACK、artifact 隐私门禁，音频明确 deferred。
-同 renderer 的雨动画观感
-已获用户确认通过；P4 UI 三轮文本和扬声器可听仍待人工观察，因此保持
-`pending_real_environment`，尚未打开默认 SR。
+startup tone、P4 UI 三轮文本、分角色 TTS 播放与 barge-in 的技术门禁和既定人工功能观察均已
+通过。模型计时提交 `6821b24` 的 `phase5e_ui` run `33526540788` 又按 manifest-first 协议通过
+真实 P4/STT/Qwen/HA/UI 和 artifact 隐私门禁，并确认首轮 Qwen 冷加载 `10.928 s` 是首次响应慢
+的主因；热态 write/chat 模型阶段 `2.001 s / 1.703 s`，STT `1.338–1.785 s`。同 renderer 的
+雨动画观感已获用户确认通过。响应优化、P4 wake/VAD 收口计时和长停顿句人工确认仍待完成，因此
+保持 `pending_real_environment`，尚未打开默认 SR。
 
 ### Phase 6 — Memory
 
