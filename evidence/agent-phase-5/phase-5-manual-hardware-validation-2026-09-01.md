@@ -6,7 +6,7 @@
 
 分支：`feature/agent-harness`
 
-提交：`85b55ec9d282218baed14d685ddd5dc2d505562b` / `d39b69b97e34511e73ea512aaaeac49814bc8e88` / `e004870f0810e1d9e31f9148bf4fac5f177d6d3e` / `8b96022145283dce76917a11f48b56ef8707e7a2`
+提交：`85b55ec9d282218baed14d685ddd5dc2d505562b` / `d39b69b97e34511e73ea512aaaeac49814bc8e88` / `e004870f0810e1d9e31f9148bf4fac5f177d6d3e` / `8b96022145283dce76917a11f48b56ef8707e7a2` / `cbd0f39cd484673d02ecfd75d9a4012c0ff5b2fd`
 
 ## 结论
 
@@ -22,7 +22,8 @@
   没有播放，不能请求或记录人工听觉通过；
 - 首次迟到 credit 修复提交 `8b96022` 的 run `33461779715` 再次以相同时序失败，证明只覆盖关闭后
   IDLE 不足；pre-EOS credit 实际在 `WAITING_CLOSE` 窗口触发异步重连。补充修复已通过独立 review
-  和原生 C 状态矩阵，仍待新提交实机验证；
+  和原生 C 状态矩阵；提交 `cbd0f39` 的 run `33463393866` 已自动化实机通过，当前只剩响应体感
+  和长停顿句人工确认；
 - `phase5e_e2e` profile 不启用 Conversation UI 输出。该 run 中屏幕未更新不能判为 Conversation UI
   回归；UI 由独立 `phase5e_ui` run 和用户肉眼观察判定。
 
@@ -252,12 +253,51 @@ artifact SHA-256：
 
 本 run 没有任何 playback opened，因此没有新增人工扬声器或延迟体感结论。
 
-## 7. 当前剩余项
+## 7. 最终自动复验：业务、artifact 与 terminal credit 修复通过
 
-- 提交并推送覆盖 WAITING_CLOSE 的 terminal credit 竞态修复；
-- 从新提交重跑 `phase5e_e2e`，要求 artifact audit、完整交互业务终态、
-  audio driver 与 harness 全部通过，并重新量化 capture-open 到 playback-open；
-- 在同一有效 run 中由用户确认长句未被 `800 ms` 静音窗口误截断，且响应体感可接受；
+commit `cbd0f39cd484673d02ecfd75d9a4012c0ff5b2fd` 的 `phase5e_e2e` run
+`33463393866` 已按 manifest-first 协议完整通过：
+
+| 项目 | 结果 |
+|---|---|
+| workflow / transport | `success`；`completed`，exit `0` |
+| profile / serial / capture | `phase5e_e2e`；`/dev/cu.usbserial-210`；`600 s / 780 s` |
+| app image | `3010464` bytes；SHA-256 `bb4491aabc74312e5e9a55fb581a3dbc84d8cbba5083718a46a942f6274142df` |
+| driver / harness | `0 / 0` |
+| 业务 | `passed=true`；read/write/restore/barge/follow-up 全部通过 |
+| STT / TTS | `4 / 4`；STT 总计 `5189 ms`，TTS 总计 `6158 ms`；mismatch `0`；所有失败分类均为 `0` |
+| 播放 | 4 segments、`712000` bytes；前两轮 completed，第三轮 cancelled，第四轮 completed |
+| 审计 | artifact `pass`；4 个 composition audit、23 个事件；raw audio 未保留 |
+| 稳定性 | power-on `1`、reset `1`、crash `0` |
+
+原始串口时序：
+
+| 轮次 | capture open → playback open | capture 收口 | 播放终态 |
+|---|---:|---|---|
+| read | `7.66 s` | `vad_silence`；terminal credit 在 `waiting_close` 安全消费 | completed |
+| write | `7.55 s` | `vad_silence`；terminal credit 在 `waiting_close` 安全消费 | completed |
+| barge | `8.16 s` | `5 s` hard deadline | 被下一次 wake cancelled |
+| follow-up | `7.86 s` | `5 s` hard deadline | completed |
+
+Agent 阶段计时为 STT `1292 / 1313 / 1281 / 1303 ms`，TTS
+`1466 / 1510 / 1735 / 1447 ms`。首轮已不再出现旧 run 的模型冷启动 `40.6 s`；本次四轮无 STT
+重试。两次 `DIAG:voice:late_terminal_credit state=waiting_close` 后连接保持并进入播放，证明本次
+协议修复命中预期窗口；barge-in 后为 follow-up 建立连接属于测试序列，未取消 STT，最终 result
+严格通过。
+
+artifact SHA-256：
+
+- `monitor.log`：`283ad321fe4bcdc3d3dbb91443a693e027ad2286971047188b2bb6c681189037`
+- `hardware-validation-manifest.json`：
+  `aae9d799837ea8e6bdfb461b9085eea0651e9395d13cc7e1c4a4c594cae40c8d`
+
+以上只证明自动播放传输和 P4 串口时序；实际可听性、响应体感和长停顿句是否被误截断仍由用户
+人工判断，不以 marker 代替。
+
+## 8. 当前剩余项
+
+- 由用户确认 run `33463393866` 四轮实际可听，且 `7.55–8.16 s` 的响应体感可接受；
+- 通过人工长停顿句确认未被 `800 ms` 静音窗口误截断；
 - 真实网络丢失、HA 重启/对账、launchd KeepAlive、P4 感知 Agent 重连和长跑连续性继续按既定决策
   延期，不冒充已验证；
 - 上述非延期阻断项通过后，再交由用户最终 review 关闭 Phase 5。

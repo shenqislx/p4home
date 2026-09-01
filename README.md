@@ -61,8 +61,10 @@ fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 r
 证明 artifact 审计通过且 VAD 已由固定 `5 s` 改为语音后静音提前收口，但 terminal credit 被固件
 误判后触发重连，三次 STT 均被取消。首次修复提交 `8b96022` 的 run `33461779715` 复现同样失败，
 从精确时序确认 pre-EOS credit 是在 `WAITING_CLOSE` 窗口到达，而非只在关闭后的 IDLE 到达。
-覆盖两个终止窗口的窄化策略已完成独立 review、原生 C 状态矩阵和本地门禁，仍待新提交实机重跑
-验证业务闭环与延迟。因此 Phase 5 继续保持
+覆盖两个终止窗口的修复提交 `cbd0f39` 已由 run `33463393866` 完成实机复验：workflow、artifact
+审计、driver/harness、四轮业务、写入恢复和 barge-in 全部通过，STT/TTS 均为 4 次且无重试；
+capture-open 到 playback-open 为 `7.55–8.16 s`。仍待用户确认实际响应体感可接受，以及人工长停顿
+句不被 `800 ms` 静音窗口误截断。因此 Phase 5 继续保持
 `pending_real_environment`，默认 SR 仍关闭。2026-08-24 用户明确授权 Phase 6
 先完成编码、确定性测试与模拟验证。Phase 6A–6E
 本地门禁现已完成：Memory contract/SQLite、

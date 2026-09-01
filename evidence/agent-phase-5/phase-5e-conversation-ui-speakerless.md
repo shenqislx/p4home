@@ -24,7 +24,8 @@ LVGL/RGB565 host renderer 生成 48 帧循环预览，并于 2026-08-31 获用�
 观感验收，不冒充 P4 面板摄像证据。后续 `phase5e_e2e` run `33456284948` 曾完成功能播放但
 artifact 审计失败且响应偏慢；低延迟提交 `e004870` 的 run `33460199737` artifact 审计通过，
 但 terminal credit 引发重连并取消 STT；首次修复提交 `8b96022` 的 run `33461779715` 确认
-实际触发窗口为 `WAITING_CLOSE`，完整实体播放仍未形成新闭环，因此 Phase 5 继续为
+实际触发窗口为 `WAITING_CLOSE`；补充修复提交 `cbd0f39` 的 run `33463393866` 已使 workflow、
+artifact、四轮业务和 barge-in 自动化通过。仍待响应体感和长停顿句人工确认，因此 Phase 5 继续为
 `pending_real_environment`。
 
 ## 已实现闭环
@@ -189,8 +190,9 @@ artifact SHA-256：`monitor.log`
   `e004870` 的 run `33460199737` 已使 artifact audit 通过且三次 VAD 提前收口生效，但正常 EOS 后
   terminal credit 被误判触发重连，三次 STT 均 cancelled、无 playback。首次修复提交 `8b96022`
   的 run `33461779715` 再次失败，确认 credit 是在 `WAITING_CLOSE` 到达。覆盖 WAITING_CLOSE/刚
-  关闭 IDLE 的策略已完成独立 review 和原生 C 状态矩阵，仍需新 commit 实机复验业务闭环、响应
-  延迟和长句停顿不截断。
+  关闭 IDLE 的策略已完成独立 review 和原生 C 状态矩阵。提交 `cbd0f39` 的 run `33463393866`
+  已通过业务闭环、artifact audit、driver/harness 和 barge-in，端到端为 `7.55–8.16 s`；仍需用户
+  确认响应体感和长句停顿不截断。
 - 真实 P4 网络丢失、HA 服务重启与状态对账、真实 launchd KeepAlive/P4 感知 Agent 重连，以及
   P4/HA/Agent 长跑中的固定命令、触摸、P4 ↔ HA、Cat、heap/stack/watchdog/UI 连续性（延期）。
 - artifact 中 Agent duration 由运行方进程计时；schema 能验证范围、状态和内部一致性，但不能提供独立
