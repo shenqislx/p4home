@@ -280,7 +280,7 @@ commit `cbd0f39cd484673d02ecfd75d9a4012c0ff5b2fd` 的 `phase5e_e2e` run
 | follow-up | `7.86 s` | `5 s` hard deadline | completed |
 
 Agent 阶段计时为 STT `1292 / 1313 / 1281 / 1303 ms`，TTS
-`1466 / 1510 / 1735 / 1447 ms`。首轮已不再出现旧 run 的模型冷启动 `40.6 s`；本次四轮无 STT
+`1466 / 1510 / 1735 / 1447 ms`。首轮已不再出现旧 run 的 STT/TTS MLX 冷启动 `40.6 s`；本次四轮无 STT
 重试。两次 `DIAG:voice:late_terminal_credit state=waiting_close` 后连接保持并进入播放，证明本次
 协议修复命中预期窗口；barge-in 后为 follow-up 建立连接属于测试序列，未取消 STT，最终 result
 严格通过。
@@ -296,8 +296,42 @@ artifact SHA-256：
 
 ## 8. 当前剩余项
 
-- 由用户确认 run `33463393866` 四轮实际可听，且 `7.55–8.16 s` 的响应体感可接受；
+- 用户已确认 run `33463393866` 四轮实际可听、打断与 follow-up 功能符合要求，但明确判定语音响应
+  明显偏慢；延迟验收未通过；
 - 通过人工长停顿句确认未被 `800 ms` 静音窗口误截断；
+- 用真实 Qwen 的 `phase5e_ui` 重新采集 load、prompt eval、generation 与 Agent request wall time，
+  再决定 Qwen 预热/保活、流式回复、增量 TTS 和 VAD 参数；
 - 真实网络丢失、HA 重启/对账、launchd KeepAlive、P4 感知 Agent 重连和长跑连续性继续按既定决策
   延期，不冒充已验证；
 - 上述非延期阻断项通过后，再交由用户最终 review 关闭 Phase 5。
+
+## 9. 真实 Qwen 延迟观测与串口基础设施阻断
+
+提交 `6821b24b4619071f4b5c0db8dd6f72ee0d0e5523` 新增 body-free、版本化的模型计时：覆盖
+Router 与全部 Role/tool-loop `provider.chat`，分别记录 Agent request wall time 和 Ollama
+`total/load/prompt_eval/eval` duration、prompt/output token，并守恒 completed、failed、cancelled、
+timed-out 与 usage missing。产品 `voice_role_completed` 结构化日志和 `phase5e_ui` schema v3 artifact
+均输出该计时，但不保留 transcript、response、error detail 或 raw audio。独立 review 修复 timeout/
+cancel 竞态、unsafe integer、额外字段注入和 Python `bool == int` 审计绕过；Node 24 typecheck、Agent
+`456/456`、Python contract `112/112`、harness `68/68` 与 focused `43/43` 均通过。提交已通过
+`git-push.sh --reviewed` 推送，本地、tracking 与远端 SHA 一致。
+
+随后两次真实 `phase5e_ui` 自动 run 均未进入设备或模型阶段：
+
+| run | workflow / transport | manifest 身份 | 确定性错误 | 业务结论 |
+|---|---|---|---|---|
+| `33507758927` | failure；`failed/2` | `6821b24`；`phase5e_ui`；`900/1080 s`；`/dev/cu.usbserial-210` | esptool 打开串口时 `termios.error: (22, 'Invalid argument')` | `infra-fail`；无 flash、boot、STT 或 Qwen 调用 |
+| `33508472447` | failure；`failed/2` | 同上 | 同一 `termios EINVAL` | `infra-fail`；一次自动重试后停止 |
+
+两轮构建和 artifact 隐私审计均通过，但 manifest 均为 power-on/reset/crash `0/0/0`、
+`agent_harness_status=null`、`agent_hardware_result=null`，不能作为模型或语音功能证据。artifact SHA-256：
+
+- run `33507758927`：`monitor.log`
+  `bc32a4dc206d84f126c52db0d1bc95d9b9bf283327a839def247f0b09887fdf4`；manifest
+  `7125818765843a8ced787821e970d3e13f5f68ab12630c072e91390ff227ba82`；
+- run `33508472447`：`monitor.log`
+  `feccd718b35f1d63012d6e486ed36942b40b2e1d4e15eee5a84f539cdfc6946e`；manifest
+  `77e031861b010818d9ee6c1bfea41bc1f662ab9bafaec17451a683e07bde4401`。
+
+下一次实机尝试必须先恢复串口 termios 可配置状态；在此之前不重复触发 workflow，也不把缺失的
+Qwen 延迟数据推断为性能通过或失败。

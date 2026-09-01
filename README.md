@@ -63,8 +63,11 @@ fake sink、丢帧 0，并保持 HA、固定命令与稳态 UI 主链，独立 r
 从精确时序确认 pre-EOS credit 是在 `WAITING_CLOSE` 窗口到达，而非只在关闭后的 IDLE 到达。
 覆盖两个终止窗口的修复提交 `cbd0f39` 已由 run `33463393866` 完成实机复验：workflow、artifact
 审计、driver/harness、四轮业务、写入恢复和 barge-in 全部通过，STT/TTS 均为 4 次且无重试；
-capture-open 到 playback-open 为 `7.55–8.16 s`。仍待用户确认实际响应体感可接受，以及人工长停顿
-句不被 `800 ms` 静音窗口误截断。因此 Phase 5 继续保持
+capture-open 到 playback-open 为 `7.55–8.16 s`。用户随后确认语音功能符合要求，但明确判定响应
+明显偏慢；人工长停顿句是否被 `800 ms` 静音窗口误截断仍待确认。提交
+`6821b24` 已补齐真实 Qwen request/load/prompt/eval/generation 的 body-free 计时与 fail-closed
+artifact 审计。首次两轮 `phase5e_ui` run `33507758927`、`33508472447` 均在 flash 前因串口
+`termios EINVAL` 判为 `infra-fail`，尚未产生 Qwen 数据，恢复串口后仍需复验。因此 Phase 5 继续保持
 `pending_real_environment`，默认 SR 仍关闭。2026-08-24 用户明确授权 Phase 6
 先完成编码、确定性测试与模拟验证。Phase 6A–6E
 本地门禁现已完成：Memory contract/SQLite、
