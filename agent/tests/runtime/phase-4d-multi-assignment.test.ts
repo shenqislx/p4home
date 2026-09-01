@@ -325,6 +325,12 @@ test("Human then Robot receive only their exact slices and compose in source ord
   assert.equal(result.routing.plan.reason, "model_mixed");
   assert.deepEqual(result.runs.map((item) => item.assignment.role_id), ["human", "robot"]);
   assert.equal(requests.length, 2);
+  assert.equal(result.model_timing.calls, requests.length);
+  assert.equal(
+    result.model_timing.completed_calls + result.model_timing.failed_calls
+      + result.model_timing.cancelled_calls + result.model_timing.timed_out_calls,
+    result.model_timing.calls,
+  );
   const humanUserMessage = requests[1]?.messages.at(-1)?.content ?? "";
   assert.equal(humanUserMessage, "我好累😿，");
   assert.doesNotMatch(humanUserMessage, /打开书房灯/);

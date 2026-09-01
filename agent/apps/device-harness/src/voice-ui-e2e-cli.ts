@@ -28,6 +28,7 @@ import {
   readCurrentIdentity,
   requirePhase5eRestoredState,
   restoreRobotState,
+  summarizeOllamaChatTimings,
   validatePhase5eSpeakerlessUiGate,
   waitForStableProjectedState,
   type Phase5ePromptSet,
@@ -381,6 +382,10 @@ async function main(): Promise<void> {
       initial_state: initialState,
       restored_state: restoredState,
     });
+    const modelTimingTotals = summarizeOllamaChatTimings(
+      interactions.flatMap((item) => item.role.model_timing.call_details),
+    );
+    if (modelTimingTotals.calls !== realModelCalls) throw new Error("model_call_count_mismatch");
     let auditEvents = 0;
     for (const record of roleResults.values()) {
       const trace = await store.getRunTrace(`run:${record.interaction.interaction_id}`);
@@ -390,7 +395,7 @@ async function main(): Promise<void> {
       auditEvents += trace.events.length;
     }
     await atomicJson(resultFile, {
-      schema_version: 2,
+      schema_version: 3,
       profile: "phase5e_ui",
       passed: true,
       interaction_kinds: interactions.map((item) => item.kind),
@@ -411,6 +416,15 @@ async function main(): Promise<void> {
       stt_non_mismatch_failures_by_expected_kind: nonMismatchFailuresByExpectedKind,
       stt_total_ms: Math.round(sttDurations.reduce((sum, value) => sum + value, 0)),
       real_model_calls: realModelCalls,
+      model_timing: {
+        schema_version: 1,
+        interactions: interactions.map((item) => ({
+          kind: item.kind,
+          timing: item.role.model_timing,
+        })),
+        totals: modelTimingTotals,
+        content_retained: false,
+      },
       audit_events: auditEvents,
       restored: true,
       ...verdict,

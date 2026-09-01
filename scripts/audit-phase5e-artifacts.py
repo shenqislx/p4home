@@ -39,13 +39,33 @@ UI_RESULT_KEYS = {
     "audio_delivery_statuses", "stt_provider_version", "stt_model_revision",
     "stt_calls", "stt_transcript_mismatches", "stt_rejections_by_expected_kind",
     "stt_non_mismatch_failures_by_expected_kind",
-    "stt_total_ms", "real_model_calls",
+    "stt_total_ms", "real_model_calls", "model_timing",
     "audit_events", "restored", "read_passed", "write_passed", "chat_passed",
     "ui_deliveries_completed", "audio_delivery_deferred",
     "composition_audits_persisted", "raw_audio_retained",
     "interaction_metrics",
 }
 UI_METRIC_INTERACTION_KEYS = {"kind", "metrics"}
+MODEL_TIMING_KEYS = {
+    "schema_version", "calls", "completed_calls", "failed_calls",
+    "cancelled_calls", "timed_out_calls", "usage_complete_calls", "usage_missing_calls",
+    "request_total_ms", "ollama_totals", "call_details", "content_retained",
+}
+MODEL_CALL_TIMING_KEYS = {"schema_version", "status", "request_duration_ms", "ollama"}
+OLLAMA_USAGE_KEYS = {
+    "total_duration_ns", "load_duration_ns", "prompt_eval_count",
+    "prompt_eval_duration_ns", "eval_count", "eval_duration_ns",
+}
+OLLAMA_USAGE_MAXIMUMS = {
+    "total_duration_ns": 600_000_000_000,
+    "load_duration_ns": 600_000_000_000,
+    "prompt_eval_count": 1_000_000_000,
+    "prompt_eval_duration_ns": 600_000_000_000,
+    "eval_count": 1_000_000_000,
+    "eval_duration_ns": 600_000_000_000,
+}
+MODEL_TIMING_RESULT_KEYS = {"schema_version", "interactions", "totals", "content_retained"}
+MODEL_TIMING_INTERACTION_KEYS = {"kind", "timing"}
 METRICS_KEYS = {
     "schema_version", "stages", "dropped_events", "cancelled_stages",
     "interaction_cancelled",
@@ -96,6 +116,100 @@ def bounded_counter(value: object) -> bool:
 
 def bounded_integer(value: object, maximum: int) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= maximum
+
+
+def exact_schema_version(value: object, expected: int) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value == expected
+
+
+def model_timing_summary_valid(value: object, require_complete: bool) -> bool:
+    if (not isinstance(value, dict) or set(value) != MODEL_TIMING_KEYS
+            or not exact_schema_version(value.get("schema_version"), 1)
+            or value.get("content_retained") is not False):
+        return False
+    details = value.get("call_details")
+    if not isinstance(details, list) or len(details) > 4096:
+        return False
+    status_counts = {"completed": 0, "failed": 0, "cancelled": 0, "timed_out": 0}
+    usage_complete = 0
+    request_total = 0
+    totals = {key: 0 for key in OLLAMA_USAGE_KEYS}
+    for call in details:
+        if (not isinstance(call, dict) or set(call) != MODEL_CALL_TIMING_KEYS
+                or not exact_schema_version(call.get("schema_version"), 1)
+                or call.get("status") not in status_counts
+                or not bounded_integer(call.get("request_duration_ms"), 600_000)):
+            return False
+        usage = call.get("ollama")
+        if not isinstance(usage, dict) or set(usage) != OLLAMA_USAGE_KEYS:
+            return False
+        complete = True
+        for key in OLLAMA_USAGE_KEYS:
+            metric = usage[key]
+            if metric is None:
+                complete = False
+            elif not bounded_integer(metric, OLLAMA_USAGE_MAXIMUMS[key]):
+                return False
+            else:
+                totals[key] += metric
+        status_counts[call["status"]] += 1
+        request_total += call["request_duration_ms"]
+        if complete:
+            usage_complete += 1
+    calls = len(details)
+    summary_counters = {
+        "calls": calls,
+        "completed_calls": status_counts["completed"],
+        "failed_calls": status_counts["failed"],
+        "cancelled_calls": status_counts["cancelled"],
+        "timed_out_calls": status_counts["timed_out"],
+        "usage_complete_calls": usage_complete,
+        "usage_missing_calls": calls - usage_complete,
+    }
+    reported_totals = value.get("ollama_totals")
+    return (
+        all(bounded_counter(value.get(key)) and value.get(key) == expected
+                for key, expected in summary_counters.items())
+        and bounded_integer(value.get("request_total_ms"), calls * 600_000)
+        and value.get("request_total_ms") == request_total
+        and isinstance(reported_totals, dict)
+        and set(reported_totals) == OLLAMA_USAGE_KEYS
+        and all(bounded_integer(reported_totals.get(key), OLLAMA_USAGE_MAXIMUMS[key] * calls)
+                for key in OLLAMA_USAGE_KEYS)
+        and reported_totals == totals
+        and (not require_complete or (
+            calls > 0
+            and status_counts == {
+                "completed": calls, "failed": 0, "cancelled": 0, "timed_out": 0,
+            }
+            and usage_complete == calls
+        ))
+    )
+
+
+def ui_model_timing_valid(result: dict) -> bool:
+    value = result.get("model_timing")
+    if (not isinstance(value, dict) or set(value) != MODEL_TIMING_RESULT_KEYS
+            or not exact_schema_version(value.get("schema_version"), 1)
+            or value.get("content_retained") is not False):
+        return False
+    interactions = value.get("interactions")
+    expected_kinds = ["read", "write", "chat"]
+    if not isinstance(interactions, list) or len(interactions) != len(expected_kinds):
+        return False
+    combined: list[dict] = []
+    for index, item in enumerate(interactions):
+        if (not isinstance(item, dict) or set(item) != MODEL_TIMING_INTERACTION_KEYS
+                or item.get("kind") != expected_kinds[index]
+                or not model_timing_summary_valid(item.get("timing"), True)):
+            return False
+        combined.extend(item["timing"]["call_details"])
+    totals = value.get("totals")
+    return (
+        model_timing_summary_valid(totals, True)
+        and totals["call_details"] == combined
+        and totals["calls"] == result.get("real_model_calls")
+    )
 
 
 def pinned_version(value: object) -> bool:
@@ -466,6 +580,7 @@ def ui_result_summary_valid(result: dict) -> bool:
     return (
         bounded_integer(result.get("real_model_calls"), 4_096)
         and result.get("real_model_calls") > 0
+        and ui_model_timing_valid(result)
         and result.get("read_passed") is True
         and result.get("write_passed") is True
         and result.get("chat_passed") is True
@@ -629,8 +744,10 @@ def main() -> int:
             else VOICE_RESULT_KEYS if profile == "phase5e_e2e"
             else None
         )
+        expected_schema_version = 3 if profile == "phase5e_ui" else 2
         if (not isinstance(result, dict) or expected_keys is None
-                or set(result) != expected_keys or result.get("schema_version") != 2
+                or set(result) != expected_keys
+                or result.get("schema_version") != expected_schema_version
                 or not common_result_schema_valid(result, profile)):
             reasons.add("result_schema")
         elif profile == "phase5e_ui":

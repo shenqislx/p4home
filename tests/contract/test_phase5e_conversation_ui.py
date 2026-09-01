@@ -118,6 +118,7 @@ class Phase5EConversationUiContractTest(unittest.TestCase):
         ):
             self.assertIn(expected, product)
         self.assertIn('"start:voice"', package)
+        self.assertIn("model_timing: result.model_timing", product)
         self.assertNotIn("response.text", product)
         self.assertIn("deviceTokenBytes.fill(0)", product)
         self.assertIn("key.fill(0)", product)

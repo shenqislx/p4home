@@ -252,6 +252,7 @@ async function main(): Promise<void> {
           run_status: result.run.status,
           response_status: result.response.status,
           composition_audit_status: result.composition_audit_status,
+          model_timing: result.model_timing,
         })}\n`);
       },
     });

@@ -126,8 +126,26 @@ test("product role entrypoint composes routing, bounded scheduling and the assig
         requests.push(request);
         const router = request.messages[0]?.content.includes("Role Router") === true;
         return router
-          ? { model: "fake", message: { role: "assistant", content: '{"assignments":[{"role":"human","text":"今天好累"}]}' } }
-          : { model: "fake", message: { role: "assistant", content: "辛苦了，先休息一下吧。" } };
+          ? {
+              model: "fake",
+              message: { role: "assistant", content: '{"assignments":[{"role":"human","text":"今天好累"}]}' },
+              total_duration_ns: 10,
+              load_duration_ns: 1,
+              prompt_eval_count: 2,
+              prompt_eval_duration_ns: 3,
+              eval_count: 4,
+              eval_duration_ns: 5,
+            }
+          : {
+              model: "fake",
+              message: { role: "assistant", content: "辛苦了，先休息一下吧。" },
+              total_duration_ns: 20,
+              load_duration_ns: 2,
+              prompt_eval_count: 3,
+              prompt_eval_duration_ns: 4,
+              eval_count: 5,
+              eval_duration_ns: 6,
+            };
       },
     },
     clock: () => 1_001,
@@ -138,6 +156,16 @@ test("product role entrypoint composes routing, bounded scheduling and the assig
   assert.equal(requests.length, 2);
   assert.equal(sessions.get("human").history().length, 2);
   assert.deepEqual(sessions.get("robot").history(), []);
+  assert.equal(result.model_timing.calls, 2);
+  assert.equal(result.model_timing.usage_complete_calls, 2);
+  assert.deepEqual(result.model_timing.ollama_totals, {
+    total_duration_ns: 30,
+    load_duration_ns: 3,
+    prompt_eval_count: 5,
+    prompt_eval_duration_ns: 7,
+    eval_count: 9,
+    eval_duration_ns: 11,
+  });
   scheduler.close();
 });
 
@@ -175,6 +203,75 @@ test("a new user interaction cancels Cat first and emits only body-free task com
   assert.equal(JSON.stringify(notices).includes(value.text), false);
   catLease.release();
   catRegistry.close();
+});
+
+test("product role entrypoint accounts for failed model calls without retaining errors", async () => {
+  let calls = 0;
+  const scheduler = new RoleScheduler();
+  const result = await runRoleInteraction({
+    interaction: interaction("interaction:model-metric-failure", "今天好累"),
+    route_plan_id: "route:model-metric-failure",
+    run_id: "run:model-metric-failure",
+    sessions: registry(),
+    scheduler,
+    provider: {
+      async chat(): Promise<OllamaChatResult> {
+        calls++;
+        if (calls === 1) {
+          return {
+            model: "fake",
+            message: {
+              role: "assistant",
+              content: '{"assignments":[{"role":"human","text":"今天好累"}]}',
+            },
+          };
+        }
+        throw new Error("private provider failure detail");
+      },
+    },
+  });
+
+  assert.equal(result.run.status, "failed");
+  assert.deepEqual({
+    calls: result.model_timing.calls,
+    completed: result.model_timing.completed_calls,
+    failed: result.model_timing.failed_calls,
+    missing: result.model_timing.usage_missing_calls,
+  }, { calls: 2, completed: 1, failed: 1, missing: 2 });
+  assert.equal(JSON.stringify(result.model_timing).includes("private provider"), false);
+  scheduler.close();
+});
+
+test("product role entrypoint times out promptly when the provider ignores abort", async () => {
+  let underlyingCalls = 0;
+  const scheduler = new RoleScheduler();
+  const startedAt = Date.now();
+  const result = await runRoleInteraction({
+    interaction: interaction("interaction:model-metric-timeout", "今天好累"),
+    route_plan_id: "route:model-metric-timeout",
+    run_id: "run:model-metric-timeout",
+    sessions: registry(),
+    scheduler,
+    timeout_ms: 100,
+    provider: {
+      async chat(): Promise<OllamaChatResult> {
+        underlyingCalls++;
+        return await new Promise(() => undefined);
+      },
+    },
+  });
+
+  assert.equal(Date.now() - startedAt < 1_000, true);
+  assert.equal(underlyingCalls, 1);
+  assert.equal(result.run.status, "timed_out");
+  assert.deepEqual({
+    calls: result.model_timing.calls,
+    completed: result.model_timing.completed_calls,
+    failed: result.model_timing.failed_calls,
+    cancelled: result.model_timing.cancelled_calls,
+    timedOut: result.model_timing.timed_out_calls,
+  }, { calls: 1, completed: 0, failed: 0, cancelled: 0, timedOut: 1 });
+  scheduler.close();
 });
 
 test("product role entrypoint rejects invalid timeout before routing", async () => {

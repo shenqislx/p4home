@@ -74,6 +74,50 @@ def phase5e_metrics(role_id: str, mode: str, outcome: str = "completed") -> dict
     }
 
 
+def model_call_timing(seed: int) -> dict:
+    return {
+        "schema_version": 1,
+        "status": "completed",
+        "request_duration_ms": 10 + seed,
+        "ollama": {
+            "total_duration_ns": 1_000_000 + seed,
+            "load_duration_ns": 100_000 + seed,
+            "prompt_eval_count": 20 + seed,
+            "prompt_eval_duration_ns": 200_000 + seed,
+            "eval_count": 5 + seed,
+            "eval_duration_ns": 300_000 + seed,
+        },
+    }
+
+
+def model_timing_summary(calls: list[dict]) -> dict:
+    usage_keys = (
+        "total_duration_ns", "load_duration_ns", "prompt_eval_count",
+        "prompt_eval_duration_ns", "eval_count", "eval_duration_ns",
+    )
+    complete = sum(
+        all(call["ollama"][key] is not None for key in usage_keys)
+        for call in calls
+    )
+    return {
+        "schema_version": 1,
+        "calls": len(calls),
+        "completed_calls": sum(call["status"] == "completed" for call in calls),
+        "failed_calls": sum(call["status"] == "failed" for call in calls),
+        "cancelled_calls": sum(call["status"] == "cancelled" for call in calls),
+        "timed_out_calls": sum(call["status"] == "timed_out" for call in calls),
+        "usage_complete_calls": complete,
+        "usage_missing_calls": len(calls) - complete,
+        "request_total_ms": sum(call["request_duration_ms"] for call in calls),
+        "ollama_totals": {
+            key: sum(call["ollama"][key] or 0 for call in calls)
+            for key in usage_keys
+        },
+        "call_details": calls,
+        "content_retained": False,
+    }
+
+
 class Phase5eProfileTests(unittest.TestCase):
     @staticmethod
     def write_secret(path: pathlib.Path, value: str = "top-secret-token-value"):
@@ -1175,8 +1219,14 @@ class Phase5eProfileTests(unittest.TestCase):
             artifact = root / "monitor.log"
             artifact.write_text("VERIFY:phase5e:voice_ui_e2e:PASS\n", encoding="utf-8")
             result = root / "result.json"
+            model_calls = [model_call_timing(index) for index in range(7)]
+            interaction_model_timings = [
+                model_timing_summary(model_calls[:1]),
+                model_timing_summary(model_calls[1:4]),
+                model_timing_summary(model_calls[4:]),
+            ]
             result.write_text(json.dumps({
-                "schema_version": 2, "profile": "phase5e_ui", "passed": True,
+                "schema_version": 3, "profile": "phase5e_ui", "passed": True,
                 "interaction_kinds": ["read", "write", "chat"],
                 "role_ids": ["robot", "robot", "human"],
                 "role_statuses": ["completed"] * 3,
@@ -1202,7 +1252,17 @@ class Phase5eProfileTests(unittest.TestCase):
                     }
                     for kind in ("read", "write", "chat", "unexpected")
                 },
-                "real_model_calls": 7, "audit_events": 6, "restored": True,
+                "real_model_calls": 7,
+                "model_timing": {
+                    "schema_version": 1,
+                    "interactions": [{
+                        "kind": kind,
+                        "timing": interaction_model_timings[index],
+                    } for index, kind in enumerate(("read", "write", "chat"))],
+                    "totals": model_timing_summary(model_calls),
+                    "content_retained": False,
+                },
+                "audit_events": 6, "restored": True,
                 "read_passed": True, "write_passed": True, "chat_passed": True,
                 "ui_deliveries_completed": 3, "audio_delivery_deferred": True,
                 "composition_audits_persisted": 3, "raw_audio_retained": False,
@@ -1218,6 +1278,76 @@ class Phase5eProfileTests(unittest.TestCase):
             )
             self.assertEqual(self.run_audit(command), 0)
             payload = json.loads(result.read_text(encoding="utf-8"))
+            valid_payload = json.loads(json.dumps(payload))
+            payload["model_timing"]["interactions"][0]["timing"][
+                "call_details"
+            ][0]["ollama"]["load_duration_ns"] = None
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "successful real-model artifacts require complete Ollama usage",
+            )
+            payload = json.loads(json.dumps(valid_payload))
+            payload["model_timing"]["interactions"][0]["timing"]["calls"] = True
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "booleans cannot forge integer timing counters",
+            )
+            payload = json.loads(json.dumps(valid_payload))
+            payload["model_timing"]["interactions"][0]["timing"][
+                "call_details"
+            ][0]["schema_version"] = True
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "booleans cannot forge nested schema versions",
+            )
+            payload = json.loads(json.dumps(valid_payload))
+            payload["model_timing"]["interactions"][0]["timing"][
+                "call_details"
+            ][0]["transcript"] = "private forged transcript"
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "call details use an exact body-free schema",
+            )
+            payload = json.loads(json.dumps(valid_payload))
+            payload["model_timing"]["interactions"][0]["timing"][
+                "call_details"
+            ][0]["request_duration_ms"] = float("nan")
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "NaN timing values fail closed",
+            )
+            payload = json.loads(json.dumps(valid_payload))
+            payload["model_timing"]["interactions"][0]["timing"][
+                "call_details"
+            ][0]["ollama"]["total_duration_ns"] = 600_000_000_001
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "out-of-range Ollama counters fail closed",
+            )
+            payload = json.loads(json.dumps(valid_payload))
+            payload["model_timing"]["totals"]["call_details"][0][
+                "request_duration_ms"
+            ] += 1
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "aggregate call details must equal the interaction concatenation",
+            )
+            payload = json.loads(json.dumps(valid_payload))
+            payload["real_model_calls"] += 1
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertNotEqual(
+                self.run_audit(command), 0,
+                "real model calls must conserve the aggregated timing calls",
+            )
+            payload = valid_payload
+            result.write_text(json.dumps(payload), encoding="utf-8")
             payload["stt_calls"] = 7
             payload["stt_transcript_mismatches"] = 4
             payload["stt_rejections_by_expected_kind"] = {

@@ -32,6 +32,10 @@ import {
   defaultLowPriorityCatRunRegistry,
   type LowPriorityCatRunRegistry,
 } from "./low-priority-cat-run-registry.ts";
+import {
+  measureOllamaChatProvider,
+  type OllamaChatTimingSummary,
+} from "./ollama-chat-timing.ts";
 
 export interface RoleTaskCompletionNotice {
   readonly run_id: string;
@@ -65,6 +69,8 @@ export interface RunRoleInteractionResult {
   readonly response: ComposedRoleResponse;
   readonly composition_audit_run_id: string | null;
   readonly composition_audit_status: "disabled" | "persisted" | "deferred";
+  /** Body-free metrics for every Router and role/tool-loop provider.chat call. */
+  readonly model_timing: OllamaChatTimingSummary;
   /** Compatibility view for single-assignment callers; mixed routes expose the first run. */
   readonly run: RoleRunResult;
 }
@@ -295,12 +301,14 @@ export async function runRoleInteraction(
     : deadlineSignal === undefined
       ? options.signal
       : AbortSignal.any([options.signal, deadlineSignal]);
-  const boundedProvider: Pick<OllamaProvider, "chat"> = {
+  // Measure outside the abort fence so a provider that ignores cancellation
+  // still produces an immediate cancelled/timed-out terminal in the snapshot.
+  const measuredProvider = measureOllamaChatProvider({
     chat: async (request, signal) => await settleOnAbort(
-      async () => await options.provider.chat(request, signal),
-      signal,
+      async () => await options.provider.chat(request, signal), signal,
     ),
-  };
+  });
+  const boundedProvider: Pick<OllamaProvider, "chat"> = measuredProvider.provider;
   const routing = await routeInteraction({
     interaction: options.interaction,
     route_plan_id: options.route_plan_id,
@@ -699,5 +707,6 @@ export async function runRoleInteraction(
     run,
     composition_audit_run_id: compositionAuditRunId,
     composition_audit_status: compositionAuditStatus,
+    model_timing: measuredProvider.snapshot(),
   };
 }
