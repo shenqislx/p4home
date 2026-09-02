@@ -201,3 +201,4 @@ add_test(NAME world_object_runtime_host_test COMMAND world_object_runtime_host_t
 add_test(NAME voice_protocol_host_test COMMAND voice_protocol_host_test)
 add_test(NAME audio_service_lease_host_test COMMAND audio_service_lease_host_test)
 add_test(NAME pixel_object_gate COMMAND pixel_sim --mode dump --verify-object-gate)
+add_test(NAME pixel_pet_autonomy_gate COMMAND pixel_sim --mode dump --verify-pet-autonomy)

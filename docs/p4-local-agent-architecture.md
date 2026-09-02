@@ -872,7 +872,7 @@ unrestricted production deployment。2026-08-27 用户最终 review 通过，Pha
 LLM：提出结构化意图
 Role Router：把用户语义分配给 Human/Robot，不授予权限
 Robot：只执行受策略约束的 HA 命令
-Human：只负责对话理解和表达，不执行真实动作
+Human：普通路径只负责对话；avatar 路径只通过 Device Protocol v3 控制屏幕 Human
 Cat：只由低频事件驱动并使用最小 P4 World 能力
 Agent Core：按角色控制 Run 的预算、上下文和工具生命周期
 P4Home Domain：定义允许做什么及安全策略
@@ -881,7 +881,9 @@ Home Assistant：维护物理家庭状态真值
 UI：渲染结果，不替 Agent 做语义决策
 ```
 
-“小人是 Cat 的身体”可以继续作为产品愿景；Robot 的身体是受限 HA Tool，Human 没有执行身体。
+屏幕 Human 是 Human 语音角色的独立 avatar 身体，Runtime 固定 `actor_id=human_avatar`；Cat 仍只由
+timer、HA、world、task 事件驱动，既不接收原始 transcript，也不复用 Human avatar 的 Runner、Session
+或 Memory。Robot 的身体仍是受限 HA Tool，在 human-only 产品模式中保持关闭。
 Cat 的工程边界必须落实为：
 
 > 一个具有版本化能力描述、幂等动作协议、可取消执行状态机和真实状态反馈的 P4 World Adapter。

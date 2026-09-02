@@ -21,7 +21,9 @@ static const char *TAG = "ui_actor";
 #define UI_ACTOR_DIALOG_PAGE_MAX 224U
 #define UI_ACTOR_DIALOG_TEXT_MAX (CONVERSATION_UI_DIALOG_TEXT_MAX_BYTES + 1U)
 #define UI_ACTOR_DIALOG_PAGE_HOLD_TICKS 24U
-#define UI_ACTOR_PET_LAG 2U
+#define UI_ACTOR_PET_ART_H 6
+#define UI_ACTOR_PET_IDLE_TICKS 80U
+#define UI_ACTOR_PET_ROOM_MARGIN 8
 
 /* Floor lines the actor stands on, in house art pixels. */
 #define UI_ACTOR_UPPER_FLOOR_Y (UI_HOME_UPPER_ART_Y + UI_HOME_ROOM_ART_H - UI_ACTOR_ART_H - 2)
@@ -71,8 +73,15 @@ static uint8_t s_idle_frame;
 static uint16_t s_blink_countdown = 60U;
 static bool s_blinking;
 
-static ui_actor_point_t s_pet_trail[UI_ACTOR_PET_LAG + 1U];
-static uint8_t s_pet_trail_head;
+static ui_actor_point_t s_pet_pos;
+static ui_actor_point_t s_pet_target;
+static ui_actor_point_t s_pet_waypoint;
+static size_t s_pet_room = WORLD_ROOM_LIVING_ROOM;
+static size_t s_pet_target_room = WORLD_ROOM_LIVING_ROOM;
+static uint16_t s_pet_idle_ticks_remaining;
+static uint32_t s_pet_target_revision;
+static bool s_pet_has_waypoint;
+static bool s_pet_moving;
 static uint8_t s_pet_frame;
 
 static char s_dialog_full[UI_ACTOR_DIALOG_TEXT_MAX];
@@ -230,20 +239,92 @@ static void ui_home_actor_set_pose(const lv_image_dsc_t *src)
     ui_home_actor_place();
 }
 
-static void ui_home_actor_advance_pet(void)
+static ui_actor_point_t ui_home_actor_pet_room_target(size_t room_index,
+                                                      uint32_t target_revision)
+{
+    int32_t origin_x = 0;
+    ui_home_room_origin(room_index, &origin_x, NULL);
+    const int16_t alternate_offset =
+        (int16_t)(UI_HOME_ROOM_ART_W - UI_ACTOR_PET_ART_W - UI_ACTOR_PET_ROOM_MARGIN);
+    ui_actor_point_t target = {
+        .x = (int16_t)(origin_x + ((target_revision & 1U) != 0U
+                                      ? UI_ACTOR_PET_ROOM_MARGIN
+                                      : alternate_offset)),
+        .y = (int16_t)(ui_home_actor_room_floor_y(room_index) + UI_ACTOR_ART_H -
+                       UI_ACTOR_PET_ART_H),
+    };
+    return target;
+}
+
+static void ui_home_actor_place_pet(void)
 {
     if (s_pet == NULL) {
         return;
     }
-    /* The companion follows a delayed copy of the actor's path, which is enough
-     * to look like it is trailing rather than glued on. */
-    s_pet_trail[s_pet_trail_head] = s_pos;
-    s_pet_trail_head = (uint8_t)((s_pet_trail_head + 1U) % (UI_ACTOR_PET_LAG + 1U));
-    ui_actor_point_t behind = s_pet_trail[s_pet_trail_head];
-    int16_t offset = (behind.x <= s_pos.x) ? -(int16_t)(UI_ACTOR_PET_ART_W + 2)
-                                          : (int16_t)(UI_ACTOR_ART_W + 2);
-    ui_pixel_fx_sprite_move(s_pet, (int16_t)(behind.x + offset),
-                            (int16_t)(behind.y + UI_ACTOR_ART_H - 6));
+    ui_pixel_fx_sprite_move(s_pet, s_pet_pos.x, s_pet_pos.y);
+}
+
+static void ui_home_actor_pet_choose_target(void)
+{
+    /* This deterministic route is deliberately local. It neither consumes the
+     * Human position nor introduces a global PRNG side effect. */
+    static const size_t route[UI_HOME_ROOM_COUNT] = {
+        WORLD_ROOM_LIVING_ROOM,
+        WORLD_ROOM_KITCHEN,
+        WORLD_ROOM_GUEST_ROOM,
+        WORLD_ROOM_STUDY,
+        WORLD_ROOM_PRIMARY_BEDROOM,
+        WORLD_ROOM_ENTRY,
+    };
+    size_t route_index = 0U;
+    while (route_index < UI_HOME_ROOM_COUNT && route[route_index] != s_pet_room) {
+        route_index++;
+    }
+    s_pet_target_room = route[(route_index + 1U) % UI_HOME_ROOM_COUNT];
+    s_pet_target_revision++;
+    s_pet_target = ui_home_actor_pet_room_target(s_pet_target_room,
+                                                  s_pet_target_revision);
+    if (s_pet_target.y != s_pet_pos.y) {
+        s_pet_waypoint.x = UI_ACTOR_STAIR_X;
+        s_pet_waypoint.y = s_pet_target.y;
+        s_pet_has_waypoint = true;
+    } else {
+        s_pet_has_waypoint = false;
+    }
+    s_pet_moving = true;
+}
+
+static void ui_home_actor_advance_pet(uint32_t tick)
+{
+    if (s_pet == NULL) {
+        return;
+    }
+    if (!s_pet_moving) {
+        if (s_pet_idle_ticks_remaining > 0U) {
+            s_pet_idle_ticks_remaining--;
+        }
+        if (s_pet_idle_ticks_remaining == 0U) {
+            ui_home_actor_pet_choose_target();
+        }
+        return;
+    }
+    if ((tick % 2U) != 0U) {
+        return;
+    }
+
+    ui_actor_point_t goal = s_pet_has_waypoint ? s_pet_waypoint : s_pet_target;
+    if (s_pet_pos.x != goal.x) {
+        s_pet_pos.x = (int16_t)(s_pet_pos.x + (goal.x > s_pet_pos.x ? 1 : -1));
+    } else if (s_pet_pos.y != goal.y) {
+        s_pet_pos.y = (int16_t)(s_pet_pos.y + (goal.y > s_pet_pos.y ? 1 : -1));
+    } else if (s_pet_has_waypoint) {
+        s_pet_has_waypoint = false;
+    } else {
+        s_pet_room = s_pet_target_room;
+        s_pet_moving = false;
+        s_pet_idle_ticks_remaining = UI_ACTOR_PET_IDLE_TICKS;
+    }
+    ui_home_actor_place_pet();
 }
 
 static bool ui_home_actor_tick(uint32_t tick, void *user_data)
@@ -349,9 +430,7 @@ static bool ui_home_actor_tick(uint32_t tick, void *user_data)
         break;
     }
 
-    if ((tick % 2U) == 0U) {
-        ui_home_actor_advance_pet();
-    }
+    ui_home_actor_advance_pet(tick);
     if ((tick % 4U) == 0U && s_pet != NULL) {
         s_pet_frame = (uint8_t)((s_pet_frame + 1U) % PET_IDLE_FRAME_COUNT);
         ui_pixel_fx_sprite_set_src(s_pet, s_pet_frames[s_pet_frame]);
@@ -416,9 +495,16 @@ esp_err_t ui_home_actor_create(lv_obj_t *house)
         s_pos.y = ui_home_actor_room_floor_y(s_room);
     }
     s_target = s_pos;
-    for (size_t i = 0; i <= UI_ACTOR_PET_LAG; ++i) {
-        s_pet_trail[i] = s_pos;
-    }
+    /* Cat owns an independent firmware-local state. Never seed it from the
+     * Human snapshot, even when the Human reconnects in another room. */
+    s_pet_room = WORLD_ROOM_LIVING_ROOM;
+    s_pet_target_room = WORLD_ROOM_LIVING_ROOM;
+    s_pet_target_revision = 0U;
+    s_pet_pos = ui_home_actor_pet_room_target(s_pet_room, s_pet_target_revision);
+    s_pet_target = s_pet_pos;
+    s_pet_has_waypoint = false;
+    s_pet_moving = false;
+    s_pet_idle_ticks_remaining = UI_ACTOR_PET_IDLE_TICKS;
 
     /* A hard-edged shadow, not a soft one: soft shadows fight the pixel grid. */
     s_actor_shadow = lv_obj_create(house);
@@ -434,8 +520,7 @@ esp_err_t ui_home_actor_create(lv_obj_t *house)
     s_actor = ui_pixel_fx_sprite(house, &actor_idle_0, s_pos.x, s_pos.y);
     ESP_RETURN_ON_FALSE(s_actor != NULL, ESP_ERR_NO_MEM, TAG, "actor alloc failed");
 
-    s_pet = ui_pixel_fx_sprite(house, &pet_idle_0, s_pos.x - UI_ACTOR_PET_ART_W - 2,
-                               s_pos.y + UI_ACTOR_ART_H - 6);
+    s_pet = ui_pixel_fx_sprite(house, &pet_idle_0, s_pet_pos.x, s_pet_pos.y);
     ESP_RETURN_ON_FALSE(s_pet != NULL, ESP_ERR_NO_MEM, TAG, "pet alloc failed");
 
     ui_home_actor_place();
@@ -732,6 +817,15 @@ void ui_home_actor_get_render_snapshot(ui_home_actor_render_snapshot_t *snapshot
     snapshot->moving = s_state == UI_ACTOR_RENDER_WALK;
     snprintf(snapshot->target_object_id, sizeof(snapshot->target_object_id), "%s",
              s_target_object_id);
+    snapshot->pet_art_x = s_pet_pos.x;
+    snapshot->pet_floor_y = (int16_t)(s_pet_pos.y + UI_ACTOR_PET_ART_H);
+    snapshot->pet_target_art_x = s_pet_target.x;
+    snapshot->pet_target_floor_y = (int16_t)(s_pet_target.y + UI_ACTOR_PET_ART_H);
+    snapshot->pet_room = s_pet_room;
+    snapshot->pet_target_room = s_pet_target_room;
+    snapshot->pet_ticks_until_target = s_pet_idle_ticks_remaining;
+    snapshot->pet_target_revision = s_pet_target_revision;
+    snapshot->pet_moving = s_pet_moving;
 }
 
 esp_err_t ui_home_actor_create_dialog(lv_obj_t *parent, int32_t art_w, int32_t art_h)

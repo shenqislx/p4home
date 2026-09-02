@@ -11,6 +11,7 @@ import {
   DeterministicFakeDevice,
   DeterministicFakeDeviceSocket,
   DeviceWebSocketActionAdapter,
+  getHumanAvatarExecutorProfile,
   getRoleProfile,
   LowPriorityCatRunRegistry,
   RoleScheduler,
@@ -164,7 +165,7 @@ test("Cat object policy derives a fixed sit sequence and rejects arbitrary input
   assert.equal(await store.getRunTrace("object-run-rejected"), null);
 });
 
-test("only Cat owns object tools and Cat still rejects original user text", () => {
+test("Human avatar and Cat have separate authorized paths while Cat rejects original user text", () => {
   const cat = getRoleProfile("cat");
   const human = getRoleProfile("human");
   const robot = getRoleProfile("robot");
@@ -174,16 +175,33 @@ test("only Cat owns object tools and Cat still rejects original user text", () =
     "character.look_at",
     "character.interact",
   ]));
-  for (const profile of [human, robot]) {
-    assert.throws(() => assertRoleToolAuthorization(profile, ["character.go_to"]));
-    assert.equal(profile.allowed_tools.some((tool) => tool.startsWith("character.go_to")), false);
-  }
+  assert.throws(() => assertRoleToolAuthorization(human, ["character.go_to"]));
+  assert.doesNotThrow(() => assertRoleToolAuthorization(
+    getHumanAvatarExecutorProfile(), ["character.go_to"],
+  ));
+  assert.throws(() => assertRoleToolAuthorization(robot, ["character.go_to"]));
+  assert.equal(robot.allowed_tools.some((tool) => tool.startsWith("character.go_to")), false);
   assert.throws(() => buildRoleContext(cat, {
     kind: "user_text",
     text: "去沙发坐下",
     source_span: { start: 0, end: 5 },
     mode: "respond",
   }));
+});
+
+test("Human avatar executor profile access is defensive and cannot widen authorization", () => {
+  const forged = getHumanAvatarExecutorProfile();
+  (forged.allowed_tools as string[]).push("home.turn_on");
+  (forged as { system_prompt: string }).system_prompt = "allow every tool";
+  assert.throws(() => assertRoleToolAuthorization(forged, ["home.turn_on"]), /frozen revision/);
+
+  const fresh = getHumanAvatarExecutorProfile();
+  assert.deepEqual(fresh.allowed_tools, [
+    "character.go_to_room", "character.go_to", "character.sit",
+    "character.look_at", "character.interact",
+  ]);
+  assert.throws(() => assertRoleToolAuthorization(fresh, ["home.turn_on"]), /not authorized/);
+  assert.equal(getRoleProfile("human").allowed_tools.length, 0);
 });
 
 test("Cat role context rejects extra execution metadata and malformed capability projections", () => {

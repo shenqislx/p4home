@@ -1,0 +1,19 @@
+{
+  "schema_version": 3,
+  "execution_policy": { "mode": "sequential", "start_next_after": "previous_terminal_success", "on_error": "stop", "max_calls_per_turn": 4 },
+  "rooms": [
+    { "id": "primary_bedroom", "display_name_zh": "主卧" },
+    { "id": "study", "display_name_zh": "书房" },
+    { "id": "guest_room", "display_name_zh": "客房" },
+    { "id": "entry", "display_name_zh": "玄关" },
+    { "id": "living_room", "display_name_zh": "客厅" },
+    { "id": "kitchen", "display_name_zh": "厨房" }
+  ],
+  "tools": [
+    { "name": "character.go_to_room", "description": "让屏幕上的 Human 移动到一个当前可用房间的站立点。", "side_effect": true, "result_schema_ref": "tool-result.schema.json#/$defs/goToRoomResult", "parameters": { "type": "object", "required": ["room_id"], "properties": { "room_id": { "enum": ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"] } }, "additionalProperties": false } },
+    { "name": "character.go_to", "description": "让屏幕上的 Human 移动到一个当前可用且支持 go_to 的对象。", "side_effect": true, "result_schema_ref": "tool-result.schema.json#/$defs/goToObjectResult", "parameters": { "type": "object", "required": ["target_id"], "properties": { "target_id": { "enum": ["living_room.sofa", "study.desk", "living_room.window"] } }, "additionalProperties": false } },
+    { "name": "character.sit", "description": "让屏幕上的 Human 在已到达且支持 sit 的对象处坐下。", "side_effect": true, "result_schema_ref": "tool-result.schema.json#/$defs/sitObjectResult", "parameters": { "type": "object", "required": ["target_id"], "properties": { "target_id": { "enum": ["living_room.sofa"] } }, "additionalProperties": false } },
+    { "name": "character.look_at", "description": "让屏幕上的 Human 看向一个已到达且支持 look_at 的对象。", "side_effect": true, "result_schema_ref": "tool-result.schema.json#/$defs/lookAtObjectResult", "parameters": { "type": "object", "required": ["target_id"], "properties": { "target_id": { "enum": ["living_room.sofa", "study.desk", "living_room.window"] } }, "additionalProperties": false } },
+    { "name": "character.interact", "description": "让屏幕上的 Human 与一个已到达且支持 interact 的对象交互。", "side_effect": true, "result_schema_ref": "tool-result.schema.json#/$defs/interactObjectResult", "parameters": { "type": "object", "required": ["target_id"], "properties": { "target_id": { "enum": ["living_room.sofa", "study.desk", "living_room.window"] } }, "additionalProperties": false } }
+  ]
+}

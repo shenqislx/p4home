@@ -9,6 +9,7 @@
 #include "fake_backend.h"
 #include "ui_home_actor.h"
 #include "ui_home_actor_test.h"
+#include "ui_home_rooms.h"
 #include "ui_pages.h"
 #include "ui_pixel_fx.h"
 #include "ui_time_source.h"
@@ -196,6 +197,27 @@ static bool sim_complete_object_action(void)
     return true;
 }
 
+static bool sim_seed_non_living_human_before_ui(void)
+{
+    if (world_service_init(NULL) != ESP_OK ||
+        world_service_set_agent_connected(true) != ESP_OK) {
+        return false;
+    }
+    world_action_request_t request = {
+        .action_id = "sim-human-initial-study",
+        .tool = WORLD_ACTION_CHARACTER_GO_TO_ROOM,
+        .timeout_ms = 5000U,
+    };
+    request.arguments.room = WORLD_ROOM_STUDY;
+    world_action_event_t event = {0};
+    return world_service_submit(&request, &event) == ESP_OK &&
+           event.status == WORLD_ACTION_STATUS_ACCEPTED &&
+           world_service_start_next(&event) == ESP_OK &&
+           event.status == WORLD_ACTION_STATUS_STARTED &&
+           world_service_complete_active(&event) == ESP_OK &&
+           event.status == WORLD_ACTION_STATUS_COMPLETED;
+}
+
 static bool sim_wait_for_actor(uint32_t max_ticks)
 {
     for (uint32_t tick = 0U; tick < max_ticks; ++tick) {
@@ -315,12 +337,119 @@ static int sim_verify_object_gate(void)
     return 0;
 }
 
+static bool sim_pet_inside_house(const ui_home_actor_render_snapshot_t *render)
+{
+    return render->pet_art_x >= 2 && render->pet_art_x + 10 <= 174 &&
+           render->pet_floor_y >= 46 && render->pet_floor_y <= 84 &&
+           render->pet_target_art_x >= 2 && render->pet_target_art_x + 10 <= 174 &&
+           (render->pet_target_floor_y == 46 || render->pet_target_floor_y == 84) &&
+           render->pet_room < UI_HOME_ROOM_COUNT &&
+           render->pet_target_room < UI_HOME_ROOM_COUNT;
+}
+
+static int sim_verify_pet_autonomy(void)
+{
+    ui_home_actor_render_snapshot_t before_human = {0};
+    ui_home_actor_get_render_snapshot(&before_human);
+    world_service_snapshot_t initial_human = {0};
+    world_service_get_snapshot(&initial_human);
+    if (!sim_pet_inside_house(&before_human) ||
+        before_human.pet_ticks_until_target < 4U ||
+        initial_human.room != WORLD_ROOM_STUDY ||
+        before_human.pet_room != WORLD_ROOM_LIVING_ROOM) {
+        fprintf(stderr,
+                "VERIFY:pet_autonomy:safe_bounds:FAIL reason=initial_state x=%d floor=%d "
+                "target_x=%d target_floor=%d human_room=%u room=%u target_room=%u ticks=%u\n",
+                before_human.pet_art_x, before_human.pet_floor_y,
+                before_human.pet_target_art_x, before_human.pet_target_floor_y,
+                (unsigned)initial_human.room,
+                (unsigned)before_human.pet_room, (unsigned)before_human.pet_target_room,
+                (unsigned)before_human.pet_ticks_until_target);
+        return 1;
+    }
+
+    if (world_service_set_agent_connected(true) != ESP_OK) {
+        return 1;
+    }
+    world_action_request_t human_go = sim_object_request(
+        "sim-human-go-sofa", WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
+        "living_room.sofa");
+    if (!sim_begin_object_action(&human_go, WORLD_OBJECT_ANIMATION_CAT_WALK) ||
+        !sim_complete_object_action()) {
+        fprintf(stderr, "VERIFY:pet_autonomy:human_isolation:FAIL reason=human_action\n");
+        return 1;
+    }
+
+    ui_home_actor_render_snapshot_t after_human = {0};
+    ui_home_actor_get_render_snapshot(&after_human);
+    if (after_human.pet_art_x != before_human.pet_art_x ||
+        after_human.pet_floor_y != before_human.pet_floor_y ||
+        after_human.pet_target_art_x != before_human.pet_target_art_x ||
+        after_human.pet_target_floor_y != before_human.pet_target_floor_y ||
+        after_human.pet_target_revision != before_human.pet_target_revision ||
+        after_human.pet_moving) {
+        fprintf(stderr, "VERIFY:pet_autonomy:human_isolation:FAIL reason=pet_changed\n");
+        return 1;
+    }
+
+    const uint32_t initial_revision = after_human.pet_target_revision;
+    const int16_t initial_target_x = after_human.pet_target_art_x;
+    const int16_t initial_target_floor = after_human.pet_target_floor_y;
+    while (after_human.pet_ticks_until_target > 1U) {
+        sim_advance(UI_FX_TICK_MS);
+        ui_home_actor_get_render_snapshot(&after_human);
+        if (after_human.pet_target_revision != initial_revision ||
+            after_human.pet_target_art_x != initial_target_x ||
+            after_human.pet_target_floor_y != initial_target_floor ||
+            after_human.pet_moving) {
+            fprintf(stderr, "VERIFY:pet_autonomy:timer_gate:FAIL reason=early_retarget\n");
+            return 1;
+        }
+    }
+
+    sim_advance(UI_FX_TICK_MS);
+    ui_home_actor_get_render_snapshot(&after_human);
+    if (!after_human.pet_moving ||
+        after_human.pet_target_revision != initial_revision + 1U ||
+        (after_human.pet_target_art_x == initial_target_x &&
+         after_human.pet_target_floor_y == initial_target_floor)) {
+        fprintf(stderr, "VERIFY:pet_autonomy:timer_gate:FAIL reason=no_retarget\n");
+        return 1;
+    }
+
+    /* Cover a same-floor leg and the next cross-storey leg. Every rendered
+     * position and every selected destination must stay inside the house. */
+    bool completed_cross_storey = false;
+    for (uint32_t tick = 0U; tick < 400U; ++tick) {
+        sim_advance(UI_FX_TICK_MS);
+        ui_home_actor_get_render_snapshot(&after_human);
+        if (!sim_pet_inside_house(&after_human)) {
+            fprintf(stderr, "VERIFY:pet_autonomy:safe_bounds:FAIL reason=out_of_bounds\n");
+            return 1;
+        }
+        if (after_human.pet_target_revision >= initial_revision + 2U &&
+            !after_human.pet_moving) {
+            completed_cross_storey = true;
+            break;
+        }
+    }
+    if (!completed_cross_storey) {
+        fprintf(stderr, "VERIFY:pet_autonomy:safe_bounds:FAIL reason=route_timeout\n");
+        return 1;
+    }
+
+    printf("VERIFY:pet_autonomy:human_isolation:PASS source=local_timer\n");
+    printf("VERIFY:pet_autonomy:timer_gate:PASS idle_ticks=80 deterministic=true\n");
+    printf("VERIFY:pet_autonomy:safe_bounds:PASS routes=same_floor,cross_storey\n");
+    return 0;
+}
+
 static void sim_usage(const char *argv0)
 {
     fprintf(stderr,
             "usage: %s [--mode window|dump] [--out DIR] [--frames N]\n"
             "          [--clock-speed N] [--start-hour H] [--scenario]\n"
-            "          [--verify-object-gate]\n",
+            "          [--verify-object-gate] [--verify-pet-autonomy]\n",
             argv0);
 }
 
@@ -332,6 +461,7 @@ int main(int argc, char **argv)
     int start_hour = 20;
     bool scenario = false;
     bool verify_object_gate = false;
+    bool verify_pet_autonomy = false;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
@@ -348,6 +478,8 @@ int main(int argc, char **argv)
             scenario = true;
         } else if (strcmp(argv[i], "--verify-object-gate") == 0) {
             verify_object_gate = true;
+        } else if (strcmp(argv[i], "--verify-pet-autonomy") == 0) {
+            verify_pet_autonomy = true;
         } else {
             sim_usage(argv[0]);
             return 2;
@@ -392,6 +524,11 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    if (verify_pet_autonomy && !sim_seed_non_living_human_before_ui()) {
+        fprintf(stderr, "VERIFY:pet_autonomy:human_isolation:FAIL reason=seed_human_study\n");
+        return 1;
+    }
+
     if (ui_pages_render_bootstrap() != ESP_OK) {
         fprintf(stderr, "ui_pages_render_bootstrap failed\n");
         return 1;
@@ -399,6 +536,9 @@ int main(int argc, char **argv)
 
     if (verify_object_gate) {
         return sim_verify_object_gate();
+    }
+    if (verify_pet_autonomy) {
+        return sim_verify_pet_autonomy();
     }
 
     if (frames == 0) {

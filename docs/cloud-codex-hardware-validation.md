@@ -97,13 +97,18 @@ Mac 系统扬声器只生成固定的麦克风测试输入，依次覆盖 Robot 
 
 日常人工聊天使用 `product_human`，`monitor_seconds` 至少为 180 秒。它不是自动业务门禁：runner
 从本机 `0700` 的 `~/.config/p4home/product-voice` 读取 `0600` 的稳定 device identity、RSA-2048 TLS identity
-与 SPKI pin，生成仅存在于 runner 临时目录的产品 sdkconfig。该 profile 启用 SR 与 Voice transport，
-关闭 startup selftest、Phase 5A/5B validation marker、Device Agent transport 和全部 Robot HA 装配；
-刷写前必须确认本机常驻 Voice 服务正在监听且呈现匹配的 SPKI。上传候选必须扫描稳定 token、TLS
+与 SPKI pin，生成仅存在于 runner 临时目录的产品 sdkconfig。该 profile 启用 SR、Voice transport
+以及固定 `actor_id=human_avatar` 的 Device Protocol v3 Agent transport，同时关闭 startup selftest、
+Phase 5A/5B validation marker 和全部 Robot HA 装配。Voice 端口使用 workflow 的 `agent_port`；独立
+Device 端口从私有 product config 的 `device-port` 读取，旧配置缺少该文件时只使用固定默认值
+`18444`，不会改写身份或密钥。刷写前必须确认本机常驻 Voice 与 Device 服务分别监听，且 Voice
+服务呈现匹配的 SPKI。屏幕 Cat 仍仅由固件本地 timer 和自有状态推进；Agent Cat autonomy 在
+`product_human` 中硬关闭，且不接收 Human transcript。上传候选必须扫描稳定 token、TLS
 私钥、raw-audio 字段和二进制/长 Base64 材料，审计失败时不得上传 artifact。manifest 中的
 `product_human_*` 字段只证明配置、刷写、启动和隐私传输边界；真人 `Hi ESP`、中文 STT、Human
-回复、UI 可见性与 P4 扬声器听感仍需独立人工观察。常驻服务启用固定 Kokoro TTS，并要求 P4
-playback 完成；这些产品行为不由 product profile 的刷写 manifest 自动证明。常驻安装与日常使用见
+回复、UI 可见性、P4 扬声器听感，以及屏幕 Human 的移动、坐下或互动仍需独立人工观察。常驻服务
+启用固定 Kokoro TTS，并要求 P4 playback 完成；workflow 绿色及 product profile 的刷写 manifest
+都不自动证明语音或角色动作已完成。常驻安装与日常使用见
 [Human-only 常驻语音聊天](./product-human-voice.md)。
 
 Phase 6H Cat + Memory 使用独立的 `phase6h_cat_memory`，`monitor_seconds` 至少为 120 秒，
@@ -190,6 +195,12 @@ manifest 推断。
 `phase5e_artifact_audit_status=pass`。Mac input driver 成功只证明测试语音已注入，不能替代 P4 UI
 渲染/ACK marker、真实模型调用、HA 读写恢复和 Agent 汇总判定。harness 或 input driver 的业务
 失败不会阻断已通过隐私审计的证据上传；隐私审计失败仍会 fail closed 并跳过 Phase 5E artifact。
+`product_human` 还记录 `product_human_agent_transport_enabled=true`、
+`product_human_agent_protocol_version=3`；兼容字段 `product_human_agent_transport_disabled` 必须为
+`false`。这些字段只证明最终 sdkconfig 启用了 Human-avatar v3 transport，不包含私有 Device 端口，
+也不证明任一角色动作已发送、完成或被屏幕渲染。`product_human_voice_transport_enabled`、
+`product_human_validation_disabled` 与 `product_human_artifact_audit_status` 仍分别证明 Voice 配置、
+验证 marker 关闭和发布隐私审计，不能互相替代。
 `phase7_autonomy` 还记录 `phase7_artifact_audit_status=pass` 与结构化
 `agent_hardware_result`，并以 `capture_actual_seconds` 记录动态提前结束后的实际串口采集时长；
 结构化结果中的 HA 字段只有 alias 数量、只读 frame 计数和上述隔离投影

@@ -326,7 +326,19 @@ static const char *agent_activity_id(world_activity_t activity)
 
 static bool agent_uses_object_runtime(void)
 {
-    return s_agent.protocol_version == AGENT_TRANSPORT_PROTOCOL_V2;
+    return s_agent.protocol_version >= AGENT_TRANSPORT_PROTOCOL_V2;
+}
+
+static bool agent_uses_human_avatar_runtime(void)
+{
+    return s_agent.protocol_version == AGENT_TRANSPORT_PROTOCOL_V3;
+}
+
+static void agent_add_actor_id(cJSON *payload)
+{
+    if (agent_uses_human_avatar_runtime()) {
+        cJSON_AddStringToObject(payload, "actor_id", AGENT_TRANSPORT_HUMAN_AVATAR_ID);
+    }
 }
 
 static cJSON *agent_character_json(const world_service_snapshot_t *snapshot)
@@ -424,6 +436,7 @@ static cJSON *agent_snapshot_payload(const char *reason)
              s_agent.boot_id, snapshot.state_version);
     cJSON_AddStringToObject(payload, "snapshot_id", snapshot_id);
     cJSON_AddStringToObject(payload, "reason", reason);
+    agent_add_actor_id(payload);
     cJSON_AddNumberToObject(payload, "state_version", snapshot.state_version);
     cJSON_AddNumberToObject(payload, "observed_at_ms", (double)snapshot.observed_at_ms);
     cJSON_AddItemToObject(payload, "character", agent_character_json(&snapshot));
@@ -441,6 +454,7 @@ static cJSON *agent_changed_payload(void)
     if (payload == NULL) {
         return NULL;
     }
+    agent_add_actor_id(payload);
     cJSON_AddNumberToObject(payload, "state_version", snapshot.state_version);
     cJSON_AddNumberToObject(payload, "observed_at_ms", (double)snapshot.observed_at_ms);
     cJSON_AddItemToObject(payload, "character", agent_character_json(&snapshot));
@@ -572,6 +586,7 @@ static cJSON *agent_action_result(const world_action_event_t *event)
         cJSON_Delete(result);
         return agent_character_json(&event->result.snapshot);
     case WORLD_ACTION_GET_SNAPSHOT:
+        agent_add_actor_id(result);
         cJSON_AddNumberToObject(result, "state_version", event->result.snapshot.state_version);
         cJSON_AddNumberToObject(result, "observed_at_ms",
                                 (double)event->result.snapshot.observed_at_ms);
@@ -606,6 +621,7 @@ static esp_err_t agent_send_action_event(const world_action_event_t *event,
         return ESP_ERR_NO_MEM;
     }
     cJSON_AddStringToObject(payload, "action_id", event->action_id);
+    agent_add_actor_id(payload);
     const char *type = NULL;
     switch (event->status) {
     case WORLD_ACTION_STATUS_ACCEPTED:
@@ -769,7 +785,13 @@ static bool agent_parse_action_request(const cJSON *payload, world_action_reques
     static const char *const fields[] = {
         "action_id", "tool", "arguments", "timeout_ms", "origin",
     };
-    if (!agent_object_has_exact_fields(payload, fields, 5U)) {
+    static const char *const avatar_fields[] = {
+        "action_id", "actor_id", "tool", "arguments", "timeout_ms", "origin",
+    };
+    if ((agent_uses_human_avatar_runtime() &&
+         !agent_object_has_exact_fields(payload, avatar_fields, 6U)) ||
+        (!agent_uses_human_avatar_runtime() &&
+         !agent_object_has_exact_fields(payload, fields, 5U))) {
         return false;
     }
     const cJSON *action_id = cJSON_GetObjectItemCaseSensitive(payload, "action_id");
@@ -777,11 +799,17 @@ static bool agent_parse_action_request(const cJSON *payload, world_action_reques
     const cJSON *arguments = cJSON_GetObjectItemCaseSensitive(payload, "arguments");
     const cJSON *timeout = cJSON_GetObjectItemCaseSensitive(payload, "timeout_ms");
     const cJSON *origin = cJSON_GetObjectItemCaseSensitive(payload, "origin");
+    const cJSON *actor_id = cJSON_GetObjectItemCaseSensitive(payload, "actor_id");
     uint32_t timeout_ms = 0U;
     if (!cJSON_IsString(action_id) || !agent_valid_id(action_id->valuestring) ||
         !cJSON_IsString(tool) || !cJSON_IsObject(arguments) || !cJSON_IsString(origin) ||
         !agent_json_integer(timeout, AGENT_ACTION_TIMEOUT_MIN_MS,
                             AGENT_ACTION_TIMEOUT_MAX_MS, &timeout_ms)) {
+        return false;
+    }
+    if (agent_uses_human_avatar_runtime() &&
+        (!cJSON_IsString(actor_id) ||
+         strcmp(actor_id->valuestring, AGENT_TRANSPORT_HUMAN_AVATAR_ID) != 0)) {
         return false;
     }
     if (strcmp(origin->valuestring, "user") != 0 && strcmp(origin->valuestring, "agent") != 0 &&
@@ -837,7 +865,8 @@ static bool agent_parse_action_request(const cJSON *payload, world_action_reques
     if (agent_uses_object_runtime()) {
         const cJSON *target = cJSON_GetObjectItemCaseSensitive(arguments, "target_id");
         if (argument_count != 1U || !cJSON_IsString(target) ||
-            strcmp(origin->valuestring, "user") == 0) {
+            (s_agent.protocol_version == AGENT_TRANSPORT_PROTOCOL_V2 &&
+             strcmp(origin->valuestring, "user") == 0)) {
             return false;
         }
         if (strcmp(tool->valuestring, "character.go_to") == 0) {
@@ -885,17 +914,29 @@ static void agent_handle_action_request(const cJSON *payload, const char *messag
 static void agent_handle_cancel(const cJSON *payload, const char *message_id)
 {
     static const char *const fields[] = {"action_id", "reason"};
-    if (!agent_object_has_exact_fields(payload, fields, 2U)) {
+    static const char *const avatar_fields[] = {"action_id", "actor_id", "reason"};
+    if ((agent_uses_human_avatar_runtime() &&
+         !agent_object_has_exact_fields(payload, avatar_fields, 3U)) ||
+        (!agent_uses_human_avatar_runtime() &&
+         !agent_object_has_exact_fields(payload, fields, 2U))) {
         (void)agent_send_protocol_error("INVALID_MESSAGE", "invalid action.cancel payload",
                                         message_id);
         return;
     }
     const cJSON *action_id = cJSON_GetObjectItemCaseSensitive(payload, "action_id");
     const cJSON *reason = cJSON_GetObjectItemCaseSensitive(payload, "reason");
+    const cJSON *actor_id = cJSON_GetObjectItemCaseSensitive(payload, "actor_id");
     if (!cJSON_IsString(action_id) || !agent_valid_id(action_id->valuestring) ||
         !cJSON_IsString(reason) || reason->valuestring[0] == '\0' ||
         strlen(reason->valuestring) > 128U) {
         (void)agent_send_protocol_error("INVALID_MESSAGE", "invalid action.cancel payload",
+                                        message_id);
+        return;
+    }
+    if (agent_uses_human_avatar_runtime() &&
+        (!cJSON_IsString(actor_id) ||
+         strcmp(actor_id->valuestring, AGENT_TRANSPORT_HUMAN_AVATAR_ID) != 0)) {
+        (void)agent_send_protocol_error("INVALID_MESSAGE", "invalid Human avatar actor_id",
                                         message_id);
         return;
     }
@@ -1108,6 +1149,9 @@ static esp_err_t agent_send_handshake(void)
     if (agent_uses_object_runtime()) {
         cJSON_AddItemToArray(versions, cJSON_CreateNumber(2));
     }
+    if (agent_uses_human_avatar_runtime()) {
+        cJSON_AddItemToArray(versions, cJSON_CreateNumber(3));
+    }
     cJSON_AddStringToObject(hello, "connection_reason",
                             s_agent.first_connection ? "boot" : "reconnect");
     ESP_RETURN_ON_ERROR(agent_send_payload("device.hello", hello, NULL), TAG,
@@ -1116,6 +1160,7 @@ static esp_err_t agent_send_handshake(void)
     cJSON *capabilities = cJSON_CreateObject();
     cJSON_AddNumberToObject(capabilities, "selected_protocol_version",
                             s_agent.protocol_version);
+    agent_add_actor_id(capabilities);
     cJSON *rooms = cJSON_AddArrayToObject(capabilities, "rooms");
     for (int index = 0; index < WORLD_ROOM_COUNT; ++index) {
         cJSON_AddItemToArray(rooms, cJSON_CreateString(agent_room_id((world_room_id_t)index)));
@@ -1368,7 +1413,7 @@ esp_err_t agent_transport_init(const agent_transport_config_t *config)
                                    ? AGENT_TRANSPORT_PROTOCOL_V1
                                    : config->protocol_version;
     if (protocol_version < AGENT_TRANSPORT_PROTOCOL_V1 ||
-        protocol_version > AGENT_TRANSPORT_PROTOCOL_V2) {
+        protocol_version > AGENT_TRANSPORT_PROTOCOL_V3) {
         return ESP_ERR_INVALID_ARG;
     }
     snprintf(s_agent.uri, sizeof(s_agent.uri), "%s", config->uri);

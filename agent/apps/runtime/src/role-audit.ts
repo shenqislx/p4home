@@ -14,11 +14,17 @@ import type { RobotHaObservationCursor } from "@p4home/transport-ha";
 import type { AuditStore } from "@p4home/storage-sqlite";
 
 import type {
-  RoleAssignment,
+  RouteAssignment,
   RoutePlan,
   UserTextInteraction,
 } from "./role-contracts.ts";
-import { buildRoleContext, getRoleProfile, type RoleInput } from "./role-profiles.ts";
+import { isHumanAvatarAssignment } from "./role-contracts.ts";
+import {
+  buildRoleContext,
+  getHumanAvatarExecutorProfile,
+  getRoleProfile,
+  type RoleInput,
+} from "./role-profiles.ts";
 import type { RoleRunResult } from "./role-runner.ts";
 import type { RoleSession } from "./role-session.ts";
 
@@ -33,7 +39,7 @@ export class RoleRunAuditTrail {
   readonly #runId: string;
   readonly #interaction: UserTextInteraction;
   readonly #plan: RoutePlan;
-  readonly #assignment: RoleAssignment;
+  readonly #assignment: RouteAssignment;
   readonly #session: RoleSession;
   #auditSessionId: string;
   #sessionMigration: {
@@ -44,12 +50,13 @@ export class RoleRunAuditTrail {
   #lastTime = -1;
   #messageOrdinal = 0;
   #eventOrdinal = 0;
+  readonly #avatarActionCreatedAt = new Map<string, number>();
 
   public constructor(
     runId: string,
     interaction: UserTextInteraction,
     plan: RoutePlan,
-    assignment: RoleAssignment,
+    assignment: RouteAssignment,
     session: RoleSession,
     options: RoleRunAuditOptions,
   ) {
@@ -65,7 +72,9 @@ export class RoleRunAuditTrail {
   }
 
   public async start(input: RoleInput): Promise<void> {
-    const profile = getRoleProfile(this.#session.role_id);
+    const profile = isHumanAvatarAssignment(this.#assignment)
+      ? getHumanAvatarExecutorProfile()
+      : getRoleProfile(this.#session.role_id);
     const profileId = `${profile.revision.replace("/", "-")}:${profile.role_id}`;
     const storedProfile = await this.#store.getSessionAgentProfile(this.#session.session_id);
     if (storedProfile !== null && storedProfile.agent_profile_id !== profileId) {
@@ -102,6 +111,9 @@ export class RoleRunAuditTrail {
       role_profile_revision: profile.revision,
       route_reason: this.#plan.reason,
       assignment_mode: assignment.mode,
+      ...("capability" in assignment
+        ? { assignment_capability: assignment.capability }
+        : {}),
       source_span: assignment.source_span,
     } as const;
     const messages: Message[] = [
@@ -311,6 +323,54 @@ export class RoleRunAuditTrail {
       tool_results: [{ run_id: this.#runId, result, completed_at_ms: completedAtMs }],
       events: [event],
     });
+  }
+
+  public async avatarActionLifecycle(
+    toolCallId: string,
+    actionId: string,
+    tool: string,
+    argumentsValue: Readonly<Record<string, unknown>>,
+    status: "requested" | "completed" | "failed" | "cancelled" | "unknown",
+    errorCode: string | null,
+    replayAllowed = false,
+    reconciliation: unknown = null,
+  ): Promise<void> {
+    const occurredAtMs = this.#now();
+    const createdAtMs = status === "requested"
+      ? occurredAtMs
+      : this.#avatarActionCreatedAt.get(actionId);
+    if (createdAtMs === undefined) {
+      throw new Error(`Human avatar action ${actionId} has no requested audit lifecycle`);
+    }
+    if (status === "requested") {
+      this.#avatarActionCreatedAt.set(actionId, createdAtMs);
+    }
+    await this.#store.writeBatch({
+      actions: [{
+        action_id: actionId,
+        run_id: this.#runId,
+        tool_call_id: toolCallId,
+        status,
+        created_at_ms: createdAtMs,
+      }],
+      events: [this.#event(`role.avatar.action.${status}`, {
+        interaction_id: this.#interaction.interaction_id,
+        assignment_id: this.#assignment.assignment_id,
+        role_id: "human",
+        actor_id: "human_avatar",
+        tool_call_id: toolCallId,
+        action_id: actionId,
+        tool,
+        target: argumentsValue.room_id ?? argumentsValue.target_id ?? null,
+        status,
+        error_code: errorCode,
+        replay_allowed: replayAllowed,
+        reconciliation,
+      })],
+    });
+    if (status !== "requested") {
+      this.#avatarActionCreatedAt.delete(actionId);
+    }
   }
 
   public async finish(result: RoleRunResult): Promise<void> {

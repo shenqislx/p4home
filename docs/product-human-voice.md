@@ -11,7 +11,11 @@
 - 固定 STT 的 final transcript 仍进入统一 Role Router；
 - Human 决策正常执行；Robot 或混合决策 fail-closed 为 Human 澄清；
 - Agent 不读取 HA URL、token 或 policy，也不构造 Robot HA 客户端；
-- Human 没有执行型 Tool，不能控制灯具；
+- 屏幕上的 Cat 只运行固件本地 timer 驱动的独立状态机，不读取 Human 位置或 transcript；
+  Agent Cat autonomy 在 `product_human` 中保持硬关闭；
+- Human 普通对话没有执行工具；只有 Router 明确识别为屏幕 Human avatar 动作时，Runtime 才提供
+  `go_to_room/go_to/sit/look_at/interact` 白名单 Tool。`actor_id=human_avatar` 由 Runtime 固定，模型
+  不能选择 Cat、坐标或 Home Assistant；
 - `ui_output=required`，P4 必须确认 UI revision；
 - `audio_output=required`，Human 回复按安全中文分段进入常驻 Kokoro worker；每段 PCM 增量生成后
   立即按 P4 credit 播放，不再等待整轮模型回复和整段音频全部完成；
@@ -55,6 +59,11 @@ launchctl kickstart -k gui/$(id -u)/local.p4home.product-human-voice
 Conversation UI 和 P4 playback。Human-only 是默认且由启动 wrapper 强制设置，不能从 launchd
 环境意外扩大到 Robot。STT/TTS 模型路径均由安装器绑定到固定 revision，启动时缺失即 fail closed。
 
+从旧版 Human Voice 安装升级时可直接替换代码后重启。若既有私有配置中尚无 `device-port`，启动脚本
+只为当前进程使用固定默认值 `18444`，不会重写或轮换 `device-token`、TLS 私钥、证书或设备身份；
+再次运行安装器会原子补写该配置。现有身份文件若不是私有普通文件，安装器仍会拒绝隐式修复。
+如果旧配置的语音端口正是 `18444`，必须先显式选择另一个 Device 端口，避免端口身份混用。
+
 ## 刷写产品固件
 
 常驻服务开始监听后，使用自托管硬件工作流的 `product_human` profile。该 profile 从同一台 runner
@@ -69,9 +78,19 @@ manifest 和 artifact 均不得包含 token。
 - `agent_host=<AGENT_LAN_IP>`
 - `agent_port=18443`
 
-产品 profile 启用 SR、Voice transport、外部内存栈与 TLS SPKI pin，同时关闭 startup selftest、
-Phase 5A/5B validation marker 和 Device Agent transport。工作流会在刷写前确认本机 Voice 服务正在
-监听，但 workflow 绿色只证明构建、刷写、启动与 artifact 传输，不代替真人聊天观察。
+Device 端口不是 `workflow_dispatch` 输入。工作流从 runner 私有配置
+`~/.config/p4home/product-voice/device-port` 读取；旧配置缺少该文件时使用固定默认值 `18444`，且
+必须与 `agent_port` 不同。
+
+产品 profile 启用 SR、Voice transport、Device Protocol v3 Human-avatar transport、外部内存栈与
+TLS SPKI pin，同时关闭 startup selftest、Phase 5A/5B validation marker、Robot/HA 和 Cat autonomy。
+工作流会在刷写前确认本机 Voice 与 Device 服务均在监听，但 workflow 绿色只证明构建、刷写、启动
+与 artifact 传输，不代替真人聊天或角色动作观察。
+
+manifest 中 `product_human_agent_transport_enabled=true`、
+`product_human_agent_protocol_version=3` 和兼容字段 `product_human_agent_transport_disabled=false`
+只证明固件配置启用了 Human-avatar v3 transport；manifest 不记录私有 Device 端口，也不证明移动、
+坐下或互动动作已经完成。
 
 ## 日常使用
 
@@ -83,6 +102,20 @@ Phase 5A/5B validation marker 和 Device Agent transport。工作流会在刷写
 5. Human final transcript 与回复显示在同一对话框中；扬声器会在模型完整回复结束前开始播放已完成的
    安全语句。
 
+也可以直接说“让屏幕上的 Human 去书房”“去客厅沙发坐下”或“去窗边看看”。动作规划不会使用
+流式聊天文本；只有 P4 返回 `completed` 后，UI/TTS 才会确认完成。目标含糊、未知、带条件或混合
+复杂意图时只会请求澄清，不会猜测执行。
+
+Cat 的画面移动不是一次 Agent 决策：它由固件本地 timer 从自身固定初始房间和自身状态推进。
+`product_human` 不启动 Cat runner、Session、Memory 或 Device Protocol v2 autonomy，因此 Human
+transcript 不会成为 Cat 输入。
+
+普通 Human 对话 profile 的 `allowed_tools` 始终为空；avatar 使用独立、零 Memory 预算的 executor
+profile，只授权上述五个 `character.*` 动作。该 executor 不与 Cat profile 共用授权、Session 或历史。
+
+上述省略 Human 主语的直接祈使句已经纳入 Router 契约与本地 mock 回归；真实 Qwen 对不同口语表达的
+稳定分类仍属于真实模型门禁，不能由 mock 测试代替。
+
 这里的“流式”是端到端的增量文本、clause 级 Kokoro 生成和 PCM 帧级传输。Kokoro 仍会先完成一个
 有界 clause 的声学生成，再输出该 clause 的 PCM，因此不等同于声学模型逐帧推理；实际首声延迟和
 句间连续性必须以 P4 扬声器人工听感为准。
@@ -91,8 +124,8 @@ Phase 5A/5B validation marker 和 Device Agent transport。工作流会在刷写
 实时速率追赶，避免一次性灌满 Voice 帧队列。它用于保护稍早开口的句首，但不鼓励在提示人声播放时
 抢话。
 
-设备控制类语句会进入 Human 澄清，不会调用 HA。回复播放期间再次说 `Hi ESP` 会触发 barge-in，
-取消旧播放 epoch 并开启新一轮采集。
+灯具等家居控制语句仍会进入 Human 澄清，不会调用 HA。回复播放或 Human avatar 动作期间再次说
+`Hi ESP` 会触发 barge-in，取消旧播放 epoch、未发送动作及可取消的在途动作，并开启新一轮采集。
 
 ## 验收
 
@@ -102,7 +135,8 @@ Phase 5A/5B validation marker 和 Device Agent transport。工作流会在刷写
 2. P4 串口显示 SR/WakeNet 和 Voice transport ready/connected，且无 panic/watchdog/reset loop；
 3. 真人连续完成三轮 Human 对话，UI 中文 transcript 与回复完整可见，扬声器回复清晰可听；
 4. 重启 P4 与 Agent 主机后自动恢复；
-5. 说一次设备控制语句，确认没有 HA 写入，UI 只显示安全澄清；
-6. SQLite/日志/artifact 不含 token、TLS 私钥或原始音频。
+5. 分别说一次移动、坐下和互动命令，确认屏幕 Human 执行动作，Cat 不接收 transcript；
+6. 说一次灯具控制语句，确认没有 HA 写入，UI 只显示安全澄清；
+7. SQLite/日志/artifact 不含 token、TLS 私钥或原始音频。
 
 自动 marker、Agent 日志、SQLite 审计和用户肉眼 UI 观察必须分别报告，不能互相替代。

@@ -107,6 +107,15 @@ function runStatus(outcome: DeviceActionOutcome): CatActionRunResult["status"] {
   return "failed";
 }
 
+function actionStatus(result: CatActionRunResult): Action["status"] {
+  const outcome = result.outcome;
+  if (outcome.status === "completed") return "completed";
+  if (outcome.status === "unknown") return "unknown";
+  if (result.status === "cancelled" || outcome.error.code === "CANCELLED") return "cancelled";
+  if (outcome.error.details?.source === "adapter") return "unknown";
+  return "failed";
+}
+
 function toolResult(
   toolCallId: string,
   outcome: DeviceActionOutcome,
@@ -263,7 +272,7 @@ async function auditFinish(
     action_id: options.action_id,
     run_id: options.run_id,
     tool_call_id: options.tool_call_id,
-    status: result.outcome.status === "completed" ? "completed" : "failed",
+    status: actionStatus(result),
     created_at_ms: actionCreatedAtMs,
   };
   const run: Run = {

@@ -13,7 +13,8 @@ import {
 } from "./role-audit.ts";
 import {
   assertContractId,
-  type RoleAssignment,
+  isHumanAvatarAssignment,
+  type RouteAssignment,
   type RoutePlan,
   type UserTextInteraction,
   validateRoutePlan,
@@ -40,6 +41,10 @@ import {
 import { assessHumanResponsePolicy } from "./role-response-policy.ts";
 import type { RoleSession } from "./role-session.ts";
 import { HumanSpeechSegmenter } from "./human-speech-segmenter.ts";
+import {
+  runHumanAvatarAction,
+  type HumanAvatarDeviceRuntime,
+} from "./human-avatar-action-runner.ts";
 
 export const ROBOT_CAPABILITY_UNAVAILABLE_TEXT =
   "家居控制能力将在 Phase 4 上线；这次没有执行任何设备动作。";
@@ -57,6 +62,7 @@ export interface RunAssignedRoleOptions {
   readonly signal?: AbortSignal;
   readonly audit?: RoleRunAuditOptions;
   readonly robot_ha?: RobotHaReadRuntime | RobotHaWriteRuntime;
+  readonly human_avatar?: HumanAvatarDeviceRuntime;
   /** Internal orchestration latch used to preserve unknown write outcomes. */
   readonly on_side_effect_dispatched?: () => void;
   readonly on_human_speech_segment?: (
@@ -138,7 +144,7 @@ function isWriteRuntime(
 
 function roleInput(
   options: RunAssignedRoleOptions,
-  assignment: RoleAssignment,
+  assignment: RouteAssignment,
 ): UserTextRoleInput {
   return {
     kind: "user_text",
@@ -280,7 +286,7 @@ function validateHumanTerminal(
 
 async function streamHumanResponse(
   options: RunAssignedRoleOptions,
-  assignment: RoleAssignment,
+  assignment: RouteAssignment,
   input: UserTextRoleInput,
   memory: MemoryContextResult | undefined,
 ): Promise<RoleRunResult> {
@@ -392,7 +398,7 @@ async function streamHumanResponse(
   }
 }
 
-function validateOptions(options: RunAssignedRoleOptions): RoleAssignment {
+function validateOptions(options: RunAssignedRoleOptions): RouteAssignment {
   assertContractId(options.run_id, "run_id");
   validateUserTextInteraction(options.interaction);
   validateRoutePlan(options.plan, options.interaction);
@@ -421,7 +427,7 @@ function validateOptions(options: RunAssignedRoleOptions): RoleAssignment {
 
 async function executeAssignedRole(
   options: RunAssignedRoleOptions,
-  assignment: RoleAssignment,
+  assignment: RouteAssignment,
   input: UserTextRoleInput,
   audit: RoleRunAuditTrail | undefined,
 ): Promise<RoleRunResult> {
@@ -433,6 +439,83 @@ async function executeAssignedRole(
       message: "role run was cancelled before execution",
       retryable: false,
     }, 0);
+  }
+
+  if (isHumanAvatarAssignment(assignment)) {
+    if (options.human_avatar === undefined) {
+      return {
+        run_id: options.run_id,
+        role_id: "human",
+        status: "completed",
+        final_text: "现在还不能控制屏幕上的 Human，请稍后再试。",
+        model_turns: 0,
+        capability_available: false,
+        outcome: "capability_unavailable",
+        tool_results: [],
+        error: null,
+      };
+    }
+    const avatar = await runHumanAvatarAction({
+      run_id: options.run_id,
+      assignment_id: assignment.assignment_id,
+      text: input.text,
+      provider: options.provider,
+      device: options.human_avatar,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(options.timeout_ms === undefined ? {} : { timeout_ms: options.timeout_ms }),
+      ...(audit === undefined ? {} : { audit }),
+      ...(options.on_side_effect_dispatched === undefined
+        ? {}
+        : { on_side_effect_dispatched: options.on_side_effect_dispatched }),
+    });
+    if (avatar.status === "cancelled") {
+      return failure(options, "human", "cancelled", {
+        source: "runtime",
+        code: "CANCELLED",
+        message: "Human avatar action was cancelled",
+        retryable: false,
+      }, avatar.model_turns, avatar.tool_results);
+    }
+    if (avatar.status === "failed") {
+      let terminalError: ToolResult["error"] = null;
+      for (let index = avatar.tool_results.length - 1; index >= 0; index--) {
+        const candidate = avatar.tool_results[index];
+        if (candidate?.status === "error") {
+          terminalError = candidate.error;
+          break;
+        }
+      }
+      return failure(options, "human", "failed", {
+        source: "tool",
+        code: avatar.error_code ?? terminalError?.code ?? "AVATAR_ACTION_FAILED",
+        message: "Human avatar action did not reach a completed terminal",
+        retryable: terminalError?.retryable ?? false,
+      }, avatar.model_turns, avatar.tool_results);
+    }
+    if (avatar.status === "unavailable") {
+      return {
+        run_id: options.run_id,
+        role_id: "human",
+        status: "completed",
+        final_text: avatar.final_text,
+        model_turns: avatar.model_turns,
+        capability_available: false,
+        outcome: "capability_unavailable",
+        tool_results: avatar.tool_results,
+        error: null,
+      };
+    }
+    return {
+      run_id: options.run_id,
+      role_id: "human",
+      status: "completed",
+      final_text: avatar.final_text,
+      model_turns: avatar.model_turns,
+      capability_available: true,
+      outcome: "response",
+      tool_results: avatar.tool_results,
+      error: null,
+    };
   }
 
   const profile = options.session.profile;
@@ -556,6 +639,7 @@ export async function runAssignedRole(
       throw new RoleRunAuditFinalizeError(result, error);
     }
     if (result.final_text.length > 0
+        && !isHumanAvatarAssignment(assignment)
         && (roleId === "human" || options.robot_ha === undefined)) {
       options.session.commitExchange(input, result.final_text);
     }

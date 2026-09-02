@@ -114,6 +114,8 @@ def install(args: argparse.Namespace) -> pathlib.Path:
         raise ValueError("invalid product Voice Agent host")
     if not 1 <= args.agent_port <= 65535:
         raise ValueError("invalid product Voice Agent port")
+    if not 1 <= args.device_port <= 65535 or args.device_port == args.agent_port:
+        raise ValueError("invalid product Human avatar Device port")
 
     config_dir = pathlib.Path(args.config_dir).expanduser().resolve()
     state_dir = pathlib.Path(args.state_dir).expanduser().resolve()
@@ -131,6 +133,7 @@ def install(args: argparse.Namespace) -> pathlib.Path:
     atomic_write(config_dir / "device-id", f"{args.device_id}\n".encode())
     atomic_write(config_dir / "agent-host", f"{args.agent_host}\n".encode())
     atomic_write(config_dir / "agent-port", f"{args.agent_port}\n".encode())
+    atomic_write(config_dir / "device-port", f"{args.device_port}\n".encode())
     atomic_write(config_dir / "stt-model-path", f"{stt_model}\n".encode())
     atomic_write(config_dir / "tts-model-path", f"{tts_model}\n".encode())
     atomic_write(config_dir / "spki-sha256", f"{spki_sha256(config_dir / 'agent-key.pem')}\n".encode())
@@ -168,6 +171,7 @@ def main() -> None:
     parser.add_argument("--repo-root", default=str(repo_root))
     parser.add_argument("--agent-host", required=True)
     parser.add_argument("--agent-port", type=int, default=18443)
+    parser.add_argument("--device-port", type=int, default=18444)
     parser.add_argument("--device-id", default="p4-product-human")
     parser.add_argument("--node-bin", default=node_default)
     parser.add_argument("--config-dir", default=str(home / ".config/p4home/product-voice"))

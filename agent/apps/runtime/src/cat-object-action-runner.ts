@@ -243,6 +243,13 @@ function outcomeStatus(outcome: DeviceActionOutcome): CatObjectActionRunResult["
   return "failed";
 }
 
+function actionStatus(outcome: DeviceActionOutcome): Action["status"] {
+  if (outcome.status === "completed") return "completed";
+  if (outcome.status === "unknown") return "unknown";
+  if (outcome.error.details?.source === "adapter") return "unknown";
+  return outcome.error.code === "CANCELLED" ? "cancelled" : "failed";
+}
+
 function skippedOutcome(actionId: string, previous: DeviceActionOutcome): DeviceActionOutcome {
   return {
     status: "failed",
@@ -284,7 +291,7 @@ function internalOutcome(actionId: string, error: unknown): DeviceActionOutcome 
       code: "INTERNAL",
       message: "Cat object action failed before a terminal device outcome",
       retryable: error instanceof OllamaProviderError ? error.retryable : false,
-      details: { source_error_code: sourceCode },
+      details: { source: "adapter", source_error_code: sourceCode },
     },
   };
 }
@@ -456,7 +463,7 @@ async function auditFinish(
       action_id: step.action_id,
       run_id: options.run_id,
       tool_call_id: step.tool_call_id,
-      status: step.outcome.status === "completed" ? "completed" : "failed",
+      status: actionStatus(step.outcome),
       created_at_ms: actionCreatedAt.get(step.index) ?? startedAtMs,
     }));
   const event: Event = {

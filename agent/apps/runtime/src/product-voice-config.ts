@@ -20,3 +20,9 @@ export function resolveProductVoiceRoleMode(
 export function productVoiceAllowsRobot(mode: ProductVoiceRoleMode): boolean {
   return mode === "human-robot";
 }
+
+export function productVoiceAllowsCatAutonomy(
+  mode: ProductVoiceRoleMode,
+): boolean {
+  return mode === "human-robot";
+}

@@ -63,15 +63,17 @@ Phase 1 至 Phase 4 已按各自证据门禁关闭。Robot 只开放 alias 级
 
 `pnpm start:voice` 启动真实产品装配：P4 PCM → 固定版本 Python STT → 统一 Role Router →
 Human-only Runtime（含 private Memory）→ P4 独立 Conversation UI → 固定 Kokoro TTS → P4
-playback。`ui_output=required` 与 `audio_output=required` 必须分别完成；不能用模型成功替代 UI 或
-扬声器播放成功，也不会经 `character.say` 改写 Cat World。
+playback。普通 Human chat 保持流式；明确的屏幕 Human avatar 命令通过独立 Device Protocol v3
+通道执行，Runtime 固定 `actor_id=human_avatar`。`ui_output=required` 与 `audio_output=required`
+必须分别完成；不能用模型成功替代 UI、扬声器播放或动作 lifecycle 成功。
 
 入口要求以下环境变量，所有路径必须为绝对路径；设备 token、TLS 私钥和 HA token 文件须在仓库外，
 其中设备 token/TLS 私钥及 HA token 必须为当前用户所有且权限不宽于 `0600`：
 
 - Agent：`P4HOME_AGENT_DEVICE_ID`、`P4HOME_AGENT_DEVICE_TOKEN_FILE`、
   `P4HOME_AGENT_TLS_KEY_FILE`、`P4HOME_AGENT_TLS_CERT_FILE`，以及可选
-  `P4HOME_AGENT_HOST`（默认 `0.0.0.0`）、`P4HOME_AGENT_PORT`（默认 `8443`）；
+  `P4HOME_AGENT_HOST`（默认 `0.0.0.0`）、`P4HOME_AGENT_PORT`（默认 `8443`）、
+  `P4HOME_DEVICE_PORT`（Human avatar Device v3，默认 `18444`）；
 - STT：`P4HOME_STT_PYTHON`、`P4HOME_STT_WORKER`、`P4HOME_STT_MODEL`，以及可选
   `P4HOME_STT_TIMEOUT_MS`；
 - TTS：`P4HOME_TTS_PYTHON`、`P4HOME_TTS_WORKER`、`P4HOME_TTS_MODEL`，以及可选

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://p4home.local/contracts/tools/v3/tool-result.schema.json",
+  "title": "P4 Human Avatar Tool Result v3",
+  "type": "object",
+  "required": ["schema_version", "tool_call_id", "name", "status", "result", "error"],
+  "properties": {
+    "schema_version": { "const": 3 },
+    "tool_call_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "name": { "$ref": "#/$defs/toolName" },
+    "status": { "enum": ["success", "error"] },
+    "result": { "oneOf": [{ "type": "object" }, { "type": "null" }] },
+    "error": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["code", "message", "retryable"],
+          "properties": {
+            "code": { "enum": ["INVALID_ARGUMENT", "UNSUPPORTED_TOOL", "UNKNOWN_ROOM", "DEVICE_OFFLINE", "QUEUE_FULL", "DEADLINE_EXCEEDED", "CANCELLED", "DEVICE_BUSY", "ACTION_ID_CONFLICT", "UNKNOWN_OBJECT", "UNSUPPORTED_OBJECT_ACTION", "OBJECT_UNAVAILABLE", "OBJECT_OCCUPIED", "OBJECT_NOT_REACHED", "INTERNAL"] },
+            "message": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "retryable": { "type": "boolean" },
+            "details": { "type": "object" }
+          },
+          "allOf": [
+            { "if": { "properties": { "code": { "enum": ["OBJECT_UNAVAILABLE", "OBJECT_OCCUPIED"] } }, "required": ["code"] }, "then": { "properties": { "retryable": { "const": true } } } },
+            { "if": { "properties": { "code": { "enum": ["UNKNOWN_OBJECT", "UNSUPPORTED_OBJECT_ACTION", "OBJECT_NOT_REACHED"] } }, "required": ["code"] }, "then": { "properties": { "retryable": { "const": false } } } }
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "roomId": { "enum": ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"] },
+    "objectId": { "enum": ["living_room.sofa", "study.desk", "living_room.window"] },
+    "toolName": { "enum": ["character.go_to_room", "character.go_to", "character.sit", "character.look_at", "character.interact"] },
+    "goToRoomResult": { "type": "object", "required": ["room_id"], "properties": { "room_id": { "$ref": "#/$defs/roomId" } }, "additionalProperties": false },
+    "objectActionResult": {
+      "type": "object",
+      "required": ["object_id", "action", "pose"],
+      "properties": {
+        "object_id": { "$ref": "#/$defs/objectId" },
+        "action": { "enum": ["go_to", "sit", "look_at", "interact"] },
+        "pose": { "enum": ["standing", "sitting"] }
+      },
+      "additionalProperties": false
+    },
+    "goToObjectResult": { "allOf": [{ "$ref": "#/$defs/objectActionResult" }, { "properties": { "action": { "const": "go_to" }, "pose": { "const": "standing" } } }] },
+    "sitObjectResult": { "allOf": [{ "$ref": "#/$defs/objectActionResult" }, { "properties": { "object_id": { "const": "living_room.sofa" }, "action": { "const": "sit" }, "pose": { "const": "sitting" } } }] },
+    "lookAtObjectResult": { "allOf": [{ "$ref": "#/$defs/objectActionResult" }, { "properties": { "action": { "const": "look_at" } } }, { "oneOf": [{ "properties": { "object_id": { "const": "living_room.sofa" } } }, { "properties": { "object_id": { "enum": ["study.desk", "living_room.window"] }, "pose": { "const": "standing" } } }] }] },
+    "interactObjectResult": { "allOf": [{ "$ref": "#/$defs/objectActionResult" }, { "properties": { "action": { "const": "interact" } } }, { "oneOf": [{ "properties": { "object_id": { "const": "living_room.sofa" } } }, { "properties": { "object_id": { "enum": ["study.desk", "living_room.window"] }, "pose": { "const": "standing" } } }] }] }
+  },
+  "allOf": [
+    { "if": { "properties": { "status": { "const": "success" } }, "required": ["status"] }, "then": { "properties": { "result": { "type": "object" }, "error": { "type": "null" } } } },
+    { "if": { "properties": { "status": { "const": "error" } }, "required": ["status"] }, "then": { "properties": { "result": { "type": "null" }, "error": { "type": "object" } } } },
+    { "if": { "properties": { "status": { "const": "success" }, "name": { "const": "character.go_to_room" } }, "required": ["status", "name"] }, "then": { "properties": { "result": { "$ref": "#/$defs/goToRoomResult" } } } },
+    { "if": { "properties": { "status": { "const": "success" }, "name": { "const": "character.go_to" } }, "required": ["status", "name"] }, "then": { "properties": { "result": { "$ref": "#/$defs/goToObjectResult" } } } },
+    { "if": { "properties": { "status": { "const": "success" }, "name": { "const": "character.sit" } }, "required": ["status", "name"] }, "then": { "properties": { "result": { "$ref": "#/$defs/sitObjectResult" } } } },
+    { "if": { "properties": { "status": { "const": "success" }, "name": { "const": "character.look_at" } }, "required": ["status", "name"] }, "then": { "properties": { "result": { "$ref": "#/$defs/lookAtObjectResult" } } } },
+    { "if": { "properties": { "status": { "const": "success" }, "name": { "const": "character.interact" } }, "required": ["status", "name"] }, "then": { "properties": { "result": { "$ref": "#/$defs/interactObjectResult" } } } }
+  ],
+  "additionalProperties": false
+}

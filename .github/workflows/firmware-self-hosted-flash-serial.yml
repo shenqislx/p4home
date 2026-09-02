@@ -248,28 +248,46 @@ jobs:
             file_mode="$(stat -f '%Lp' "$PRODUCT_CONFIG_DIR/$private_file")"
             [[ "$file_mode" == "600" || "$file_mode" == "400" ]]
           done
+          if [[ -e "$PRODUCT_CONFIG_DIR/device-port" || -L "$PRODUCT_CONFIG_DIR/device-port" ]]; then
+            test -f "$PRODUCT_CONFIG_DIR/device-port"
+            test ! -L "$PRODUCT_CONFIG_DIR/device-port"
+            device_port_mode="$(stat -f '%Lp' "$PRODUCT_CONFIG_DIR/device-port")"
+            [[ "$device_port_mode" == "600" || "$device_port_mode" == "400" ]]
+          fi
           openssl x509 -in "$PRODUCT_CONFIG_DIR/agent-cert.pem" -noout -text \
             | grep -q "Public Key Algorithm: rsaEncryption"
           PRODUCT_DEVICE_ID="$(head -n 1 "$PRODUCT_CONFIG_DIR/device-id")"
           PRODUCT_AGENT_HOST="$(head -n 1 "$PRODUCT_CONFIG_DIR/agent-host")"
           PRODUCT_AGENT_PORT="$(head -n 1 "$PRODUCT_CONFIG_DIR/agent-port")"
+          PRODUCT_DEVICE_PORT="18444"
+          if [[ -f "$PRODUCT_CONFIG_DIR/device-port" ]]; then
+            PRODUCT_DEVICE_PORT="$(head -n 1 "$PRODUCT_CONFIG_DIR/device-port")"
+          fi
           test "$AGENT_HOST" = "$PRODUCT_AGENT_HOST"
           test "$AGENT_PORT" = "$PRODUCT_AGENT_PORT"
+          [[ "$PRODUCT_DEVICE_PORT" =~ ^[0-9]+$ ]]
+          (( PRODUCT_DEVICE_PORT >= 1 && PRODUCT_DEVICE_PORT <= 65535 ))
+          test "$PRODUCT_DEVICE_PORT" != "$PRODUCT_AGENT_PORT"
           PRODUCT_AGENT_URI="wss://$PRODUCT_AGENT_HOST:$PRODUCT_AGENT_PORT/v1/voice"
+          PRODUCT_DEVICE_URI="wss://$PRODUCT_AGENT_HOST:$PRODUCT_DEVICE_PORT/v1/device"
           python3 scripts/prepare-phase5b-voice-profile.py \
             --sdkconfig "$HARDWARE_SDKCONFIG" \
             --uri "$PRODUCT_AGENT_URI" \
             --device-id "$PRODUCT_DEVICE_ID" \
             --token-file "$PRODUCT_CONFIG_DIR/device-token" \
             --spki-file "$PRODUCT_CONFIG_DIR/spki-sha256" \
-            --profile product
+            --profile product \
+            --device-uri "$PRODUCT_DEVICE_URI"
           grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" "$HARDWARE_SDKCONFIG"
           grep -qx "CONFIG_P4HOME_SR_ENABLE=y" "$HARDWARE_SDKCONFIG"
           grep -qx "CONFIG_P4HOME_VOICE_TRANSPORT_ENABLED=y" "$HARDWARE_SDKCONFIG"
           grep -qx "# CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST is not set" "$HARDWARE_SDKCONFIG"
           grep -qx "# CONFIG_P4HOME_PHASE5A_VALIDATION is not set" "$HARDWARE_SDKCONFIG"
           grep -qx "# CONFIG_P4HOME_PHASE5B_VALIDATION is not set" "$HARDWARE_SDKCONFIG"
-          grep -qx "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set" "$HARDWARE_SDKCONFIG"
+          grep -qx "CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED=y" "$HARDWARE_SDKCONFIG"
+          grep -qx "CONFIG_P4HOME_AGENT_PROTOCOL_VERSION=3" "$HARDWARE_SDKCONFIG"
+          grep -qx "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=12288" "$HARDWARE_SDKCONFIG"
+          echo "P4HOME_PRODUCT_DEVICE_PORT=$PRODUCT_DEVICE_PORT" >> "$GITHUB_ENV"
           echo "EXPECTED_MAIN_TASK_STACK_SIZE=8192" >> "$GITHUB_ENV"
           echo "P4HOME_PRODUCT_HUMAN_AUDIT_STATUS_FILE=$RUNNER_TEMP/product-human-artifact-audit-status" >> "$GITHUB_ENV"
 
@@ -500,7 +518,9 @@ jobs:
             # value instead of requiring a particular serialized n form.
             ! grep -qx "CONFIG_P4HOME_PHASE5A_VALIDATION=y" "$HARDWARE_SDKCONFIG"
             grep -qx "# CONFIG_P4HOME_PHASE5B_VALIDATION is not set" "$HARDWARE_SDKCONFIG"
-            grep -qx "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED=y" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_P4HOME_AGENT_PROTOCOL_VERSION=3" "$HARDWARE_SDKCONFIG"
+            grep -qx "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=12288" "$HARDWARE_SDKCONFIG"
           fi
           test "$(shasum -a 256 firmware/dependencies.lock | awk '{print $1}')" = "$DEPENDENCY_LOCK_SHA256_BEFORE"
 
@@ -509,19 +529,23 @@ jobs:
         run: |
           set -euo pipefail
           nc -z 127.0.0.1 "$AGENT_PORT"
-          PRODUCT_SERVICE_CERT="$RUNNER_TEMP/product-human-service-cert.pem"
-          openssl s_client \
-            -connect "127.0.0.1:$AGENT_PORT" \
-            -servername p4home-product-human \
-            -showcerts < /dev/null 2> /dev/null \
-            | openssl x509 -outform PEM > "$PRODUCT_SERVICE_CERT"
-          SERVICE_SPKI_SHA256="$(
-            openssl x509 -in "$PRODUCT_SERVICE_CERT" -pubkey -noout \
-              | openssl pkey -pubin -outform DER 2> /dev/null \
-              | shasum -a 256 \
-              | awk '{print $1}'
-          )"
-          test "$SERVICE_SPKI_SHA256" = "$(head -n 1 "$HOME/.config/p4home/product-voice/spki-sha256")"
+          nc -z 127.0.0.1 "$P4HOME_PRODUCT_DEVICE_PORT"
+          EXPECTED_SERVICE_SPKI_SHA256="$(head -n 1 "$HOME/.config/p4home/product-voice/spki-sha256")"
+          for service_port in "$AGENT_PORT" "$P4HOME_PRODUCT_DEVICE_PORT"; do
+            PRODUCT_SERVICE_CERT="$RUNNER_TEMP/product-human-service-$service_port-cert.pem"
+            openssl s_client \
+              -connect "127.0.0.1:$service_port" \
+              -servername p4home-product-human \
+              -showcerts < /dev/null 2> /dev/null \
+              | openssl x509 -outform PEM > "$PRODUCT_SERVICE_CERT"
+            SERVICE_SPKI_SHA256="$(
+              openssl x509 -in "$PRODUCT_SERVICE_CERT" -pubkey -noout \
+                | openssl pkey -pubin -outform DER 2> /dev/null \
+                | shasum -a 256 \
+                | awk '{print $1}'
+            )"
+            test "$SERVICE_SPKI_SHA256" = "$EXPECTED_SERVICE_SPKI_SHA256"
+          done
 
       - name: Set up Node for Agent harness
         if: inputs.validation_profile == 'phase2d_agent' || inputs.validation_profile == 'phase3d_object' || inputs.validation_profile == 'phase4c_ha' || inputs.validation_profile == 'phase5b_voice' || inputs.validation_profile == 'phase5c_stt' || inputs.validation_profile == 'phase5e_e2e' || inputs.validation_profile == 'phase5e_ui' || inputs.validation_profile == 'phase6h_cat_memory' || inputs.validation_profile == 'phase7_autonomy'
@@ -1186,6 +1210,7 @@ jobs:
           agent_stack_prefix = "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK="
           agent_transport_enabled_prefix = "CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED="
           agent_transport_disabled_line = "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set"
+          agent_protocol_version_prefix = "CONFIG_P4HOME_AGENT_PROTOCOL_VERSION="
           phase4c_validation_prefix = "CONFIG_P4HOME_PHASE4C_VALIDATION="
           phase5a_validation_prefix = "CONFIG_P4HOME_PHASE5A_VALIDATION="
           phase5b_validation_prefix = "CONFIG_P4HOME_PHASE5B_VALIDATION="
@@ -1200,6 +1225,7 @@ jobs:
           audio_selftest_prefix = "CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST="
           main_stack_size = None
           agent_stack_size = None
+          agent_protocol_version = None
           phase4c_validation_enabled = False
           agent_transport_disabled = False
           phase4c_agent_transport_disabled = False
@@ -1277,6 +1303,10 @@ jobs:
                   elif line.startswith(agent_transport_enabled_prefix):
                       agent_transport_disabled = (
                           line.removeprefix(agent_transport_enabled_prefix) != "y"
+                      )
+                  elif line.startswith(agent_protocol_version_prefix):
+                      agent_protocol_version = int(
+                          line.removeprefix(agent_protocol_version_prefix)
                       )
                   elif line.startswith(phase4c_validation_prefix):
                       phase4c_validation_enabled = (
@@ -1392,6 +1422,12 @@ jobs:
               ),
               "product_human_agent_transport_disabled": (
                   profile == "product_human" and agent_transport_disabled
+              ),
+              "product_human_agent_transport_enabled": (
+                  profile == "product_human" and not agent_transport_disabled
+              ),
+              "product_human_agent_protocol_version": (
+                  agent_protocol_version if profile == "product_human" else None
               ),
               "product_human_validation_disabled": (
                   profile == "product_human"

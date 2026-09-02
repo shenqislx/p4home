@@ -23,6 +23,9 @@ test "$(/usr/bin/stat -f '%Lp' "$CONFIG_DIR")" = "700"
 for private_file in device-id device-token agent-key.pem agent-cert.pem stt-model-path tts-model-path agent-port; do
   require_private_file "$CONFIG_DIR/$private_file"
 done
+if [[ -e "$CONFIG_DIR/device-port" || -L "$CONFIG_DIR/device-port" ]]; then
+  require_private_file "$CONFIG_DIR/device-port"
+fi
 
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
@@ -35,9 +38,15 @@ device_id="$(<"$CONFIG_DIR/device-id")"
 stt_model="$(<"$CONFIG_DIR/stt-model-path")"
 tts_model="$(<"$CONFIG_DIR/tts-model-path")"
 agent_port="$(<"$CONFIG_DIR/agent-port")"
+device_port="18444"
+if [[ -f "$CONFIG_DIR/device-port" ]]; then
+  device_port="$(<"$CONFIG_DIR/device-port")"
+fi
 [[ "$device_id" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]
 [[ "$agent_port" == <-> ]]
+[[ "$device_port" == <-> ]]
 (( agent_port >= 1 && agent_port <= 65535 ))
+(( device_port >= 1 && device_port <= 65535 && device_port != agent_port ))
 test -d "$stt_model"
 test -d "$tts_model"
 
@@ -48,6 +57,8 @@ export P4HOME_AGENT_TLS_KEY_FILE="$CONFIG_DIR/agent-key.pem"
 export P4HOME_AGENT_TLS_CERT_FILE="$CONFIG_DIR/agent-cert.pem"
 export P4HOME_AGENT_HOST="0.0.0.0"
 export P4HOME_AGENT_PORT="$agent_port"
+export P4HOME_DEVICE_PORT="$device_port"
+export P4HOME_CAT_AUTONOMY_ENABLED="0"
 export P4HOME_PRODUCT_AUDIT_DB="$STATE_DIR/audit.sqlite"
 export P4HOME_STT_PYTHON="$AGENT_ROOT/packages/provider-stt/python/.venv/bin/python"
 export P4HOME_STT_WORKER="$AGENT_ROOT/packages/provider-stt/python/p4home_stt_worker.py"

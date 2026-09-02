@@ -24,6 +24,8 @@ import {
   ProductCatAutonomyRuntime,
 } from "./product-cat-autonomy.ts";
 import { DeviceRuntimeHub } from "./device-websocket-server.ts";
+import type { DeviceActionSpec } from "./device-action-adapter.ts";
+import type { HumanAvatarDeviceRuntime } from "./human-avatar-action-runner.ts";
 import { LowPriorityCatRunRegistry } from "./low-priority-cat-run-registry.ts";
 import { productionMemoryStoreOptions } from "./memory-storage-policy.ts";
 import {
@@ -175,9 +177,46 @@ async function main(): Promise<void> {
     });
     const catRunRegistry = new LowPriorityCatRunRegistry();
     const autonomyEnabled = optionalFlag("P4HOME_CAT_AUTONOMY_ENABLED");
+    if (!robotEnabled && autonomyEnabled) {
+      throw new Error("cat_autonomy_disabled_in_human_avatar_mode");
+    }
     let autonomyDevicePort: number | null = null;
+    let humanAvatarDevicePort: number | null = null;
     let autonomyControlPort: number | null = null;
-    if (autonomyEnabled) {
+    let humanAvatar: HumanAvatarDeviceRuntime | null = null;
+    if (!autonomyEnabled) {
+      deviceHub = new DeviceRuntimeHub({
+        server: {
+          host: process.env.P4HOME_DEVICE_HOST?.trim()
+            || process.env.P4HOME_AGENT_HOST?.trim()
+            || "0.0.0.0",
+          port: optionalInteger("P4HOME_DEVICE_PORT", 18_444, 1, 65_535),
+          tls: { key, cert },
+          device_tokens: { [deviceId]: deviceToken },
+          max_connections: 1,
+        },
+        adapter: { protocol_version: 3, actor_id: "human_avatar" },
+      });
+      const hub = deviceHub;
+      const adapter = () => hub.getAdapter(deviceId);
+      humanAvatar = {
+        get is_ready() { return adapter()?.is_ready === true; },
+        get protocol_version() { return adapter()?.protocol_version ?? 3; },
+        get room_capabilities() { return adapter()?.room_capabilities ?? []; },
+        get action_capabilities() { return adapter()?.action_capabilities ?? []; },
+        get object_capabilities() { return adapter()?.object_capabilities ?? []; },
+        get last_snapshot() { return adapter()?.last_snapshot ?? null; },
+        async executeAction(spec: DeviceActionSpec) {
+          const active = adapter();
+          if (active === undefined || !active.is_ready) {
+            throw new Error("human_avatar_device_not_ready");
+          }
+          return await active.executeAction(spec);
+        },
+      };
+      const deviceAddress = await deviceHub.start();
+      humanAvatarDevicePort = deviceAddress.port;
+    } else {
       if (haClient === null) throw new Error("cat_autonomy_requires_robot_ha_mode");
       const configBytes = await readBoundedFile(
         "P4HOME_CAT_AUTONOMY_CONFIG_FILE", 65_536, false,
@@ -247,6 +286,7 @@ async function main(): Promise<void> {
       ...(haClient === null
         ? { human_only: true }
         : { robot_ha: { client: haClient, observation_timeout_ms: 10_000 } }),
+      ...(humanAvatar === null ? {} : { human_avatar: humanAvatar }),
       memory,
       cat_run_registry: catRunRegistry,
       ...(autonomy === null ? {} : { on_task_complete: autonomy.taskCompletionSink() }),
@@ -328,6 +368,8 @@ async function main(): Promise<void> {
       cat_autonomy_enabled: autonomyEnabled,
       cat_autonomy_ready: autonomy?.getStatus().product_ready ?? false,
       cat_autonomy_device_port: autonomyDevicePort,
+      human_avatar_enabled: humanAvatar !== null,
+      human_avatar_device_port: humanAvatarDevicePort,
       cat_autonomy_control_host: autonomyControl === null ? null : "127.0.0.1",
       cat_autonomy_control_port: autonomyControlPort,
     })}\n`);

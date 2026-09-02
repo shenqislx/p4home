@@ -1,5 +1,12 @@
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "timed_out";
-export type ActionStatus = "requested" | "accepted" | "started" | "completed" | "failed";
+export type ActionStatus =
+  | "requested"
+  | "accepted"
+  | "started"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "unknown";
 
 export interface AgentProfile {
   readonly agent_profile_id: string;
@@ -90,7 +97,7 @@ export interface ToolError {
 }
 
 export interface ToolSuccessResult {
-  readonly schema_version: 1 | 2;
+  readonly schema_version: 1 | 2 | 3;
   readonly tool_call_id: string;
   readonly name: string;
   readonly status: "success";
@@ -99,7 +106,7 @@ export interface ToolSuccessResult {
 }
 
 export interface ToolFailureResult {
-  readonly schema_version: 1 | 2;
+  readonly schema_version: 1 | 2 | 3;
   readonly tool_call_id: string;
   readonly name: string;
   readonly status: "error";

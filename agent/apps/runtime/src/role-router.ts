@@ -8,8 +8,11 @@ import {
 import { QWEN_THINKING_ENABLED } from "./model-config.ts";
 import {
   assertContractId,
+  type HumanAvatarAssignment,
   type RoleAssignment,
+  type RoutePlan,
   type RoutePlanV2,
+  type RoutePlanV3,
   type RouteReason,
   type UserRoutableRoleId,
   type UserTextInteraction,
@@ -20,11 +23,14 @@ import {
 export const ROLE_ROUTER_SYSTEM_PROMPT = [
   "你是 P4 Home 的 Role Router，只切分和分类，不回答用户，也没有任何工具。",
   "Home Assistant 家居查询或控制属于 robot；普通对话、知识问答、情绪表达属于 human。",
+  "明确要求屏幕上的 Human 移动到注册房间或对象、坐下、看向对象、与对象互动，且目标唯一明确时属于 avatar。",
+  "在本产品语境中，省略 Human 主语但目标唯一明确的直接角色祈使句也属于 avatar，例如“去客厅沙发坐下”“去窗边看看”。",
+  "avatar 只接受单一直接动作或可确定的连续动作；含糊目标、未知目标、条件式、否定式、与聊天或家居控制混合时输出 clarify。",
   "输出一个或两个 assignment；text 必须逐字复制对应的原始用户文本子串，不能改写、增删或规范化字符。",
   "assignment 必须按原文顺序、非空、无重叠无遗漏地覆盖全文；标点、空格、连接词和 emoji 也必须归入相邻一段。",
   "单意图也输出一个 assignment，text 必须等于完整原始文本。",
   "混合意图最多输出一段 human 和一段 robot；不能安全切分、含糊目标、否定或条件式命令时输出唯一 full-span clarify assignment。",
-  "唯一允许的 JSON 形状是 {\"assignments\":[{\"role\":\"human|robot|clarify\",\"text\":\"原文精确子串\"}]}，不得输出自然语言。",
+  "唯一允许的 JSON 形状是 {\"assignments\":[{\"role\":\"human|avatar|robot|clarify\",\"text\":\"原文精确子串\"}]}，不得输出自然语言。",
   "禁止 Cat、第三段、Markdown、解释、工具调用、thinking 或其他字段。",
 ].join("");
 
@@ -40,7 +46,7 @@ export const ROLE_ROUTER_DECISION_SCHEMA = {
         type: "object",
         required: ["role", "text"],
         properties: {
-          role: { enum: ["human", "robot", "clarify"] },
+          role: { enum: ["human", "avatar", "robot", "clarify"] },
           text: { type: "string", minLength: 1, maxLength: 1_024 },
         },
         additionalProperties: false,
@@ -59,7 +65,7 @@ export const ROLE_ROUTER_MODEL_OPTIONS = {
 
 interface SpanRouterDecision {
   readonly assignments: readonly {
-    readonly role: UserRoutableRoleId | "clarify";
+    readonly role: UserRoutableRoleId | "avatar" | "clarify";
     readonly text: string;
   }[];
 }
@@ -83,17 +89,18 @@ export interface RouteInteractionOptions {
 }
 
 export interface RouteInteractionResult {
-  readonly plan: RoutePlanV2;
+  readonly plan: RoutePlanV2 | RoutePlanV3;
   readonly model_output_accepted: boolean;
   readonly fallback_error_code: string | null;
 }
 
 function makePlan(
   options: RouteInteractionOptions,
-  assignments: readonly Omit<RoleAssignment, "assignment_id" | "mode">[],
+  assignments: readonly (Omit<RoleAssignment, "assignment_id" | "mode">
+    & { readonly capability?: "avatar" })[],
   reason: RouteReason,
   mode: "respond" | "clarify" = "respond",
-): RoutePlanV2 {
+): RoutePlanV2 | RoutePlanV3 {
   const assignmentId = (index: number): string => {
     if (assignments.length === 1) {
       return options.route_plan_id;
@@ -109,6 +116,38 @@ function makePlan(
     const tail = `:${digest}${suffix}`;
     return `${options.route_plan_id.slice(0, 100 - tail.length)}${tail}`;
   };
+  if (reason === "model_human_avatar") {
+    const assignment = assignments[0];
+    if (
+      assignments.length !== 1
+      || assignment === undefined
+      || assignment.role_id !== "human"
+      || assignment.capability !== "avatar"
+      || mode !== "respond"
+    ) {
+      throw new TypeError("Human avatar routing requires one responding Human assignment");
+    }
+    const avatarAssignment: HumanAvatarAssignment = {
+      assignment_id: assignmentId(0),
+      role_id: "human",
+      source_span: assignment.source_span,
+      mode: "respond",
+      capability: "avatar",
+    };
+    const plan: RoutePlanV3 = {
+      schema_version: 3,
+      route_plan_id: options.route_plan_id,
+      interaction_id: options.interaction.interaction_id,
+      assignments: [avatarAssignment],
+      reason,
+      created_at_ms: (options.clock ?? Date.now)(),
+    };
+    validateRoutePlan(plan, options.interaction);
+    return plan;
+  }
+  if (assignments.some((assignment) => assignment.capability !== undefined)) {
+    throw new TypeError("RoutePlan v2 cannot carry Human avatar capabilities");
+  }
   const normalized = assignments.map((assignment, index): RoleAssignment => ({
     assignment_id: assignmentId(index),
     role_id: assignment.role_id,
@@ -182,7 +221,7 @@ export async function routeInteraction(
   } catch {
     return fallback(options, "invalid_model_output", "INVALID_ROUTE_DECISION");
   }
-  let plan: RoutePlanV2;
+  let plan: RoutePlan;
   try {
     const clarify = decision.assignments.find((assignment) => assignment.role === "clarify");
     if (clarify !== undefined) {
@@ -197,6 +236,12 @@ export async function routeInteraction(
         source_span: { start: 0, end: options.interaction.text.length },
       }], "model_clarify", "clarify");
     } else {
+      if (
+        decision.assignments.some((assignment) => assignment.role === "avatar")
+        && decision.assignments.length !== 1
+      ) {
+        throw new TypeError("avatar actions cannot be mixed with another assignment");
+      }
       let offset = 0;
       const assignments = decision.assignments.map((assignment) => {
         if (assignment.role === "clarify") {
@@ -209,14 +254,17 @@ export async function routeInteraction(
         }
         offset = end;
         return {
-          role_id: assignment.role,
+          role_id: assignment.role === "avatar" ? "human" : assignment.role,
           source_span: { start, end },
+          ...(assignment.role === "avatar" ? { capability: "avatar" as const } : {}),
         };
       });
       if (offset !== options.interaction.text.length) {
         throw new TypeError("assignment text must cover the complete source interaction");
       }
-      const reason: RouteReason = assignments.length === 2
+      const reason: RouteReason = decision.assignments[0]?.role === "avatar"
+        ? "model_human_avatar"
+        : assignments.length === 2
         ? "model_mixed"
         : assignments[0]?.role_id === "robot"
           ? "model_robot"

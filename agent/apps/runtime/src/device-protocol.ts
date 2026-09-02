@@ -2,7 +2,9 @@ import {
   ContractBoundaryError,
   type FrozenDeviceMessage,
   type FrozenDeviceMessageType,
+  type HumanAvatarDeviceMessage,
   type ObjectRuntimeDeviceMessage,
+  validateHumanAvatarDeviceMessage,
   validateObjectRuntimeDeviceMessage,
   validateFrozenDeviceMessage,
 } from "@p4home/contracts";
@@ -10,7 +12,10 @@ import type { CharacterActivity, RoomId } from "@p4home/domain-p4home";
 
 export const DEVICE_PROTOCOL_VERSION = 1 as const;
 export const OBJECT_RUNTIME_DEVICE_PROTOCOL_VERSION = 2 as const;
-export type DeviceProtocolVersion = 1 | 2;
+export const HUMAN_AVATAR_DEVICE_PROTOCOL_VERSION = 3 as const;
+export const HUMAN_AVATAR_ACTOR_ID = "human_avatar" as const;
+export type HumanAvatarActorId = typeof HUMAN_AVATAR_ACTOR_ID;
+export type DeviceProtocolVersion = 1 | 2 | 3;
 export const DEVICE_MAX_JSON_FRAME_BYTES = 16_384;
 export const DEVICE_ACTION_QUEUE_CAPACITY = 8;
 
@@ -79,6 +84,7 @@ export type WorldSnapshotPayload = Readonly<{
   observed_at_ms: number;
   character: CharacterState | ObjectRuntimeCharacterState;
   objects?: readonly DeviceObjectState[];
+  actor_id?: HumanAvatarActorId;
 }>;
 
 export type DeviceCapabilitiesPayload = Readonly<{
@@ -86,11 +92,13 @@ export type DeviceCapabilitiesPayload = Readonly<{
   rooms: readonly RoomId[];
   actions: readonly DeviceToolName[];
   objects?: readonly DeviceObjectCapability[];
+  actor_id?: HumanAvatarActorId;
   limits: Readonly<Record<string, number>>;
 }>;
 
 export type ActionRequestPayload = Readonly<{
   action_id: string;
+  actor_id?: HumanAvatarActorId;
   tool: DeviceToolName;
   arguments: Record<string, unknown>;
   timeout_ms: number;
@@ -99,17 +107,20 @@ export type ActionRequestPayload = Readonly<{
 
 export type ActionAcceptedPayload = Readonly<{
   action_id: string;
+  actor_id?: HumanAvatarActorId;
   queue_position: number;
   accepted_at_ms: number;
 }>;
 
 export type ActionStartedPayload = Readonly<{
   action_id: string;
+  actor_id?: HumanAvatarActorId;
   started_at_ms: number;
 }>;
 
 export type ActionCompletedPayload = Readonly<{
   action_id: string;
+  actor_id?: HumanAvatarActorId;
   tool: DeviceToolName;
   completed_at_ms: number;
   state_version: number;
@@ -125,6 +136,7 @@ export type DeviceActionError = Readonly<{
 
 export type ActionFailedPayload = Readonly<{
   action_id: string;
+  actor_id?: HumanAvatarActorId;
   failed_at_ms: number;
   error: DeviceActionError;
 }>;
@@ -133,7 +145,11 @@ export type ObjectRuntimeMessage = Omit<ObjectRuntimeDeviceMessage, "type"> & {
   readonly type: FrozenDeviceMessageType;
 };
 
-export type DeviceMessage = FrozenDeviceMessage | ObjectRuntimeMessage;
+export type HumanAvatarRuntimeMessage = Omit<HumanAvatarDeviceMessage, "type"> & {
+  readonly type: FrozenDeviceMessageType;
+};
+
+export type DeviceMessage = FrozenDeviceMessage | ObjectRuntimeMessage | HumanAvatarRuntimeMessage;
 
 export type DeviceProtocolBoundaryErrorCode =
   | "FRAME_TOO_LARGE"
@@ -153,9 +169,11 @@ export class DeviceProtocolBoundaryError extends Error {
 export function encodeDeviceMessage(message: DeviceMessage): string {
   let validated: DeviceMessage;
   try {
-    validated = message.protocol_version === OBJECT_RUNTIME_DEVICE_PROTOCOL_VERSION
-      ? validateObjectRuntimeDeviceMessage<ObjectRuntimeMessage>(message)
-      : validateFrozenDeviceMessage(message);
+    validated = message.protocol_version === HUMAN_AVATAR_DEVICE_PROTOCOL_VERSION
+      ? validateHumanAvatarDeviceMessage<HumanAvatarRuntimeMessage>(message)
+      : message.protocol_version === OBJECT_RUNTIME_DEVICE_PROTOCOL_VERSION
+        ? validateObjectRuntimeDeviceMessage<ObjectRuntimeMessage>(message)
+        : validateFrozenDeviceMessage(message);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new DeviceProtocolBoundaryError("INVALID_MESSAGE", detail);
@@ -185,6 +203,9 @@ export function decodeDeviceMessage(frame: string): DeviceMessage {
   }
   try {
     const version = (value as { protocol_version?: unknown }).protocol_version;
+    if (version === HUMAN_AVATAR_DEVICE_PROTOCOL_VERSION) {
+      return validateHumanAvatarDeviceMessage<HumanAvatarRuntimeMessage>(value);
+    }
     if (version === OBJECT_RUNTIME_DEVICE_PROTOCOL_VERSION) {
       return validateObjectRuntimeDeviceMessage<ObjectRuntimeMessage>(value);
     }

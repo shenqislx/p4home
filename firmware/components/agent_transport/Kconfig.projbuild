@@ -31,12 +31,13 @@ config P4HOME_AGENT_SPKI_SHA256
 
 config P4HOME_AGENT_PROTOCOL_VERSION
     int "Selected Device Protocol version"
-    range 1 2
+    range 1 3
     default 1
     depends on P4HOME_AGENT_TRANSPORT_ENABLED
     help
-        Keep 1 for the frozen room-level protocol. Select 2 only when the
-        paired Agent Runtime supports the Phase 3 object runtime contract.
+        Keep 1 for the frozen room-level protocol. Select 2 only for the
+        frozen Phase 3 object runtime. Select 3 for the product Human avatar
+        runtime, whose remote actor is fixed to human_avatar.
 
 config P4HOME_AGENT_TRANSPORT_TASK_STACK
     int "Agent transport worker stack bytes"

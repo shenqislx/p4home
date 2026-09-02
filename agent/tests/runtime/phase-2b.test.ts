@@ -14,10 +14,101 @@ import {
   DeviceActionAdapterError,
   DeviceProtocolBoundaryError,
   DeviceWebSocketActionAdapter,
+  type DeviceWebSocketConnection,
   LowPriorityCatRunRegistry,
   RoleScheduler,
   runCatRoomTargetEvent,
 } from "@p4home/runtime";
+
+test("Device dispatch latch excludes pre-dispatch NOT_READY and includes ambiguous send failure", async () => {
+  const offlineDevice = new DeterministicFakeDevice();
+  const offlineSocket = new DeterministicFakeDeviceSocket(offlineDevice);
+  const offlineAdapter = new DeviceWebSocketActionAdapter(offlineSocket, {
+    device_id: offlineDevice.device_id,
+  });
+  let offlineDispatched = false;
+  await assert.rejects(offlineAdapter.executeAction({
+    action_id: "action:not-ready-latch",
+    tool: "character.go_to_room",
+    arguments: { room_id: "study" },
+    timeout_ms: 1_000,
+    on_dispatched: () => { offlineDispatched = true; },
+  }), (error) => error instanceof DeviceActionAdapterError && error.code === "NOT_READY");
+  assert.equal(offlineDispatched, false);
+
+  const raceDevice = new DeterministicFakeDevice();
+  const raceSocket = new DeterministicFakeDeviceSocket(raceDevice);
+  let armedRace = false;
+  let armedOpenReads = 0;
+  let raceSendCalls = 0;
+  const racingConnection: DeviceWebSocketConnection = {
+    get is_open() {
+      if (armedRace && ++armedOpenReads === 3) return false;
+      return raceSocket.is_open;
+    },
+    async send(frame): Promise<void> {
+      raceSendCalls++;
+      await raceSocket.send(frame);
+    },
+    close: (code, reason) => raceSocket.close(code, reason),
+    onFrame: (listener) => raceSocket.onFrame(listener),
+    onClose: (listener) => raceSocket.onClose(listener),
+  };
+  const racingAdapter = new DeviceWebSocketActionAdapter(racingConnection, {
+    device_id: raceDevice.device_id,
+  });
+  raceSocket.connect("test");
+  let raceDispatched = false;
+  armedRace = true;
+  await assert.rejects(racingAdapter.executeAction({
+    action_id: "action:close-before-wire",
+    tool: "character.go_to_room",
+    arguments: { room_id: "study" },
+    timeout_ms: 1_000,
+    on_dispatched: () => { raceDispatched = true; },
+  }), (error) => error instanceof DeviceActionAdapterError && error.code === "NOT_READY");
+  assert.equal(raceSendCalls, 0);
+  assert.equal(raceDispatched, false);
+  assert.equal(racingAdapter.pending_waiters, 0);
+
+  // The pre-wire attempt retained neither waiter nor a new idempotency record.
+  // A later use of the exact same action id can therefore dispatch normally.
+  armedRace = false;
+  const retried = await racingAdapter.executeAction({
+    action_id: "action:close-before-wire",
+    tool: "character.go_to_room",
+    arguments: { room_id: "study" },
+    timeout_ms: 1_000,
+  });
+  assert.equal(retried.status, "completed");
+  assert.equal(raceSendCalls, 1);
+
+  const device = new DeterministicFakeDevice();
+  const socket = new DeterministicFakeDeviceSocket(device);
+  const failingConnection: DeviceWebSocketConnection = {
+    get is_open() { return socket.is_open; },
+    async send(): Promise<void> { throw new Error("synthetic send failure"); },
+    close: (code, reason) => socket.close(code, reason),
+    onFrame: (listener) => socket.onFrame(listener),
+    onClose: (listener) => socket.onClose(listener),
+  };
+  const adapter = new DeviceWebSocketActionAdapter(failingConnection, {
+    device_id: device.device_id,
+  });
+  socket.connect("test");
+  assert.equal(adapter.is_ready, true);
+  let sendDispatched = false;
+  const outcome = await adapter.executeAction({
+    action_id: "action:send-failure-latch",
+    tool: "character.go_to_room",
+    arguments: { room_id: "study" },
+    timeout_ms: 1_000,
+    on_dispatched: () => { sendDispatched = true; },
+  });
+  assert.equal(sendDispatched, true);
+  assert.equal(outcome.status, "unknown");
+  assert.equal(outcome.status === "unknown" ? outcome.reason : null, "send_failed");
+});
 
 function roomEvent(id: string, occurredAtMs: number, roomTarget = "study") {
   return {
@@ -676,7 +767,7 @@ test("an approved event terminalizes its audit Run when the device is not ready"
   const trace = await store.getRunTrace("cat-offline-run");
   assert.equal(trace?.run.status, "failed");
   assert.equal(trace?.tool_calls[0]?.status, "error");
-  assert.equal(trace?.actions[0]?.status, "failed");
+  assert.equal(trace?.actions[0]?.status, "unknown");
 });
 
 test("Cat Run waits for snapshot evidence and persists unknown instead of false completion", async () => {
@@ -729,7 +820,7 @@ test("Cat Run waits for snapshot evidence and persists unknown instead of false 
   assert.equal(device.executionCount("cat-reconcile-action"), 0);
   const trace = await store.getRunTrace("cat-reconcile-run");
   assert.equal(trace?.run.status, "failed");
-  assert.equal(trace?.actions[0]?.status, "failed");
+  assert.equal(trace?.actions[0]?.status, "unknown");
   assert.equal(trace?.tool_calls[0]?.error?.details?.outcome, "unknown");
   assert.equal(
     (trace?.tool_calls[0]?.error?.details?.reconciliation as { status?: string } | undefined)?.status,

@@ -1,0 +1,351 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://p4home.local/contracts/device-protocol/v3/messages/payloads.schema.json",
+  "title": "P4 Device Protocol v3 Human Avatar Runtime Payloads",
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    "actorId": { "const": "human_avatar" },
+    "roomId": { "enum": ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"] },
+    "activity": { "enum": ["idle", "sleep"] },
+    "objectId": { "enum": ["living_room.sofa", "study.desk", "living_room.window"] },
+    "objectAction": { "enum": ["go_to", "sit", "look_at", "interact"] },
+    "toolName": { "enum": ["character.get_state", "character.go_to_room", "character.set_activity", "character.say", "world.get_snapshot", "character.go_to", "character.sit", "character.look_at", "character.interact"] },
+    "characterState": {
+      "type": "object",
+      "required": ["room_id", "activity", "speaking", "active_action_id", "target_object_id", "pose"],
+      "properties": {
+        "room_id": { "$ref": "#/$defs/roomId" },
+        "activity": { "$ref": "#/$defs/activity" },
+        "speaking": { "type": "boolean" },
+        "active_action_id": { "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] },
+        "target_object_id": { "oneOf": [{ "$ref": "#/$defs/objectId" }, { "type": "null" }] },
+        "pose": { "enum": ["standing", "sitting"] }
+      },
+      "allOf": [
+        { "if": { "properties": { "target_object_id": { "type": "null" } }, "required": ["target_object_id"] }, "then": { "properties": { "pose": { "const": "standing" } } } },
+        { "if": { "properties": { "target_object_id": { "const": "living_room.sofa" } }, "required": ["target_object_id"] }, "then": { "properties": { "room_id": { "const": "living_room" } } } },
+        { "if": { "properties": { "target_object_id": { "const": "study.desk" } }, "required": ["target_object_id"] }, "then": { "properties": { "room_id": { "const": "study" }, "pose": { "const": "standing" } } } },
+        { "if": { "properties": { "target_object_id": { "const": "living_room.window" } }, "required": ["target_object_id"] }, "then": { "properties": { "room_id": { "const": "living_room" }, "pose": { "const": "standing" } } } },
+        { "if": { "properties": { "pose": { "const": "sitting" } }, "required": ["pose"] }, "then": { "properties": { "target_object_id": { "const": "living_room.sofa" } } } }
+      ],
+      "additionalProperties": false
+    },
+    "objectCapability": {
+      "type": "object",
+      "required": ["object_id", "room_id", "supported_actions", "available"],
+      "properties": {
+        "object_id": { "$ref": "#/$defs/objectId" },
+        "room_id": { "$ref": "#/$defs/roomId" },
+        "supported_actions": { "type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": { "$ref": "#/$defs/objectAction" } },
+        "available": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "sofaCapability": {
+      "allOf": [
+        { "$ref": "#/$defs/objectCapability" },
+        { "properties": { "object_id": { "const": "living_room.sofa" }, "room_id": { "const": "living_room" }, "supported_actions": { "const": ["go_to", "sit", "look_at", "interact"] } } }
+      ]
+    },
+    "deskCapability": {
+      "allOf": [
+        { "$ref": "#/$defs/objectCapability" },
+        { "properties": { "object_id": { "const": "study.desk" }, "room_id": { "const": "study" }, "supported_actions": { "const": ["go_to", "look_at", "interact"] } } }
+      ]
+    },
+    "windowCapability": {
+      "allOf": [
+        { "$ref": "#/$defs/objectCapability" },
+        { "properties": { "object_id": { "const": "living_room.window" }, "room_id": { "const": "living_room" }, "supported_actions": { "const": ["go_to", "look_at", "interact"] } } }
+      ]
+    },
+    "capabilityArray": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        { "$ref": "#/$defs/sofaCapability" },
+        { "$ref": "#/$defs/deskCapability" },
+        { "$ref": "#/$defs/windowCapability" }
+      ],
+      "items": false
+    },
+    "objectState": {
+      "type": "object",
+      "required": ["object_id", "room_id", "available", "occupied"],
+      "properties": {
+        "object_id": { "$ref": "#/$defs/objectId" },
+        "room_id": { "$ref": "#/$defs/roomId" },
+        "available": { "type": "boolean" },
+        "occupied": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "sofaState": {
+      "allOf": [
+        { "$ref": "#/$defs/objectState" },
+        { "properties": { "object_id": { "const": "living_room.sofa" }, "room_id": { "const": "living_room" } } }
+      ]
+    },
+    "deskState": {
+      "allOf": [
+        { "$ref": "#/$defs/objectState" },
+        { "properties": { "object_id": { "const": "study.desk" }, "room_id": { "const": "study" } } }
+      ]
+    },
+    "windowState": {
+      "allOf": [
+        { "$ref": "#/$defs/objectState" },
+        { "properties": { "object_id": { "const": "living_room.window" }, "room_id": { "const": "living_room" } } }
+      ]
+    },
+    "objectArray": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        { "$ref": "#/$defs/sofaState" },
+        { "$ref": "#/$defs/deskState" },
+        { "$ref": "#/$defs/windowState" }
+      ],
+      "items": false
+    },
+    "deviceHello": {
+      "type": "object",
+      "required": ["boot_id", "firmware_version", "protocol_versions", "connection_reason"],
+      "properties": {
+        "boot_id": { "$ref": "#/$defs/id" },
+        "firmware_version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "protocol_versions": { "type": "array", "const": [1, 2, 3] },
+        "connection_reason": { "enum": ["boot", "reconnect", "manual", "test"] }
+      },
+      "additionalProperties": false
+    },
+    "deviceCapabilities": {
+      "type": "object",
+      "required": ["selected_protocol_version", "actor_id", "rooms", "actions", "objects", "limits"],
+      "properties": {
+        "selected_protocol_version": { "const": 3 },
+        "actor_id": { "$ref": "#/$defs/actorId" },
+        "rooms": { "type": "array", "const": ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"] },
+        "actions": { "type": "array", "const": ["character.get_state", "character.go_to_room", "character.set_activity", "character.say", "world.get_snapshot", "character.go_to", "character.sit", "character.look_at", "character.interact"] },
+        "objects": { "$ref": "#/$defs/capabilityArray" },
+        "limits": {
+          "type": "object",
+          "required": ["max_json_frame_bytes", "action_queue_capacity", "say_text_max_chars", "action_timeout_min_ms", "action_timeout_max_ms", "idempotency_retention_ms"],
+          "properties": {
+            "max_json_frame_bytes": { "const": 16384 },
+            "action_queue_capacity": { "const": 8 },
+            "say_text_max_chars": { "const": 256 },
+            "action_timeout_min_ms": { "const": 100 },
+            "action_timeout_max_ms": { "const": 120000 },
+            "idempotency_retention_ms": { "const": 600000 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "worldSnapshot": {
+      "type": "object",
+      "required": ["snapshot_id", "reason", "actor_id", "state_version", "observed_at_ms", "character", "objects"],
+      "properties": {
+        "snapshot_id": { "$ref": "#/$defs/id" },
+        "reason": { "enum": ["connect", "reconnect", "resync", "requested"] },
+        "actor_id": { "$ref": "#/$defs/actorId" },
+        "state_version": { "type": "integer", "minimum": 0 },
+        "observed_at_ms": { "type": "integer", "minimum": 0 },
+        "character": { "$ref": "#/$defs/characterState" },
+        "objects": { "$ref": "#/$defs/objectArray" }
+      },
+      "additionalProperties": false
+    },
+    "worldChanged": {
+      "type": "object",
+      "required": ["actor_id", "state_version", "observed_at_ms", "character", "objects"],
+      "properties": {
+        "actor_id": { "$ref": "#/$defs/actorId" },
+        "state_version": { "type": "integer", "minimum": 1 },
+        "observed_at_ms": { "type": "integer", "minimum": 0 },
+        "character": { "$ref": "#/$defs/characterState" },
+        "objects": { "$ref": "#/$defs/objectArray" }
+      },
+      "additionalProperties": false
+    },
+    "targetArguments": {
+      "type": "object",
+      "required": ["target_id"],
+      "properties": { "target_id": { "$ref": "#/$defs/objectId" } },
+      "additionalProperties": false
+    },
+    "sitArguments": {
+      "type": "object",
+      "required": ["target_id"],
+      "properties": { "target_id": { "const": "living_room.sofa" } },
+      "additionalProperties": false
+    },
+    "actionRequest": {
+      "type": "object",
+      "required": ["action_id", "actor_id", "tool", "arguments", "timeout_ms", "origin"],
+      "properties": {
+        "action_id": { "$ref": "#/$defs/id" },
+        "actor_id": { "$ref": "#/$defs/actorId" },
+        "tool": { "$ref": "#/$defs/toolName" },
+        "arguments": { "type": "object" },
+        "timeout_ms": { "type": "integer", "minimum": 100, "maximum": 120000 },
+        "origin": { "enum": ["user", "agent", "autonomy", "test"] }
+      },
+      "allOf": [{
+        "oneOf": [
+          { "properties": { "tool": { "const": "character.get_state" }, "arguments": { "$ref": "https://p4home.local/contracts/device-protocol/v1/messages/payloads.schema.json#/$defs/emptyArguments" } } },
+          { "properties": { "tool": { "const": "character.go_to_room" }, "arguments": { "$ref": "https://p4home.local/contracts/device-protocol/v1/messages/payloads.schema.json#/$defs/goToRoomArguments" } } },
+          { "properties": { "tool": { "const": "character.set_activity" }, "arguments": { "$ref": "https://p4home.local/contracts/device-protocol/v1/messages/payloads.schema.json#/$defs/setActivityArguments" } } },
+          { "properties": { "tool": { "const": "character.say" }, "arguments": { "$ref": "https://p4home.local/contracts/device-protocol/v1/messages/payloads.schema.json#/$defs/sayArguments" } } },
+          { "properties": { "tool": { "const": "world.get_snapshot" }, "arguments": { "$ref": "https://p4home.local/contracts/device-protocol/v1/messages/payloads.schema.json#/$defs/emptyArguments" } } },
+          { "properties": { "tool": { "const": "character.go_to" }, "arguments": { "$ref": "#/$defs/targetArguments" } } },
+          { "properties": { "tool": { "const": "character.sit" }, "arguments": { "$ref": "#/$defs/sitArguments" } } },
+          { "properties": { "tool": { "const": "character.look_at" }, "arguments": { "$ref": "#/$defs/targetArguments" } } },
+          { "properties": { "tool": { "const": "character.interact" }, "arguments": { "$ref": "#/$defs/targetArguments" } } }
+        ]
+      }],
+      "additionalProperties": false
+    },
+    "actionAccepted": {
+      "type": "object",
+      "required": ["action_id", "actor_id", "queue_position", "accepted_at_ms"],
+      "properties": {
+        "action_id": { "$ref": "#/$defs/id" },
+        "actor_id": { "$ref": "#/$defs/actorId" },
+        "queue_position": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "accepted_at_ms": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "actionStarted": {
+      "type": "object",
+      "required": ["action_id", "actor_id", "started_at_ms"],
+      "properties": {
+        "action_id": { "$ref": "#/$defs/id" },
+        "actor_id": { "$ref": "#/$defs/actorId" },
+        "started_at_ms": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "actionCancel": {
+      "type": "object",
+      "required": ["action_id", "actor_id", "reason"],
+      "properties": {
+        "action_id": { "$ref": "#/$defs/id" },
+        "actor_id": { "$ref": "#/$defs/actorId" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "additionalProperties": false
+    },
+    "objectActionResult": {
+      "type": "object",
+      "required": ["object_id", "action", "pose"],
+      "properties": {
+        "object_id": { "$ref": "#/$defs/objectId" },
+        "action": { "$ref": "#/$defs/objectAction" },
+        "pose": { "enum": ["standing", "sitting"] }
+      },
+      "additionalProperties": false
+    },
+    "goToObjectResult": {
+      "allOf": [
+        { "$ref": "#/$defs/objectActionResult" },
+        { "properties": { "action": { "const": "go_to" }, "pose": { "const": "standing" } } }
+      ]
+    },
+    "sitObjectResult": {
+      "allOf": [
+        { "$ref": "#/$defs/objectActionResult" },
+        { "properties": { "object_id": { "const": "living_room.sofa" }, "action": { "const": "sit" }, "pose": { "const": "sitting" } } }
+      ]
+    },
+    "lookAtObjectResult": {
+      "allOf": [
+        { "$ref": "#/$defs/objectActionResult" },
+        { "properties": { "action": { "const": "look_at" } } },
+        { "oneOf": [
+          { "properties": { "object_id": { "const": "living_room.sofa" } } },
+          { "properties": { "object_id": { "enum": ["study.desk", "living_room.window"] }, "pose": { "const": "standing" } } }
+        ] }
+      ]
+    },
+    "interactObjectResult": {
+      "allOf": [
+        { "$ref": "#/$defs/objectActionResult" },
+        { "properties": { "action": { "const": "interact" } } },
+        { "oneOf": [
+          { "properties": { "object_id": { "const": "living_room.sofa" } } },
+          { "properties": { "object_id": { "enum": ["study.desk", "living_room.window"] }, "pose": { "const": "standing" } } }
+        ] }
+      ]
+    },
+    "actionCompleted": {
+      "type": "object",
+      "required": ["action_id", "actor_id", "tool", "completed_at_ms", "state_version", "result"],
+      "properties": {
+        "action_id": { "$ref": "#/$defs/id" },
+        "actor_id": { "$ref": "#/$defs/actorId" },
+        "tool": { "$ref": "#/$defs/toolName" },
+        "completed_at_ms": { "type": "integer", "minimum": 0 },
+        "state_version": { "type": "integer", "minimum": 0 },
+        "result": { "type": "object" }
+      },
+      "allOf": [{
+        "oneOf": [
+          { "properties": { "tool": { "const": "character.get_state" }, "result": { "$ref": "#/$defs/characterState" } } },
+          { "properties": { "tool": { "const": "character.go_to_room" }, "result": { "$ref": "https://p4home.local/contracts/device-protocol/v1/messages/payloads.schema.json#/$defs/goToRoomResult" } } },
+          { "properties": { "tool": { "const": "character.set_activity" }, "result": { "$ref": "https://p4home.local/contracts/device-protocol/v1/messages/payloads.schema.json#/$defs/setActivityResult" } } },
+          { "properties": { "tool": { "const": "character.say" }, "result": { "$ref": "https://p4home.local/contracts/device-protocol/v1/messages/payloads.schema.json#/$defs/sayResult" } } },
+          { "properties": { "tool": { "const": "world.get_snapshot" }, "result": { "$ref": "#/$defs/worldSnapshotResult" } } },
+          { "properties": { "tool": { "const": "character.go_to" }, "result": { "$ref": "#/$defs/goToObjectResult" } } },
+          { "properties": { "tool": { "const": "character.sit" }, "result": { "$ref": "#/$defs/sitObjectResult" } } },
+          { "properties": { "tool": { "const": "character.look_at" }, "result": { "$ref": "#/$defs/lookAtObjectResult" } } },
+          { "properties": { "tool": { "const": "character.interact" }, "result": { "$ref": "#/$defs/interactObjectResult" } } }
+        ]
+      }],
+      "additionalProperties": false
+    },
+    "worldSnapshotResult": {
+      "type": "object",
+      "required": ["actor_id", "state_version", "observed_at_ms", "character", "objects"],
+      "properties": {
+        "actor_id": { "$ref": "#/$defs/actorId" },
+        "state_version": { "type": "integer", "minimum": 0 },
+        "observed_at_ms": { "type": "integer", "minimum": 0 },
+        "character": { "$ref": "#/$defs/characterState" },
+        "objects": { "$ref": "#/$defs/objectArray" }
+      },
+      "additionalProperties": false
+    },
+    "actionError": {
+      "type": "object",
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": { "enum": ["INVALID_ARGUMENT", "UNSUPPORTED_TOOL", "UNKNOWN_ROOM", "QUEUE_FULL", "DEADLINE_EXCEEDED", "CANCELLED", "DEVICE_BUSY", "ACTION_ID_CONFLICT", "UNKNOWN_OBJECT", "UNSUPPORTED_OBJECT_ACTION", "OBJECT_UNAVAILABLE", "OBJECT_OCCUPIED", "OBJECT_NOT_REACHED", "INTERNAL"] },
+        "message": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "retryable": { "type": "boolean" },
+        "details": { "type": "object" }
+      },
+      "allOf": [
+        { "if": { "properties": { "code": { "enum": ["OBJECT_UNAVAILABLE", "OBJECT_OCCUPIED"] } }, "required": ["code"] }, "then": { "properties": { "retryable": { "const": true } } } },
+        { "if": { "properties": { "code": { "enum": ["UNKNOWN_OBJECT", "UNSUPPORTED_OBJECT_ACTION", "OBJECT_NOT_REACHED"] } }, "required": ["code"] }, "then": { "properties": { "retryable": { "const": false } } } }
+      ],
+      "additionalProperties": false
+    },
+    "actionFailed": {
+      "type": "object",
+      "required": ["action_id", "actor_id", "failed_at_ms", "error"],
+      "properties": {
+        "action_id": { "$ref": "#/$defs/id" },
+        "actor_id": { "$ref": "#/$defs/actorId" },
+        "failed_at_ms": { "type": "integer", "minimum": 0 },
+        "error": { "$ref": "#/$defs/actionError" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

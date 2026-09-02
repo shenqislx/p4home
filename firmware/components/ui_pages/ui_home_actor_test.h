@@ -13,6 +13,15 @@ typedef struct {
     world_object_animation_t animation;
     bool moving;
     char target_object_id[WORLD_OBJECT_ID_MAX_BYTES + 1U];
+    int16_t pet_art_x;
+    int16_t pet_floor_y;
+    int16_t pet_target_art_x;
+    int16_t pet_target_floor_y;
+    size_t pet_room;
+    size_t pet_target_room;
+    uint16_t pet_ticks_until_target;
+    uint32_t pet_target_revision;
+    bool pet_moving;
 } ui_home_actor_render_snapshot_t;
 
 void ui_home_actor_get_render_snapshot(ui_home_actor_render_snapshot_t *snapshot);

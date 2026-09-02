@@ -11,9 +11,19 @@ import {
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const DEVICE_V1_ROOT = `${REPOSITORY_ROOT}contracts/device-protocol/v1`;
 const DEVICE_V2_ROOT = `${REPOSITORY_ROOT}contracts/device-protocol/v2`;
+const DEVICE_V3_ROOT = `${REPOSITORY_ROOT}contracts/device-protocol/v3`;
 const TOOLS_V1_ROOT = `${REPOSITORY_ROOT}contracts/tools/v1`;
 const TOOLS_V2_ROOT = `${REPOSITORY_ROOT}contracts/tools/v2`;
+const TOOLS_V3_ROOT = `${REPOSITORY_ROOT}contracts/tools/v3`;
 const WORLD_ROOT = `${REPOSITORY_ROOT}contracts/world/v1`;
+
+const HUMAN_AVATAR_TOOL_NAMES = [
+  "character.go_to_room",
+  "character.go_to",
+  "character.sit",
+  "character.look_at",
+  "character.interact",
+] as const;
 
 const OBJECT_TOOL_NAMES = [
   "character.go_to",
@@ -86,6 +96,18 @@ export interface ObjectRuntimeDeviceMessage {
   readonly payload: Record<string, unknown>;
 }
 
+export interface HumanAvatarDeviceMessage {
+  readonly protocol_version: 3;
+  readonly message_id: string;
+  readonly correlation_id: string | null;
+  readonly device_id: string;
+  readonly session_id: string;
+  readonly seq: number;
+  readonly sent_at_ms: number;
+  readonly type: string;
+  readonly payload: Record<string, unknown>;
+}
+
 export interface ObjectRuntimeToolResult {
   readonly schema_version: 2;
   readonly tool_call_id: string;
@@ -102,6 +124,26 @@ export interface ObjectRuntimeToolDefinition {
 }
 
 export interface ObjectRuntimeToolCallInput {
+  readonly name: string;
+  readonly arguments: Record<string, unknown>;
+}
+
+export interface HumanAvatarToolResult {
+  readonly schema_version: 3;
+  readonly tool_call_id: string;
+  readonly name: (typeof HUMAN_AVATAR_TOOL_NAMES)[number];
+  readonly status: "success" | "error";
+  readonly result: Record<string, unknown> | null;
+  readonly error: Record<string, unknown> | null;
+}
+
+export interface HumanAvatarToolDefinition {
+  readonly name: (typeof HUMAN_AVATAR_TOOL_NAMES)[number];
+  readonly description: string;
+  readonly parameters: Readonly<Record<string, unknown>>;
+}
+
+export interface HumanAvatarToolCallInput {
   readonly name: string;
   readonly arguments: Record<string, unknown>;
 }
@@ -153,7 +195,9 @@ function createAjv(): Ajv2020 {
 }
 
 let objectRuntimeMessageValidator: ValidateFunction | undefined;
+let humanAvatarMessageValidator: ValidateFunction | undefined;
 let objectRuntimeToolResultValidator: ValidateFunction | undefined;
+let humanAvatarToolResultValidator: ValidateFunction | undefined;
 
 function getObjectRuntimeMessageValidator(): ValidateFunction {
   if (objectRuntimeMessageValidator !== undefined) {
@@ -169,6 +213,20 @@ function getObjectRuntimeMessageValidator(): ValidateFunction {
   return objectRuntimeMessageValidator;
 }
 
+function getHumanAvatarMessageValidator(): ValidateFunction {
+  if (humanAvatarMessageValidator !== undefined) {
+    return humanAvatarMessageValidator;
+  }
+  const ajv = createAjv();
+  ajv.addSchema(readJson<AnySchema>(`${DEVICE_V1_ROOT}/messages/payloads.schema.json`));
+  ajv.addSchema(readJson<AnySchema>(`${DEVICE_V3_ROOT}/envelope.schema.json`));
+  ajv.addSchema(readJson<AnySchema>(`${DEVICE_V3_ROOT}/messages/payloads.schema.json`));
+  humanAvatarMessageValidator = ajv.compile(
+    readJson<AnySchema>(`${DEVICE_V3_ROOT}/message.schema.json`),
+  );
+  return humanAvatarMessageValidator;
+}
+
 function getObjectRuntimeToolResultValidator(): ValidateFunction {
   if (objectRuntimeToolResultValidator === undefined) {
     objectRuntimeToolResultValidator = createAjv().compile(
@@ -176,6 +234,15 @@ function getObjectRuntimeToolResultValidator(): ValidateFunction {
     );
   }
   return objectRuntimeToolResultValidator;
+}
+
+function getHumanAvatarToolResultValidator(): ValidateFunction {
+  if (humanAvatarToolResultValidator === undefined) {
+    humanAvatarToolResultValidator = createAjv().compile(
+      readJson<AnySchema>(`${TOOLS_V3_ROOT}/tool-result.schema.json`),
+    );
+  }
+  return humanAvatarToolResultValidator;
 }
 
 function assertObjectList(
@@ -238,7 +305,9 @@ function assertRuntimeSnapshot(payload: Record<string, unknown>): void {
   }
 }
 
-function assertMessageSemantics(message: ObjectRuntimeDeviceMessage): void {
+function assertMessageSemantics(
+  message: ObjectRuntimeDeviceMessage | HumanAvatarDeviceMessage,
+): void {
   const payload = message.payload;
   if (message.type === "device.capabilities") {
     assertObjectList(payload.objects, true);
@@ -252,6 +321,19 @@ function assertMessageSemantics(message: ObjectRuntimeDeviceMessage): void {
   }
 }
 
+function assertHumanAvatarBinding(message: HumanAvatarDeviceMessage): void {
+  if (message.type === "device.capabilities"
+      || message.type === "world.snapshot"
+      || message.type === "world.changed"
+      || message.type.startsWith("action.")) {
+    if (message.payload.actor_id !== "human_avatar") {
+      throw new ObjectRuntimeContractError(
+        "Device Protocol v3 payload is not bound to human_avatar",
+      );
+    }
+  }
+}
+
 export function validateObjectRuntimeDeviceMessage<T extends ObjectRuntimeDeviceMessage>(
   message: unknown,
 ): T {
@@ -262,6 +344,21 @@ export function validateObjectRuntimeDeviceMessage<T extends ObjectRuntimeDevice
     );
   }
   const cloned = structuredClone(message) as T;
+  assertMessageSemantics(cloned);
+  return cloned;
+}
+
+export function validateHumanAvatarDeviceMessage<T extends HumanAvatarDeviceMessage>(
+  message: unknown,
+): T {
+  const validate = getHumanAvatarMessageValidator();
+  if (!validate(message)) {
+    throw new ObjectRuntimeContractError(
+      `Device Protocol v3 message: ${formatErrors(validate.errors)}`,
+    );
+  }
+  const cloned = structuredClone(message) as T;
+  assertHumanAvatarBinding(cloned);
   assertMessageSemantics(cloned);
   return cloned;
 }
@@ -282,6 +379,18 @@ export function validateObjectRuntimeToolResult<T extends ObjectRuntimeToolResul
     assertCharacterSemantics(cloned.result);
   }
   return cloned;
+}
+
+export function validateHumanAvatarToolResult<T extends HumanAvatarToolResult>(
+  result: unknown,
+): T {
+  const validate = getHumanAvatarToolResultValidator();
+  if (!validate(result)) {
+    throw new ObjectRuntimeContractError(
+      `Human avatar Tool Schema v3 result: ${formatErrors(validate.errors)}`,
+    );
+  }
+  return structuredClone(result) as T;
 }
 
 function readObjectRuntimeToolCatalog(): ToolCatalog {
@@ -318,6 +427,60 @@ export function validateObjectRuntimeToolCalls(
     const validate = validators.get(call.name);
     if (validate === undefined) {
       throw new ObjectRuntimeContractError(`tool ${call.name} is not in Tool Schema v2`);
+    }
+    if (!validate(call.arguments)) {
+      throw new ObjectRuntimeContractError(
+        `${call.name}: ${formatErrors(validate.errors)}`,
+      );
+    }
+    return { name: call.name, arguments: structuredClone(call.arguments) };
+  });
+}
+
+function readHumanAvatarToolCatalog(): ToolCatalog {
+  const catalog = readJson<ToolCatalog>(`${TOOLS_V3_ROOT}/tool-catalog.json`);
+  const readme = readFileSync(`${TOOLS_V3_ROOT}/README.md`, "utf8");
+  const names = catalog.tools.map((tool) => tool.name);
+  if (
+    catalog.schema_version !== 3
+    || catalog.execution_policy.max_calls_per_turn !== 4
+    || JSON.stringify(names) !== JSON.stringify(HUMAN_AVATAR_TOOL_NAMES)
+    || !readme.includes("Human avatar isolated contract")
+  ) {
+    throw new ObjectRuntimeContractError(
+      "runtime may import only the isolated Human avatar Tool Schema v3",
+    );
+  }
+  return catalog;
+}
+
+export function getHumanAvatarToolDefinitions(): readonly HumanAvatarToolDefinition[] {
+  return readHumanAvatarToolCatalog().tools.map((tool) => ({
+    name: tool.name as HumanAvatarToolDefinition["name"],
+    description: tool.description,
+    parameters: structuredClone(tool.parameters) as Record<string, unknown>,
+  }));
+}
+
+export function validateHumanAvatarToolCalls(
+  calls: readonly HumanAvatarToolCallInput[],
+): readonly HumanAvatarToolCallInput[] {
+  const catalog = readHumanAvatarToolCatalog();
+  if (calls.length > catalog.execution_policy.max_calls_per_turn) {
+    throw new ObjectRuntimeContractError(
+      `Human avatar Tool Schema v3 allows at most ${catalog.execution_policy.max_calls_per_turn} calls per turn`,
+    );
+  }
+  const ajv = createAjv();
+  const validators = new Map(
+    catalog.tools.map((tool) => [tool.name, ajv.compile(tool.parameters)] as const),
+  );
+  return calls.map((call) => {
+    const validate = validators.get(call.name);
+    if (validate === undefined) {
+      throw new ObjectRuntimeContractError(
+        `tool ${call.name} is not in Human avatar Tool Schema v3`,
+      );
     }
     if (!validate(call.arguments)) {
       throw new ObjectRuntimeContractError(

@@ -10,6 +10,7 @@ import type { RunAuditTrace } from "@p4home/storage-sqlite";
 import type { RoleRunAuditOptions } from "./role-audit.ts";
 import {
   assertContractId,
+  isHumanAvatarAssignment,
   type UserTextInteraction,
 } from "./role-contracts.ts";
 import {
@@ -33,6 +34,8 @@ import { RoleSessionRegistry } from "./role-session.ts";
 import type { RobotHaReadRuntime } from "./robot-ha-read-runner.ts";
 import type { RobotHaWriteRuntime } from "./robot-ha-write-runner.ts";
 import type { RoleMemoryRuntime } from "./role-memory.ts";
+import type { HumanAvatarDeviceRuntime } from "./human-avatar-action-runner.ts";
+import { getHumanAvatarExecutorProfile } from "./role-profiles.ts";
 import {
   defaultLowPriorityCatRunRegistry,
   type LowPriorityCatRunRegistry,
@@ -63,6 +66,7 @@ export interface RunRoleInteractionOptions {
   readonly audit_finalize_timeout_ms?: number;
   readonly clock?: () => number;
   readonly robot_ha?: RobotHaReadRuntime | RobotHaWriteRuntime;
+  readonly human_avatar?: HumanAvatarDeviceRuntime;
   readonly memory?: RoleMemoryRuntime;
   readonly human_only?: boolean;
   readonly cat_run_registry?: LowPriorityCatRunRegistry;
@@ -358,7 +362,8 @@ export async function runRoleInteraction(
   const auditTrackers: AssignmentAuditTracker[] = [];
   const streamSingleHuman = routing.plan.assignments.length === 1
     && routing.plan.assignments[0]?.role_id === "human"
-    && routing.plan.assignments[0]?.mode === "respond";
+    && routing.plan.assignments[0]?.mode === "respond"
+    && !("capability" in routing.plan.assignments[0]);
   const scheduled = routing.plan.assignments.map(async (assignment, index): Promise<AssignmentRunResult> => {
     const runId = assignmentRunId(options.run_id, index, routing.plan.assignments.length);
     const auditTracker: AssignmentAuditTracker = {
@@ -387,6 +392,7 @@ export async function runRoleInteraction(
           ...(executionSignal === undefined ? {} : { signal: executionSignal }),
           ...(assignmentAudit === undefined ? {} : { audit: assignmentAudit }),
           ...(options.robot_ha === undefined ? {} : { robot_ha: options.robot_ha }),
+          ...(options.human_avatar === undefined ? {} : { human_avatar: options.human_avatar }),
           ...(options.memory === undefined ? {} : { memory: options.memory }),
           ...(streamSingleHuman && options.on_human_speech_segment !== undefined
             ? { on_human_speech_segment: options.on_human_speech_segment }
@@ -519,8 +525,17 @@ export async function runRoleInteraction(
             completed_at_ms: syntheticTime + 1,
           })),
           actions: existing.actions
-            .filter((action) => action.status !== "completed" && action.status !== "failed")
-            .map((action) => ({ ...action, status: "failed" as const })),
+            .filter((action) => ![
+              "completed", "failed", "cancelled", "unknown",
+            ].includes(action.status))
+            .map((action) => ({
+              ...action,
+              status: item.run.status === "cancelled"
+                ? "cancelled" as const
+                : item.run.status === "timed_out"
+                  ? "unknown" as const
+                  : "failed" as const,
+            })),
           events: [{
             event_id: `${item.run.run_id}:event:recovered-terminal`,
             run_id: item.run.run_id,
@@ -547,7 +562,9 @@ export async function runRoleInteraction(
         continue;
       }
       const session = options.sessions.get(item.assignment.role_id);
-      const profile = session.profile;
+      const profile = isHumanAvatarAssignment(item.assignment)
+        ? getHumanAvatarExecutorProfile()
+        : session.profile;
       const profileId = `${profile.revision.replace("/", "-")}:${profile.role_id}`;
       const sessionId = suffixedId(item.run.run_id, ":synthetic-session");
       const inputText = options.interaction.text.slice(
@@ -580,6 +597,9 @@ export async function runRoleInteraction(
             route_plan_id: routing.plan.route_plan_id,
             assignment_id: item.assignment.assignment_id,
             role_id: item.assignment.role_id,
+            ...(isHumanAvatarAssignment(item.assignment)
+              ? { assignment_capability: item.assignment.capability }
+              : {}),
             source_span: item.assignment.source_span,
             synthetic: true,
           },
@@ -596,6 +616,9 @@ export async function runRoleInteraction(
             role_id: item.assignment.role_id,
             route_reason: routing.plan.reason,
             assignment_mode: item.assignment.mode,
+            ...(isHumanAvatarAssignment(item.assignment)
+              ? { assignment_capability: item.assignment.capability }
+              : {}),
             source_span: item.assignment.source_span,
             synthetic: true,
           },

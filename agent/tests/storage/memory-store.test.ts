@@ -1106,7 +1106,7 @@ test("schema v3 migrates atomically to v4 and preserves memory data", async () =
       assert.deepEqual(preserved?.tags, ["migration"]);
     }
     const database = new DatabaseSync(databasePath, { readOnly: true });
-    assert.equal(database.prepare("PRAGMA user_version").get()?.user_version, 4);
+    assert.equal(database.prepare("PRAGMA user_version").get()?.user_version, 5);
     database.close();
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -1207,7 +1207,7 @@ for (const oldVersion of [1, 2] as const) {
         await migrated.createMemory(memory(`migrated-v${oldVersion}`));
       }
       const database = new DatabaseSync(databasePath, { readOnly: true });
-      assert.equal(database.prepare("PRAGMA user_version").get()?.user_version, 4);
+      assert.equal(database.prepare("PRAGMA user_version").get()?.user_version, 5);
       assert.equal(
         database.prepare("SELECT COUNT(*) AS count FROM memories").get()?.count,
         1,

@@ -1,5 +1,7 @@
 import type { RoomId } from "@p4home/domain-p4home";
 
+export type { DeviceToolName } from "./device-protocol.ts";
+
 import {
   decodeDeviceMessage,
   encodeDeviceMessage,
@@ -16,6 +18,8 @@ import {
   type DeviceProtocolVersion,
   type DeviceObjectCapability,
   type DeviceToolName,
+  HUMAN_AVATAR_ACTOR_ID,
+  type HumanAvatarActorId,
   type ObjectRuntimeCharacterState,
   type WorldSnapshotPayload,
 } from "./device-protocol.ts";
@@ -66,6 +70,7 @@ export interface DeviceActionReconciliation {
 }
 
 export interface DeviceWorldChangedObservation {
+  readonly actor_id?: HumanAvatarActorId;
   readonly state_version: number;
   readonly observed_at_ms: number;
   readonly character: WorldSnapshotPayload["character"];
@@ -74,12 +79,15 @@ export interface DeviceWorldChangedObservation {
 
 export interface DeviceActionSpec {
   readonly action_id: string;
+  readonly actor_id?: HumanAvatarActorId;
   readonly tool: DeviceToolName;
   readonly arguments: Record<string, unknown>;
   readonly timeout_ms: number;
   readonly origin?: DeviceActionOrigin;
   readonly wait_timeout_ms?: number;
   readonly signal?: AbortSignal;
+  /** Called once after all synchronous checks and immediately before transport send. */
+  readonly on_dispatched?: () => void;
 }
 
 export interface DeviceAdapterActionRecord {
@@ -115,6 +123,7 @@ export class DeviceActionAdapterError extends Error {
 export interface DeviceActionAdapterOptions {
   readonly device_id: string;
   readonly protocol_version?: DeviceProtocolVersion;
+  readonly actor_id?: HumanAvatarActorId;
   readonly now?: () => number;
   readonly monotonic_now?: () => number;
   readonly waiter_capacity?: number;
@@ -165,6 +174,7 @@ function canonicalize(value: unknown): unknown {
 
 function fingerprint(request: ActionRequestPayload): string {
   return JSON.stringify(canonicalize({
+    actor_id: request.actor_id,
     tool: request.tool,
     arguments: request.arguments,
   }));
@@ -178,6 +188,7 @@ export class DeviceWebSocketActionAdapter {
   readonly #connection: DeviceWebSocketConnection;
   readonly #deviceId: string;
   readonly #protocolVersion: DeviceProtocolVersion;
+  readonly #actorId: HumanAvatarActorId | null;
   readonly #now: () => number;
   readonly #monotonicNow: () => number;
   readonly #waiterCapacity: number;
@@ -208,8 +219,19 @@ export class DeviceWebSocketActionAdapter {
     this.#connection = connection;
     this.#deviceId = options.device_id;
     this.#protocolVersion = options.protocol_version ?? 1;
-    if (this.#protocolVersion !== 1 && this.#protocolVersion !== 2) {
-      throw new RangeError("protocol_version must be 1 or 2");
+    if (![1, 2, 3].includes(this.#protocolVersion)) {
+      throw new RangeError("protocol_version must be 1, 2 or 3");
+    }
+    if (this.#protocolVersion === 3) {
+      if (options.actor_id !== HUMAN_AVATAR_ACTOR_ID) {
+        throw new TypeError("Device Protocol v3 adapter must bind human_avatar");
+      }
+      this.#actorId = HUMAN_AVATAR_ACTOR_ID;
+    } else {
+      if (options.actor_id !== undefined) {
+        throw new TypeError("actor_id is supported only by Device Protocol v3");
+      }
+      this.#actorId = null;
     }
     this.#now = options.now ?? Date.now;
     this.#monotonicNow = options.monotonic_now ?? (() => performance.now());
@@ -246,6 +268,14 @@ export class DeviceWebSocketActionAdapter {
       ...structuredClone(object),
       available: observedAvailability.get(object.object_id) ?? object.available,
     }));
+  }
+
+  public get room_capabilities(): readonly RoomId[] {
+    return [...(this.#capabilities?.rooms ?? [])];
+  }
+
+  public get action_capabilities(): readonly DeviceToolName[] {
+    return [...(this.#capabilities?.actions ?? [])];
   }
 
   public get last_snapshot(): WorldSnapshotPayload | null {
@@ -289,6 +319,13 @@ export class DeviceWebSocketActionAdapter {
   }
 
   public async executeAction(spec: DeviceActionSpec): Promise<DeviceActionOutcome> {
+    if (this.#protocolVersion === 3) {
+      if (spec.actor_id !== undefined && spec.actor_id !== this.#actorId) {
+        throw new TypeError("action actor_id does not match the v3 adapter binding");
+      }
+    } else if (spec.actor_id !== undefined) {
+      throw new TypeError("actor_id actions require Device Protocol v3");
+    }
     if (spec.signal?.aborted === true) {
       return {
         status: "failed",
@@ -306,6 +343,7 @@ export class DeviceWebSocketActionAdapter {
     this.#pruneRecords();
     const request: ActionRequestPayload = {
       action_id: spec.action_id,
+      ...(this.#actorId === null ? {} : { actor_id: this.#actorId }),
       tool: spec.tool,
       arguments: structuredClone(spec.arguments),
       timeout_ms: spec.timeout_ms,
@@ -394,10 +432,26 @@ export class DeviceWebSocketActionAdapter {
     this.#waiters.set(spec.action_id, waiter);
     spec.signal?.addEventListener("abort", onAbort!, { once: true });
 
+    let wireSendStarted = false;
     try {
-      await this.#send("action.request", request);
+      await this.#send("action.request", request, undefined, () => {
+        wireSendStarted = true;
+        spec.on_dispatched?.();
+      });
     } catch (error) {
       this.#lastProtocolError = error instanceof Error ? error : new Error(String(error));
+      if (!wireSendStarted) {
+        const currentWaiter = this.#waiters.get(spec.action_id);
+        if (currentWaiter === waiter) {
+          clearTimeout(waiter.timer);
+          waiter.signal?.removeEventListener("abort", waiter.onAbort!);
+          this.#waiters.delete(spec.action_id);
+        }
+        if (existing === undefined && this.#records.get(spec.action_id) === record) {
+          this.#records.delete(spec.action_id);
+        }
+        throw error;
+      }
       this.#finish(spec.action_id, {
         status: "unknown",
         action_id: spec.action_id,
@@ -415,7 +469,11 @@ export class DeviceWebSocketActionAdapter {
       throw new DeviceActionAdapterError("ACTION_NOT_FOUND", `unknown action_id ${actionId}`);
     }
     try {
-      await this.#send("action.cancel", { action_id: actionId, reason });
+      await this.#send("action.cancel", {
+        action_id: actionId,
+        ...(this.#actorId === null ? {} : { actor_id: this.#actorId }),
+        reason,
+      });
     } catch (error) {
       this.#closeAfterSendFailure(error);
       throw error;
@@ -522,6 +580,7 @@ export class DeviceWebSocketActionAdapter {
     type: DeviceMessage["type"],
     payload: Record<string, unknown>,
     preparedMessageId?: string,
+    beforeWireSend?: () => void,
   ): Promise<void> {
     if (!this.#connection.is_open || this.#sessionId === null) {
       throw new DeviceActionAdapterError("NOT_READY", "device connection is not open");
@@ -542,6 +601,11 @@ export class DeviceWebSocketActionAdapter {
     const frame = encodeDeviceMessage(message);
     this.#nextOutgoingSeq = seq + 1;
     try {
+      try {
+        beforeWireSend?.();
+      } catch {
+        // An observer cannot prevent or rewrite an already validated wire send.
+      }
       await this.#connection.send(frame);
     } catch (error) {
       // Delivery may be ambiguous after send() starts. Require a new handshake
@@ -604,12 +668,14 @@ export class DeviceWebSocketActionAdapter {
       if (capabilities.selected_protocol_version !== this.#protocolVersion) {
         throw new TypeError("device selected_protocol_version does not match the adapter");
       }
+      this.#assertActorBinding(capabilities);
       this.#capabilities = structuredClone(capabilities);
       this.#hasCapabilities = true;
       return;
     }
     if (message.type === "world.snapshot") {
       const snapshot = payloadOf<WorldSnapshotPayload & Record<string, unknown>>(message);
+      this.#assertActorBinding(snapshot);
       if (
         this.#resyncInFlight
         && (
@@ -631,6 +697,7 @@ export class DeviceWebSocketActionAdapter {
         return;
       }
       const changed = payloadOf<Record<string, unknown>>(message);
+      this.#assertActorBinding(changed);
       if (
         this.#lastSnapshot !== null
         && typeof changed.state_version === "number"
@@ -640,10 +707,11 @@ export class DeviceWebSocketActionAdapter {
         this.#lastSnapshot = {
           snapshot_id: this.#lastSnapshot.snapshot_id,
           reason: this.#lastSnapshot.reason,
+          ...(this.#actorId === null ? {} : { actor_id: this.#actorId }),
           state_version: changed.state_version,
           observed_at_ms: Number(changed.observed_at_ms),
           character: changed.character as WorldSnapshotPayload["character"],
-          ...(this.#protocolVersion === 2
+          ...(this.#protocolVersion >= 2
             ? {
                 objects: structuredClone(
                   changed.objects as NonNullable<WorldSnapshotPayload["objects"]>,
@@ -652,6 +720,7 @@ export class DeviceWebSocketActionAdapter {
             : {}),
         };
         const observation: DeviceWorldChangedObservation = {
+          ...(this.#actorId === null ? {} : { actor_id: this.#actorId }),
           state_version: changed.state_version,
           observed_at_ms: Number(changed.observed_at_ms),
           character: structuredClone(changed.character as WorldSnapshotPayload["character"]),
@@ -670,15 +739,20 @@ export class DeviceWebSocketActionAdapter {
       return;
     }
     if (message.type === "action.accepted") {
-      this.#setLifecycle(payloadOf<ActionAcceptedPayload & Record<string, unknown>>(message).action_id, "accepted");
+      const accepted = payloadOf<ActionAcceptedPayload & Record<string, unknown>>(message);
+      this.#assertActorBinding(accepted);
+      this.#setLifecycle(accepted.action_id, "accepted");
       return;
     }
     if (message.type === "action.started") {
-      this.#setLifecycle(payloadOf<ActionStartedPayload & Record<string, unknown>>(message).action_id, "started");
+      const started = payloadOf<ActionStartedPayload & Record<string, unknown>>(message);
+      this.#assertActorBinding(started);
+      this.#setLifecycle(started.action_id, "started");
       return;
     }
     if (message.type === "action.completed") {
       const completed = payloadOf<ActionCompletedPayload & Record<string, unknown>>(message);
+      this.#assertActorBinding(completed);
       this.#finish(completed.action_id, {
         status: "completed",
         action_id: completed.action_id,
@@ -691,11 +765,24 @@ export class DeviceWebSocketActionAdapter {
     }
     if (message.type === "action.failed") {
       const failed = payloadOf<ActionFailedPayload & Record<string, unknown>>(message);
+      this.#assertActorBinding(failed);
       this.#finish(failed.action_id, {
         status: "failed",
         action_id: failed.action_id,
         error: structuredClone(failed.error),
       });
+    }
+  }
+
+  #assertActorBinding(payload: Record<string, unknown>): void {
+    if (this.#actorId === null) {
+      if (payload.actor_id !== undefined) {
+        throw new TypeError("legacy protocol payload unexpectedly contains actor_id");
+      }
+      return;
+    }
+    if (payload.actor_id !== this.#actorId) {
+      throw new TypeError("v3 payload actor_id does not match the adapter binding");
     }
   }
 

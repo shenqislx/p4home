@@ -1,16 +1,16 @@
-import type { RoleAssignment, RoutePlan } from "./role-contracts.ts";
+import type { RouteAssignment, RoutePlan } from "./role-contracts.ts";
 import type { RoleRunResult } from "./role-runner.ts";
 import type { ToolResult } from "@p4home/core";
 
 export interface AssignmentRunResult {
-  readonly assignment: RoleAssignment;
+  readonly assignment: RouteAssignment;
   readonly run: RoleRunResult;
 }
 
 export interface ComposedResponsePart {
   readonly assignment_id: string;
   readonly role_id: "human" | "robot";
-  readonly source_span: RoleAssignment["source_span"];
+  readonly source_span: RouteAssignment["source_span"];
   readonly status: RoleRunResult["status"];
   readonly outcome: RoleRunResult["outcome"];
   readonly text: string;

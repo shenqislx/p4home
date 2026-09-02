@@ -74,7 +74,7 @@ class Phase5BVoiceProfileTest(unittest.TestCase):
                     "unsafe",
                 )
 
-    def test_product_profile_enables_voice_without_validation_or_startup_selftest(self):
+    def test_product_profile_enables_voice_and_human_avatar_device_v3(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "sdkconfig"
             path.write_text(
@@ -92,6 +92,7 @@ class Phase5BVoiceProfileTest(unittest.TestCase):
                 "t" * 32,
                 "ab" * 32,
                 "product",
+                "wss://192.0.2.20:18444/v1/device",
             )
             value = path.read_text(encoding="utf-8")
             for line in (
@@ -100,11 +101,72 @@ class Phase5BVoiceProfileTest(unittest.TestCase):
                 "# CONFIG_P4HOME_AUDIO_STARTUP_SELFTEST is not set",
                 "# CONFIG_P4HOME_PHASE5A_VALIDATION is not set",
                 "# CONFIG_P4HOME_PHASE5B_VALIDATION is not set",
-                "# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set",
+                "CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED=y",
+                'CONFIG_P4HOME_AGENT_TRANSPORT_URI="wss://192.0.2.20:18444/v1/device"',
+                'CONFIG_P4HOME_AGENT_DEVICE_ID="p4-product-human"',
+                "CONFIG_P4HOME_AGENT_PROTOCOL_VERSION=3",
+                "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK=12288",
                 MODULE.PRODUCT_PROFILE_COMMENT,
             ):
                 self.assertIn(f"{line}\n", value)
             self.assertNotIn(MODULE.VALIDATION_PROFILE_COMMENT, value)
+
+    def test_product_profile_requires_distinct_same_host_device_endpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "sdkconfig"
+            path.write_text("", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "requires Human avatar"):
+                MODULE.apply_profile(
+                    path, "wss://host:18443/v1/voice", "p4", "t" * 32, "ab" * 32, "product"
+                )
+
+    def test_switching_product_to_validation_removes_all_agent_managed_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "sdkconfig"
+            path.write_text("CONFIG_P4HOME_SR_ENABLE=n\n", encoding="utf-8")
+            path.chmod(0o600)
+            MODULE.apply_profile(
+                path,
+                "wss://192.0.2.20:18443/v1/voice",
+                "p4-product-human",
+                "p" * 32,
+                "ab" * 32,
+                "product",
+                "wss://192.0.2.20:18444/v1/device",
+            )
+            MODULE.apply_profile(
+                path,
+                "wss://192.0.2.10:8443/v1/voice",
+                "p4-phase5b",
+                "v" * 32,
+                "cd" * 32,
+                "validation",
+            )
+            value = path.read_text(encoding="utf-8")
+            for key in (
+                "CONFIG_P4HOME_AGENT_TRANSPORT_URI",
+                "CONFIG_P4HOME_AGENT_DEVICE_ID",
+                "CONFIG_P4HOME_AGENT_DEVICE_TOKEN",
+                "CONFIG_P4HOME_AGENT_SPKI_SHA256",
+                "CONFIG_P4HOME_AGENT_PROTOCOL_VERSION",
+                "CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK",
+            ):
+                self.assertNotIn(f"{key}=", value)
+                self.assertNotIn(f"# {key} is not set", value)
+            self.assertNotIn("p" * 32, value)
+            self.assertIn("# CONFIG_P4HOME_AGENT_TRANSPORT_ENABLED is not set\n", value)
+            self.assertIn(MODULE.VALIDATION_PROFILE_COMMENT, value)
+            self.assertNotIn(MODULE.PRODUCT_PROFILE_COMMENT, value)
+            with self.assertRaisesRegex(ValueError, "distinct ports"):
+                MODULE.apply_profile(
+                    path,
+                    "wss://host:18443/v1/voice",
+                    "p4",
+                    "t" * 32,
+                    "ab" * 32,
+                    "product",
+                    "wss://host:18443/v1/device",
+                )
 
     def test_is_idempotent_and_rejects_symlinks(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -164,7 +164,7 @@ test("schema v1 databases migrate the interaction correlation index to latest", 
     `).get();
     migratedDatabase.close();
 
-    assert.equal(version?.user_version, 4);
+    assert.equal(version?.user_version, 5);
     assert.equal(index?.name, "events_role_interaction_idx");
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -720,7 +720,7 @@ test("startup recovery records unknown outcomes and forbids blind replay", async
       recovery: "process_restart",
       replay_allowed: false,
     });
-    assert.equal(trace?.actions[0]?.status, "failed");
+    assert.equal(trace?.actions[0]?.status, "unknown");
     assert.deepEqual(trace?.events.at(-1)?.payload, {
       status: "failed",
       previous_outcome: "unknown",

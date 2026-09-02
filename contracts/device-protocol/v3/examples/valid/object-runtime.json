@@ -1,0 +1,124 @@
+[
+  {
+    "protocol_version": 3,
+    "message_id": "dev-v3-capabilities-001",
+    "correlation_id": null,
+    "device_id": "p4-panel-001",
+    "session_id": "session-v3-001",
+    "seq": 0,
+    "sent_at_ms": 1787616000000,
+    "type": "device.capabilities",
+    "payload": {
+      "selected_protocol_version": 3,
+      "actor_id": "human_avatar",
+      "rooms": ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"],
+      "actions": ["character.get_state", "character.go_to_room", "character.set_activity", "character.say", "world.get_snapshot", "character.go_to", "character.sit", "character.look_at", "character.interact"],
+      "objects": [
+        { "object_id": "living_room.sofa", "room_id": "living_room", "supported_actions": ["go_to", "sit", "look_at", "interact"], "available": true },
+        { "object_id": "study.desk", "room_id": "study", "supported_actions": ["go_to", "look_at", "interact"], "available": true },
+        { "object_id": "living_room.window", "room_id": "living_room", "supported_actions": ["go_to", "look_at", "interact"], "available": true }
+      ],
+      "limits": { "max_json_frame_bytes": 16384, "action_queue_capacity": 8, "say_text_max_chars": 256, "action_timeout_min_ms": 100, "action_timeout_max_ms": 120000, "idempotency_retention_ms": 600000 }
+    }
+  },
+  {
+    "protocol_version": 3,
+    "message_id": "dev-v3-snapshot-001",
+    "correlation_id": null,
+    "device_id": "p4-panel-001",
+    "session_id": "session-v3-001",
+    "seq": 1,
+    "sent_at_ms": 1787616000001,
+    "type": "world.snapshot",
+    "payload": {
+      "snapshot_id": "snapshot-v3-001",
+      "reason": "connect",
+      "actor_id": "human_avatar",
+      "state_version": 1,
+      "observed_at_ms": 1787616000001,
+      "character": { "room_id": "living_room", "activity": "idle", "speaking": false, "active_action_id": null, "target_object_id": null, "pose": "standing" },
+      "objects": [
+        { "object_id": "living_room.sofa", "room_id": "living_room", "available": true, "occupied": false },
+        { "object_id": "study.desk", "room_id": "study", "available": true, "occupied": false },
+        { "object_id": "living_room.window", "room_id": "living_room", "available": true, "occupied": false }
+      ]
+    }
+  },
+  {
+    "protocol_version": 3,
+    "message_id": "agent-v3-go-001",
+    "correlation_id": null,
+    "device_id": "p4-panel-001",
+    "session_id": "session-v3-001",
+    "seq": 0,
+    "sent_at_ms": 1787616000100,
+    "type": "action.request",
+    "payload": { "action_id": "action-v3-go-001", "actor_id": "human_avatar", "tool": "character.go_to", "arguments": { "target_id": "living_room.sofa" }, "timeout_ms": 10000, "origin": "user" }
+  },
+  {
+    "protocol_version": 3,
+    "message_id": "agent-v3-sit-001",
+    "correlation_id": null,
+    "device_id": "p4-panel-001",
+    "session_id": "session-v3-001",
+    "seq": 1,
+    "sent_at_ms": 1787616000200,
+    "type": "action.request",
+    "payload": { "action_id": "action-v3-sit-001", "actor_id": "human_avatar", "tool": "character.sit", "arguments": { "target_id": "living_room.sofa" }, "timeout_ms": 10000, "origin": "user" }
+  },
+  {
+    "protocol_version": 3,
+    "message_id": "dev-v3-accepted-001",
+    "correlation_id": "agent-v3-sit-001",
+    "device_id": "p4-panel-001",
+    "session_id": "session-v3-001",
+    "seq": 2,
+    "sent_at_ms": 1787616000210,
+    "type": "action.accepted",
+    "payload": { "action_id": "action-v3-sit-001", "actor_id": "human_avatar", "queue_position": 0, "accepted_at_ms": 1787616000210 }
+  },
+  {
+    "protocol_version": 3,
+    "message_id": "dev-v3-started-001",
+    "correlation_id": "agent-v3-sit-001",
+    "device_id": "p4-panel-001",
+    "session_id": "session-v3-001",
+    "seq": 3,
+    "sent_at_ms": 1787616000220,
+    "type": "action.started",
+    "payload": { "action_id": "action-v3-sit-001", "actor_id": "human_avatar", "started_at_ms": 1787616000220 }
+  },
+  {
+    "protocol_version": 3,
+    "message_id": "dev-v3-completed-001",
+    "correlation_id": "agent-v3-sit-001",
+    "device_id": "p4-panel-001",
+    "session_id": "session-v3-001",
+    "seq": 4,
+    "sent_at_ms": 1787616000300,
+    "type": "action.completed",
+    "payload": { "action_id": "action-v3-sit-001", "actor_id": "human_avatar", "tool": "character.sit", "completed_at_ms": 1787616000300, "state_version": 5, "result": { "object_id": "living_room.sofa", "action": "sit", "pose": "sitting" } }
+  },
+  {
+    "protocol_version": 3,
+    "message_id": "dev-v3-failed-001",
+    "correlation_id": "agent-v3-go-001",
+    "device_id": "p4-panel-001",
+    "session_id": "session-v3-001",
+    "seq": 5,
+    "sent_at_ms": 1787616000400,
+    "type": "action.failed",
+    "payload": { "action_id": "action-v3-go-001", "actor_id": "human_avatar", "failed_at_ms": 1787616000400, "error": { "code": "OBJECT_OCCUPIED", "message": "OBJECT_OCCUPIED", "retryable": true } }
+  },
+  {
+    "protocol_version": 3,
+    "message_id": "agent-v3-cancel-001",
+    "correlation_id": "agent-v3-go-001",
+    "device_id": "p4-panel-001",
+    "session_id": "session-v3-001",
+    "seq": 2,
+    "sent_at_ms": 1787616000450,
+    "type": "action.cancel",
+    "payload": { "action_id": "action-v3-go-001", "actor_id": "human_avatar", "reason": "superseded by a newer user interaction" }
+  }
+]

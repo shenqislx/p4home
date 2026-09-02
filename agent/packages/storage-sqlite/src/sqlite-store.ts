@@ -52,7 +52,7 @@ import type {
   StoredToolCall,
 } from "./types.ts";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const MEMORY_SCHEMA_VERSION = 1;
 const MAX_MEMORY_ID_LENGTH = 128;
 const MAX_MEMORY_CONTENT_LENGTH = 32_768;
@@ -1698,8 +1698,8 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
           WHERE run_id = ? AND status = 'pending'
         `).run(completedAtMs, toolError, runId);
         const actionWrite = this.#database.prepare(`
-          UPDATE actions SET status = 'failed'
-          WHERE run_id = ? AND status NOT IN ('completed', 'failed')
+          UPDATE actions SET status = 'unknown'
+          WHERE run_id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'unknown')
         `).run(runId);
         this.#database.prepare(`
           INSERT INTO events (event_id, run_id, type, occurred_at_ms, payload_json)
@@ -2093,7 +2093,7 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
           ) AS pending_tool_calls,
           EXISTS(
             SELECT 1 FROM actions
-            WHERE run_id = ? AND status NOT IN ('completed', 'failed')
+            WHERE run_id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'unknown')
           ) AS pending_actions
       `).get(run.run_id, run.run_id);
       if (
@@ -2149,9 +2149,9 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
         AND actions.created_at_ms = excluded.created_at_ms
         AND (
           (actions.status = 'requested') OR
-          (actions.status = 'accepted' AND excluded.status IN ('accepted', 'started', 'completed', 'failed')) OR
-          (actions.status = 'started' AND excluded.status IN ('started', 'completed', 'failed')) OR
-          (actions.status IN ('completed', 'failed') AND excluded.status = actions.status)
+          (actions.status = 'accepted' AND excluded.status IN ('accepted', 'started', 'completed', 'failed', 'cancelled', 'unknown')) OR
+          (actions.status = 'started' AND excluded.status IN ('started', 'completed', 'failed', 'cancelled', 'unknown')) OR
+          (actions.status IN ('completed', 'failed', 'cancelled', 'unknown') AND excluded.status = actions.status)
         )
     `).run(
       action.action_id,
@@ -2489,10 +2489,11 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
       && currentVersion !== 1
       && currentVersion !== 2
       && currentVersion !== 3
+      && currentVersion !== 4
     ) {
       throw new AuditStorageError(`database schema version ${currentVersion} cannot be migrated`);
     }
-    if (currentVersion === 1 || currentVersion === 2 || currentVersion === 3) {
+    if (currentVersion === 1 || currentVersion === 2 || currentVersion === 3 || currentVersion === 4) {
       if (currentVersion === 1) {
         this.#database.exec(`
           CREATE INDEX IF NOT EXISTS events_role_interaction_idx
@@ -2506,13 +2507,18 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
         this.#database.exec("PRAGMA user_version = 3");
         currentVersion = 3;
       }
-      if (currentVersion !== 3) {
+      if (currentVersion === 3) {
+        this.#upgradeMemorySchemaV4();
+        this.#database.exec("PRAGMA user_version = 4");
+        currentVersion = 4;
+      }
+      if (currentVersion !== 4) {
         throw new AuditStorageError(
-          `database schema version ${currentVersion} cannot be migrated to 4`,
+          `database schema version ${currentVersion} cannot be migrated to 5`,
         );
       }
-      this.#upgradeMemorySchemaV4();
-      this.#database.exec("PRAGMA user_version = 4");
+      this.#upgradeActionSchemaV5();
+      this.#database.exec("PRAGMA user_version = 5");
       return;
     }
     this.#database.exec(`
@@ -2587,7 +2593,7 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
           run_id TEXT NOT NULL REFERENCES runs(run_id),
           tool_call_id TEXT NOT NULL REFERENCES tool_calls(tool_call_id),
           status TEXT NOT NULL CHECK (
-            status IN ('requested', 'accepted', 'started', 'completed', 'failed')
+            status IN ('requested', 'accepted', 'started', 'completed', 'failed', 'cancelled', 'unknown')
           ),
           created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
           FOREIGN KEY (tool_call_id, run_id) REFERENCES tool_calls(tool_call_id, run_id)
@@ -2617,6 +2623,34 @@ export class SynchronousSqliteAuditStore implements AuditStore, MemoryStore, Dis
     this.#createMemorySchema();
     this.#upgradeMemorySchemaV4();
     this.#database.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+  }
+
+  #upgradeActionSchemaV5(): void {
+    const actionTable = this.#database.prepare(`
+      SELECT 1 AS present FROM sqlite_master
+      WHERE type = 'table' AND name = 'actions'
+    `).get();
+    if (actionTable === undefined) {
+      return;
+    }
+    this.#database.exec(`
+      CREATE TABLE actions_v5 (
+        action_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES runs(run_id),
+        tool_call_id TEXT NOT NULL REFERENCES tool_calls(tool_call_id),
+        status TEXT NOT NULL CHECK (
+          status IN ('requested', 'accepted', 'started', 'completed', 'failed', 'cancelled', 'unknown')
+        ),
+        created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+        FOREIGN KEY (tool_call_id, run_id) REFERENCES tool_calls(tool_call_id, run_id)
+      ) STRICT;
+      INSERT INTO actions_v5 (action_id, run_id, tool_call_id, status, created_at_ms)
+        SELECT action_id, run_id, tool_call_id, status, created_at_ms FROM actions;
+      DROP TABLE actions;
+      ALTER TABLE actions_v5 RENAME TO actions;
+      CREATE INDEX actions_run_time_idx
+        ON actions(run_id, created_at_ms, action_id);
+    `);
   }
 
   #createMemorySchema(): void {

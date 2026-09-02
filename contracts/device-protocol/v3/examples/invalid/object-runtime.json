@@ -1,0 +1,191 @@
+[
+  {
+    "name": "capability leaks anchor coordinates",
+    "message": {
+      "protocol_version": 3,
+      "message_id": "invalid-v3-anchor",
+      "correlation_id": null,
+      "device_id": "p4-panel-001",
+      "session_id": "session-v3-001",
+      "seq": 0,
+      "sent_at_ms": 1787616000000,
+      "type": "device.capabilities",
+      "payload": {
+        "selected_protocol_version": 3,
+        "actor_id": "human_avatar",
+        "rooms": ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"],
+        "actions": ["character.get_state", "character.go_to_room", "character.set_activity", "character.say", "world.get_snapshot", "character.go_to", "character.sit", "character.look_at", "character.interact"],
+        "objects": [
+          { "object_id": "living_room.sofa", "room_id": "living_room", "supported_actions": ["go_to", "sit", "look_at", "interact"], "available": true, "anchor": { "art_x": 10, "floor_y": 32 } },
+          { "object_id": "study.desk", "room_id": "study", "supported_actions": ["go_to", "look_at", "interact"], "available": true },
+          { "object_id": "living_room.window", "room_id": "living_room", "supported_actions": ["go_to", "look_at", "interact"], "available": true }
+        ],
+        "limits": { "max_json_frame_bytes": 16384, "action_queue_capacity": 8, "say_text_max_chars": 256, "action_timeout_min_ms": 100, "action_timeout_max_ms": 120000, "idempotency_retention_ms": 600000 }
+      }
+    }
+  },
+  {
+    "name": "unknown object target",
+    "message": {
+      "protocol_version": 3,
+      "message_id": "invalid-v3-target",
+      "correlation_id": null,
+      "device_id": "p4-panel-001",
+      "session_id": "session-v3-001",
+      "seq": 1,
+      "sent_at_ms": 1787616000001,
+      "type": "action.request",
+      "payload": { "action_id": "invalid-v3-action", "actor_id": "human_avatar", "tool": "character.go_to", "arguments": { "target_id": "living_room.unknown" }, "timeout_ms": 1000, "origin": "agent" }
+    }
+  },
+  {
+    "name": "unsupported sit target",
+    "message": {
+      "protocol_version": 3,
+      "message_id": "invalid-v3-sit-desk",
+      "correlation_id": null,
+      "device_id": "p4-panel-001",
+      "session_id": "session-v3-001",
+      "seq": 2,
+      "sent_at_ms": 1787616000002,
+      "type": "action.request",
+      "payload": { "action_id": "invalid-v3-sit", "actor_id": "human_avatar", "tool": "character.sit", "arguments": { "target_id": "study.desk" }, "timeout_ms": 1000, "origin": "agent" }
+    }
+  },
+  {
+    "name": "a different actor cannot control the Human avatar",
+    "message": {
+      "protocol_version": 3,
+      "message_id": "invalid-v3-user-object",
+      "correlation_id": null,
+      "device_id": "p4-panel-001",
+      "session_id": "session-v3-001",
+      "seq": 3,
+      "sent_at_ms": 1787616000003,
+      "type": "action.request",
+      "payload": { "action_id": "invalid-v3-user", "actor_id": "cat", "tool": "character.go_to", "arguments": { "target_id": "living_room.sofa" }, "timeout_ms": 1000, "origin": "user" }
+    }
+  },
+  {
+    "name": "snapshot duplicates an object id",
+    "message": {
+      "protocol_version": 3,
+      "message_id": "invalid-v3-duplicate-object",
+      "correlation_id": null,
+      "device_id": "p4-panel-001",
+      "session_id": "session-v3-001",
+      "seq": 4,
+      "sent_at_ms": 1787616000004,
+      "type": "world.snapshot",
+      "payload": {
+        "snapshot_id": "invalid-snapshot-v3",
+        "reason": "connect",
+        "actor_id": "human_avatar",
+        "state_version": 1,
+        "observed_at_ms": 1787616000004,
+        "character": { "room_id": "living_room", "activity": "idle", "speaking": false, "active_action_id": null, "target_object_id": null, "pose": "standing" },
+        "objects": [
+          { "object_id": "living_room.sofa", "room_id": "living_room", "available": true, "occupied": false },
+          { "object_id": "living_room.sofa", "room_id": "living_room", "available": true, "occupied": false },
+          { "object_id": "living_room.window", "room_id": "living_room", "available": true, "occupied": false }
+        ]
+      }
+    }
+  },
+  {
+    "name": "capability actions drift from registry",
+    "message": {
+      "protocol_version": 3,
+      "message_id": "invalid-v3-capability-actions",
+      "correlation_id": null,
+      "device_id": "p4-panel-001",
+      "session_id": "session-v3-001",
+      "seq": 5,
+      "sent_at_ms": 1787616000005,
+      "type": "device.capabilities",
+      "payload": {
+        "selected_protocol_version": 3,
+        "actor_id": "human_avatar",
+        "rooms": ["primary_bedroom", "study", "guest_room", "entry", "living_room", "kitchen"],
+        "actions": ["character.get_state", "character.go_to_room", "character.set_activity", "character.say", "world.get_snapshot", "character.go_to", "character.sit", "character.look_at", "character.interact"],
+        "objects": [
+          { "object_id": "living_room.sofa", "room_id": "living_room", "supported_actions": ["go_to", "look_at", "interact"], "available": true },
+          { "object_id": "study.desk", "room_id": "study", "supported_actions": ["go_to", "look_at", "interact"], "available": true },
+          { "object_id": "living_room.window", "room_id": "living_room", "supported_actions": ["go_to", "look_at", "interact"], "available": true }
+        ],
+        "limits": { "max_json_frame_bytes": 16384, "action_queue_capacity": 8, "say_text_max_chars": 256, "action_timeout_min_ms": 100, "action_timeout_max_ms": 120000, "idempotency_retention_ms": 600000 }
+      }
+    }
+  },
+  {
+    "name": "snapshot retains an unavailable target",
+    "message": {
+      "protocol_version": 3,
+      "message_id": "invalid-v3-unavailable-target",
+      "correlation_id": null,
+      "device_id": "p4-panel-001",
+      "session_id": "session-v3-001",
+      "seq": 6,
+      "sent_at_ms": 1787616000006,
+      "type": "world.changed",
+      "payload": {
+        "actor_id": "human_avatar",
+        "state_version": 6,
+        "observed_at_ms": 1787616000006,
+        "character": { "room_id": "study", "activity": "idle", "speaking": false, "active_action_id": null, "target_object_id": "study.desk", "pose": "standing" },
+        "objects": [
+          { "object_id": "living_room.sofa", "room_id": "living_room", "available": true, "occupied": false },
+          { "object_id": "study.desk", "room_id": "study", "available": false, "occupied": false },
+          { "object_id": "living_room.window", "room_id": "living_room", "available": true, "occupied": false }
+        ]
+      }
+    }
+  },
+  {
+    "name": "standing target is reported occupied",
+    "message": {
+      "protocol_version": 3,
+      "message_id": "invalid-v3-standing-occupied",
+      "correlation_id": null,
+      "device_id": "p4-panel-001",
+      "session_id": "session-v3-001",
+      "seq": 7,
+      "sent_at_ms": 1787616000007,
+      "type": "world.snapshot",
+      "payload": {
+        "snapshot_id": "invalid-snapshot-occupied-v3",
+        "reason": "resync",
+        "actor_id": "human_avatar",
+        "state_version": 7,
+        "observed_at_ms": 1787616000007,
+        "character": { "room_id": "living_room", "activity": "idle", "speaking": false, "active_action_id": null, "target_object_id": "living_room.sofa", "pose": "standing" },
+        "objects": [
+          { "object_id": "living_room.sofa", "room_id": "living_room", "available": true, "occupied": true },
+          { "object_id": "study.desk", "room_id": "study", "available": true, "occupied": false },
+          { "object_id": "living_room.window", "room_id": "living_room", "available": true, "occupied": false }
+        ]
+      }
+    }
+  },
+  {
+    "name": "non-seat interaction reports a sitting pose",
+    "message": {
+      "protocol_version": 3,
+      "message_id": "invalid-v3-desk-sitting",
+      "correlation_id": "request-v3-desk-sitting",
+      "device_id": "p4-panel-001",
+      "session_id": "session-v3-001",
+      "seq": 8,
+      "sent_at_ms": 1787616000008,
+      "type": "action.completed",
+      "payload": {
+        "action_id": "invalid-action-desk-sitting",
+        "actor_id": "human_avatar",
+        "tool": "character.interact",
+        "completed_at_ms": 1787616000008,
+        "state_version": 8,
+        "result": { "object_id": "study.desk", "action": "interact", "pose": "sitting" }
+      }
+    }
+  }
+]

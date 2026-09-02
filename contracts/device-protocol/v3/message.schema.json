@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://p4home.local/contracts/device-protocol/v3/message.schema.json",
+  "title": "P4 Device Protocol v3 Message",
+  "allOf": [
+    { "$ref": "envelope.schema.json" },
+    {
+      "oneOf": [
+        { "properties": { "type": { "const": "device.hello" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/deviceHello" } } },
+        { "properties": { "type": { "const": "device.capabilities" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/deviceCapabilities" } } },
+        { "properties": { "type": { "const": "world.snapshot" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/worldSnapshot" } } },
+        { "properties": { "type": { "const": "world.changed" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/worldChanged" } } },
+        { "properties": { "type": { "const": "world.resync.request" }, "payload": { "$ref": "https://p4home.local/contracts/device-protocol/v1/messages/payloads.schema.json#/$defs/worldResyncRequest" } } },
+        { "properties": { "type": { "const": "user.text" }, "payload": { "$ref": "https://p4home.local/contracts/device-protocol/v1/messages/payloads.schema.json#/$defs/userText" } } },
+        { "properties": { "type": { "const": "action.request" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/actionRequest" } } },
+        { "properties": { "type": { "const": "action.accepted" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/actionAccepted" } } },
+        { "properties": { "type": { "const": "action.started" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/actionStarted" } } },
+        { "properties": { "type": { "const": "action.completed" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/actionCompleted" } } },
+        { "properties": { "type": { "const": "action.failed" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/actionFailed" } } },
+        { "properties": { "type": { "const": "action.cancel" }, "payload": { "$ref": "messages/payloads.schema.json#/$defs/actionCancel" } } },
+        { "properties": { "type": { "const": "heartbeat" }, "payload": { "$ref": "https://p4home.local/contracts/device-protocol/v1/messages/payloads.schema.json#/$defs/heartbeat" } } },
+        { "properties": { "type": { "const": "error" }, "payload": { "$ref": "https://p4home.local/contracts/device-protocol/v1/messages/payloads.schema.json#/$defs/error" } } }
+      ]
+    }
+  ]
+}

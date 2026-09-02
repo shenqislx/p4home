@@ -14,6 +14,7 @@ import type { RoleMemoryRuntime } from "./role-memory.ts";
 import type { LowPriorityCatRunRegistry } from "./low-priority-cat-run-registry.ts";
 import type { RoleTaskCompletionNotice } from "./role-orchestrator.ts";
 import type { HumanSpeechSegment } from "./role-runner.ts";
+import type { HumanAvatarDeviceRuntime } from "./human-avatar-action-runner.ts";
 
 export interface UnifiedVoiceRoleDispatcherOptions {
   readonly provider: Pick<OllamaProvider, "chat">
@@ -25,6 +26,7 @@ export interface UnifiedVoiceRoleDispatcherOptions {
   readonly audit_finalize_timeout_ms?: number;
   readonly clock?: () => number;
   readonly robot_ha?: RobotHaReadRuntime | RobotHaWriteRuntime;
+  readonly human_avatar?: HumanAvatarDeviceRuntime;
   readonly memory?: RoleMemoryRuntime;
   readonly human_only?: boolean;
   readonly cat_run_registry?: LowPriorityCatRunRegistry;
@@ -72,6 +74,9 @@ export class UnifiedVoiceRoleDispatcher {
         : { audit_finalize_timeout_ms: this.#options.audit_finalize_timeout_ms }),
       ...(this.#options.clock === undefined ? {} : { clock: this.#options.clock }),
       ...(this.#options.robot_ha === undefined ? {} : { robot_ha: this.#options.robot_ha }),
+      ...(this.#options.human_avatar === undefined
+        ? {}
+        : { human_avatar: this.#options.human_avatar }),
       ...(this.#options.memory === undefined ? {} : { memory: this.#options.memory }),
       ...(this.#options.human_only === undefined
         ? {}

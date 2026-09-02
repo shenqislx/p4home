@@ -26,6 +26,17 @@ export const CAT_OBJECT_TOOLS = [
 
 export const CAT_WORLD_TOOLS = [...CAT_ROOM_TOOLS, ...CAT_OBJECT_TOOLS] as const;
 
+const HUMAN_AVATAR_TOOL_NAMES = [
+  "character.go_to_room",
+  "character.go_to",
+  "character.sit",
+  "character.look_at",
+  "character.interact",
+] as const;
+
+export const HUMAN_AVATAR_TOOLS: readonly (typeof HUMAN_AVATAR_TOOL_NAMES)[number][] =
+  Object.freeze([...HUMAN_AVATAR_TOOL_NAMES]);
+
 export interface RoleProfile {
   readonly revision:
     | "role-profile/v1"
@@ -33,7 +44,8 @@ export interface RoleProfile {
     | "role-profile/v3"
     | "role-profile/v4"
     | "role-profile/v5"
-    | "role-profile/v6";
+    | "role-profile/v6"
+    | "role-profile/avatar-v1";
   readonly role_id: RoleId;
   readonly accepts_user_text: boolean;
   readonly allowed_tools: readonly string[];
@@ -118,13 +130,37 @@ const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
   },
 };
 
+const HUMAN_AVATAR_EXECUTOR_CANONICAL: RoleProfile = Object.freeze({
+  revision: "role-profile/avatar-v1",
+  role_id: "human",
+  accepts_user_text: true,
+  allowed_tools: Object.freeze([...HUMAN_AVATAR_TOOL_NAMES]),
+  temperature: 0,
+  num_ctx: 4_096,
+  num_predict: 128,
+  max_model_turns: 1,
+  history_message_limit: 0,
+  memory_token_budget: 0,
+  queue_priority: "user",
+  system_prompt: "你是屏幕 Human 的隔离动作执行器，只能从 Runtime 实时提供的 character.* 工具中选择动作；不得对话、控制 Cat 或调用 Home Assistant。",
+});
+
+export function getHumanAvatarExecutorProfile(): RoleProfile {
+  return {
+    ...HUMAN_AVATAR_EXECUTOR_CANONICAL,
+    allowed_tools: [...HUMAN_AVATAR_EXECUTOR_CANONICAL.allowed_tools],
+  };
+}
+
 export function getRoleProfile(roleId: RoleId): RoleProfile {
   const profile = PROFILES[roleId];
   return { ...profile, allowed_tools: [...profile.allowed_tools] };
 }
 
 function assertCanonicalRoleProfile(profile: RoleProfile): RoleProfile {
-  const canonical = PROFILES[profile.role_id];
+  const canonical = profile.revision === HUMAN_AVATAR_EXECUTOR_CANONICAL.revision
+    ? HUMAN_AVATAR_EXECUTOR_CANONICAL
+    : PROFILES[profile.role_id];
   const fieldsMatch = canonical !== undefined
     && profile.revision === canonical.revision
     && profile.accepts_user_text === canonical.accepts_user_text

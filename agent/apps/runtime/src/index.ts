@@ -32,6 +32,7 @@ export * from "./role-contracts.ts";
 export * from "./role-audit.ts";
 export * from "./role-orchestrator.ts";
 export * from "./role-profiles.ts";
+export * from "./human-avatar-action-runner.ts";
 export * from "./role-response-policy.ts";
 export * from "./role-response-composer.ts";
 export * from "./role-router.ts";

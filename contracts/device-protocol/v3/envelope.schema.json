@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://p4home.local/contracts/device-protocol/v3/envelope.schema.json",
+  "title": "P4 Device Protocol v3 Envelope",
+  "type": "object",
+  "required": ["protocol_version", "message_id", "correlation_id", "device_id", "session_id", "seq", "sent_at_ms", "type", "payload"],
+  "properties": {
+    "protocol_version": { "const": 3 },
+    "message_id": { "$ref": "#/$defs/id" },
+    "correlation_id": { "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] },
+    "device_id": { "$ref": "#/$defs/id" },
+    "session_id": { "$ref": "#/$defs/id" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "sent_at_ms": { "type": "integer", "minimum": 0 },
+    "type": {
+      "enum": ["device.hello", "device.capabilities", "world.snapshot", "world.changed", "world.resync.request", "user.text", "action.request", "action.accepted", "action.started", "action.completed", "action.failed", "action.cancel", "heartbeat", "error"]
+    },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" }
+  }
+}

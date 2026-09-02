@@ -27,8 +27,19 @@ export interface RoleAssignment {
   readonly mode: "respond" | "clarify";
 }
 
+export interface HumanAvatarAssignment {
+  readonly assignment_id: string;
+  readonly role_id: "human";
+  readonly source_span: SourceSpan;
+  readonly mode: "respond";
+  readonly capability: "avatar";
+}
+
+export type RouteAssignment = RoleAssignment | HumanAvatarAssignment;
+
 export type RouteReason =
   | "model_human"
+  | "model_human_avatar"
   | "model_robot"
   | "model_mixed"
   | "model_clarify"
@@ -55,7 +66,17 @@ export interface RoutePlanV2 {
   readonly created_at_ms: number;
 }
 
-export type RoutePlan = RoutePlanV1 | RoutePlanV2;
+export interface RoutePlanV3 {
+  readonly schema_version: 3;
+  readonly route_plan_id: string;
+  readonly interaction_id: string;
+  /** RoutePlan v3 adds the isolated Human-avatar execution lane. */
+  readonly assignments: readonly [HumanAvatarAssignment];
+  readonly reason: "model_human_avatar";
+  readonly created_at_ms: number;
+}
+
+export type RoutePlan = RoutePlanV1 | RoutePlanV2 | RoutePlanV3;
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
@@ -84,7 +105,7 @@ export function validateUserTextInteraction(interaction: UserTextInteraction): v
 }
 
 export function validateRoutePlan(plan: RoutePlan, interaction: UserTextInteraction): void {
-  if (plan.schema_version !== 1 && plan.schema_version !== 2) {
+  if (plan.schema_version !== 1 && plan.schema_version !== 2 && plan.schema_version !== 3) {
     throw new TypeError("route plan schema_version is unsupported");
   }
   assertContractId(plan.route_plan_id, "route_plan_id");
@@ -96,6 +117,7 @@ export function validateRoutePlan(plan: RoutePlan, interaction: UserTextInteract
   }
   if (![
     "model_human",
+    "model_human_avatar",
     "model_robot",
     "model_mixed",
     "model_clarify",
@@ -112,6 +134,10 @@ export function validateRoutePlan(plan: RoutePlan, interaction: UserTextInteract
     validateV1Assignments(plan, interaction);
     return;
   }
+  if (plan.schema_version === 3) {
+    validateV3Assignments(plan, interaction);
+    return;
+  }
   validateV2Assignments(plan, interaction);
 }
 
@@ -124,7 +150,7 @@ function isUtf16Boundary(text: string, offset: number): boolean {
   return !(previous >= 0xD800 && previous <= 0xDBFF && current >= 0xDC00 && current <= 0xDFFF);
 }
 
-function validateAssignmentShape(assignment: RoleAssignment, interaction: UserTextInteraction): void {
+function validateAssignmentShape(assignment: RouteAssignment, interaction: UserTextInteraction): void {
   assertContractId(assignment.assignment_id, "assignment_id");
   if (
     (assignment.role_id !== "human" && assignment.role_id !== "robot")
@@ -168,6 +194,9 @@ function validateV1Assignments(plan: RoutePlanV1, interaction: UserTextInteracti
   if (plan.reason !== "model_robot" && assignment.role_id !== "human") {
     throw new TypeError("all non-robot route outcomes must fail closed to Human");
   }
+  if ("capability" in assignment || plan.reason === "model_human_avatar") {
+    throw new TypeError("Phase 2 route plans do not support Human avatar actions");
+  }
 }
 
 function validateV2Assignments(plan: RoutePlanV2, interaction: UserTextInteraction): void {
@@ -178,6 +207,9 @@ function validateV2Assignments(plan: RoutePlanV2, interaction: UserTextInteracti
   const roles = new Set<UserRoutableRoleId>();
   let expectedStart = 0;
   for (const assignment of plan.assignments) {
+    if ("capability" in assignment) {
+      throw new TypeError("RoutePlan v2 assignments cannot carry execution capabilities");
+    }
     validateAssignmentShape(assignment, interaction);
     if (ids.has(assignment.assignment_id)) {
       throw new TypeError("route assignment_id values must be unique");
@@ -216,13 +248,40 @@ function validateV2Assignments(plan: RoutePlanV2, interaction: UserTextInteracti
   if (plan.assignments.length === 2 && plan.reason !== "model_mixed") {
     throw new TypeError("two assignments require model_mixed reason");
   }
+  if (plan.reason === "model_human_avatar") {
+    throw new TypeError("Human avatar routes require RoutePlan v3");
+  }
   if (plan.assignments.length === 1) {
     const role = plan.assignments[0].role_id;
     if (
-      (role === "human" && plan.reason !== "model_human")
+      (role === "human"
+        && plan.reason !== "model_human")
       || (role === "robot" && plan.reason !== "model_robot")
     ) {
       throw new TypeError("single assignment reason must match its role");
     }
   }
+}
+
+function validateV3Assignments(plan: RoutePlanV3, interaction: UserTextInteraction): void {
+  if (plan.assignments.length !== 1 || plan.reason !== "model_human_avatar") {
+    throw new TypeError("RoutePlan v3 requires one Human avatar assignment");
+  }
+  const assignment = plan.assignments[0];
+  validateAssignmentShape(assignment, interaction);
+  if (
+    assignment.role_id !== "human"
+    || assignment.mode !== "respond"
+    || assignment.capability !== "avatar"
+    || assignment.source_span.start !== 0
+    || assignment.source_span.end !== interaction.text.length
+  ) {
+    throw new TypeError("RoutePlan v3 Human avatar assignment must cover the complete user text");
+  }
+}
+
+export function isHumanAvatarAssignment(
+  assignment: RouteAssignment,
+): assignment is HumanAvatarAssignment {
+  return "capability" in assignment && assignment.capability === "avatar";
 }
