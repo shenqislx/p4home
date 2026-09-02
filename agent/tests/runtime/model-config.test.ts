@@ -9,6 +9,6 @@ import {
 
 test("the product-selected default Ollama model is stable", () => {
   assert.equal(DEFAULT_OLLAMA_MODEL, "qwen3.6:35b-mlx");
-  assert.equal(PRODUCT_OLLAMA_KEEP_ALIVE, -1);
+  assert.equal(PRODUCT_OLLAMA_KEEP_ALIVE, "10m");
   assert.equal(QWEN_THINKING_ENABLED, false);
 });

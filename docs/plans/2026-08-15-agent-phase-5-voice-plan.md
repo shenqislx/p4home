@@ -165,7 +165,8 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
     可测耗时、角色/UI/播放状态和 drop/cancel 与业务真值交叉校验；
   - [x] Human 产品链路支持 Ollama NDJSON 增量文本、有界中文分段、常驻 Kokoro、增量 PCM 和
     P4 credit 驱动播放；产品 readiness 前执行无 session/audit 的真实 Qwen warmup，并以
-    `keep_alive=-1` 保持驻留。本地类型检查、497 项全量测试与真实 Kokoro 流式测试通过，安全前缀的
+    `keep_alive=10m` 在最后一次请求后保温 10 分钟，闲置超时后允许 Ollama 自动释放约
+    `22–25 GB` 模型内存。本地类型检查、497 项全量测试与真实 Kokoro 流式测试通过，安全前缀的
     失败/取消 result、audit、session 一致性及非合作流取消均有回归覆盖；热态无 P4 播放测得首个
     安全句段约 `562 ms`、首个 PCM 约 `842 ms`、模型/TTS 流终态约 `1.069 s`；
   - [ ] 真实 P4 复验首声延迟、句间连续听感和 barge-in；Kokoro 当前是 clause 级生成，不宣称

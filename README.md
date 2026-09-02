@@ -74,8 +74,9 @@ P4、STT、Qwen、HA、三轮 UI 与 artifact 审计。首轮模型调用合计 
 `1.338–1.785 s`，UI ACK 为 `145–247 ms`。因此首次语言交互慢的主因已确认是 Qwen 冷加载；
 后续候选已将 Human 链路改为 Qwen NDJSON 增量文本 → 有界中文分段 → 常驻 Kokoro worker →
 增量 PCM → P4 credit 驱动播放，并保留 barge-in、累计安全策略、partial delivery 审计与旧 provider
-兼容。产品 readiness 前会真实预热 Qwen，并用 `keep_alive=-1` 消除空闲后的冷加载，代价是模型约
-`22–25 GB` 持续驻留。Node 24 类型检查、497 项全量测试及真实 Kokoro 非静音流式测试均通过；
+兼容。产品 readiness 前会真实预热 Qwen，并用 `keep_alive=10m` 在最后一次请求后保温 10 分钟；
+活跃对话会续期，闲置超时后 Ollama 可自动释放模型占用的约 `22–25 GB`，代价是下一次请求需要重新
+冷加载。Node 24 类型检查、497 项全量测试及真实 Kokoro 非静音流式测试均通过；
 本机热态无 P4 播放链路测得首个安全句段约 `562 ms`、首个 PCM 约 `842 ms`、模型/TTS 流终态约
 `1.069 s`。真实 P4 首声延迟、连续听感和长停顿句仍待人工复验；P4 wake/VAD 收口也仍未拆分。
 Phase 5 继续保持

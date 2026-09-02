@@ -16,8 +16,9 @@
 - `audio_output=required`，Human 回复按安全中文分段进入常驻 Kokoro worker；每段 PCM 增量生成后
   立即按 P4 credit 播放，不再等待整轮模型回复和整段音频全部完成；
 - Role Router 与 Human 的每次 Qwen API 请求都显式携带 `think: false`，不依赖模型默认值；
-- Agent readiness 前真实预热 Qwen，并以 `keep_alive=-1` 持续驻留；这会长期占用约 `22–25 GB`
-  主机内存，直至显式卸载模型或重启 Ollama；
+- Agent readiness 前真实预热 Qwen，并以 `keep_alive=10m` 在最后一次请求后保温 10 分钟；活跃
+  请求会续期，闲置超时后 Ollama 可自动释放约 `22–25 GB` 主机内存，下一次请求需要重新冷加载；
+- 产品入口不提供驻留时间环境变量；provider 的单次显式 `keep_alive` 仍可覆盖产品默认值；
 - 原始 PCM 不落盘，审计与 private Memory 写入受现有生产策略约束。
 
 ## 一次性安装
