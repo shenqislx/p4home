@@ -177,6 +177,26 @@ test("playback sender opens, obeys credit, emits exact EOS PCM and waits for ter
   assert.equal(playback.retained_pcm_bytes, 0);
 });
 
+test("playback sender deep-copies static Node Buffer PCM without mutating caller memory", async () => {
+  const wire = new FakeWire();
+  const pcm = Buffer.alloc(640, 0x5a);
+  const expected = Uint8Array.from(pcm);
+  const playback = sender(pcm, wire);
+  const pending = playback.start();
+
+  playback.handleControl(control("session.ready", { initial_credit_frames: 1 }));
+  await settlePlaybackPump();
+  assert.equal(wire.binaries.length, 1);
+  const frame = decodeVoiceFrame(wire.binaries[0]!);
+  assert.deepEqual(frame.payload, expected);
+  assert.ok(frame.payload.some((value) => value !== 0));
+  assert.deepEqual(Uint8Array.from(pcm), expected);
+
+  playback.handleControl(control("session.closed", { status: "completed", dropped_frames: 0 }));
+  assert.equal((await pending).bytes, expected.byteLength);
+  assert.equal(playback.retained_pcm_bytes, 0);
+});
+
 test("playback sender accepts in-flight credits before emitting EOS control", async () => {
   const wire = new FakeWire();
   const playback = sender(new Uint8Array(6_400), wire);
@@ -354,6 +374,29 @@ test("streaming playback reassembles arbitrary chunks into exact credit-driven f
 
   playback.handleControl(control("session.closed", { status: "completed", dropped_frames: 0 }));
   assert.equal((await pending).bytes, 1_280);
+  assert.equal(playback.retained_pcm_bytes, 0);
+});
+
+test("streaming playback deep-copies Node Buffer PCM before clearing the source", async () => {
+  const wire = new FakeWire();
+  const chunk = Buffer.from(Array.from({ length: 640 }, (_, index) => (index % 251) + 1));
+  const expected = Uint8Array.from(chunk);
+  async function* source(): AsyncGenerator<Uint8Array> {
+    yield chunk;
+  }
+  const playback = streamSender(source(), wire);
+  const pending = playback.start();
+
+  playback.handleControl(control("session.ready", { initial_credit_frames: 1 }));
+  await settlePlaybackPump();
+  assert.ok(chunk.every((value) => value === 0));
+  assert.equal(wire.binaries.length, 1);
+  const frame = decodeVoiceFrame(wire.binaries[0]!);
+  assert.deepEqual(frame.payload, expected);
+  assert.ok(frame.payload.some((value) => value !== 0));
+
+  playback.handleControl(control("session.closed", { status: "completed", dropped_frames: 0 }));
+  assert.equal((await pending).bytes, expected.byteLength);
   assert.equal(playback.retained_pcm_bytes, 0);
 });
 

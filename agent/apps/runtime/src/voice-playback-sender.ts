@@ -174,7 +174,7 @@ export class VoicePlaybackSender {
       session_id_bytes: options.identity.session_id_bytes.slice(),
     };
     if (staticPcm !== undefined) {
-      this.#ownedInput = staticPcm.slice();
+      this.#ownedInput = Uint8Array.from(staticPcm);
       const ownedInput = this.#ownedInput;
       this.#source = (async function* (): AsyncGenerator<Uint8Array> {
         yield ownedInput;
@@ -480,7 +480,7 @@ export class VoicePlaybackSender {
         ));
         return false;
       }
-      retained = chunk.slice();
+      retained = Uint8Array.from(chunk);
       this.#sourceBytes += retained.byteLength;
     } finally {
       try {
