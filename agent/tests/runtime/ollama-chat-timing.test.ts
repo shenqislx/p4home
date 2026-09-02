@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   OllamaProviderError,
   type OllamaChatResult,
+  type OllamaChatStreamEvent,
 } from "@p4home/provider-ollama";
 import {
   measureOllamaChatProvider,
@@ -136,6 +137,119 @@ test("chat timing is complete under concurrent out-of-order terminals", async ()
   assert.equal(summary.completed_calls, 2);
   assert.equal(summary.call_details.length, 2);
   assert.equal(JSON.stringify(summary).includes("private"), false);
+});
+
+test("chatStream timing records one v1 call from its terminal without retaining deltas", async () => {
+  const ticks = [10, 24];
+  const measured = measureOllamaChatProvider({
+    async chat(): Promise<OllamaChatResult> {
+      throw new Error("batch chat must not be used");
+    },
+    async *chatStream(): AsyncIterable<OllamaChatStreamEvent> {
+      yield { kind: "content_delta", model: "qwen-test", content: "private delta" };
+      yield {
+        kind: "terminal",
+        result: {
+          model: "qwen-test",
+          message: { role: "assistant", content: "private delta" },
+          total_duration_ns: 12,
+          load_duration_ns: 2,
+          prompt_eval_count: 4,
+          prompt_eval_duration_ns: 3,
+          eval_count: 2,
+          eval_duration_ns: 5,
+        },
+      };
+    },
+  }, () => ticks.shift() ?? 24);
+
+  const events = [];
+  for await (const event of measured.provider.chatStream!(REQUEST)) events.push(event);
+
+  assert.equal(events.length, 2);
+  const summary = measured.snapshot();
+  assert.deepEqual({
+    calls: summary.calls,
+    completed: summary.completed_calls,
+    duration: summary.request_total_ms,
+    usageComplete: summary.usage_complete_calls,
+  }, { calls: 1, completed: 1, duration: 14, usageComplete: 1 });
+  assert.deepEqual(Object.keys(summary.call_details[0] ?? {}).sort(), [
+    "ollama", "request_duration_ms", "schema_version", "status",
+  ]);
+  assert.equal(JSON.stringify(summary).includes("private"), false);
+});
+
+test("chatStream timing falls back to batch chat and still counts exactly once", async () => {
+  let invocations = 0;
+  const measured = measureOllamaChatProvider({
+    async chat(): Promise<OllamaChatResult> {
+      invocations++;
+      return { model: "fake", message: { role: "assistant", content: "private result" } };
+    },
+  });
+
+  const events = [];
+  for await (const event of measured.provider.chatStream!(REQUEST)) events.push(event);
+
+  assert.equal(invocations, 1);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.kind, "terminal");
+  assert.equal(measured.snapshot().calls, 1);
+  assert.equal(measured.snapshot().completed_calls, 1);
+});
+
+test("chatStream timing records early consumer closure as one cancelled call", async () => {
+  let sourceClosed = false;
+  const measured = measureOllamaChatProvider({
+    async chat(): Promise<OllamaChatResult> {
+      throw new Error("batch chat must not be used");
+    },
+    async *chatStream(): AsyncIterable<OllamaChatStreamEvent> {
+      try {
+        yield { kind: "content_delta", model: "fake", content: "private partial" };
+        await new Promise(() => undefined);
+      } finally {
+        sourceClosed = true;
+      }
+    },
+  });
+  const iterator = measured.provider.chatStream!(REQUEST)[Symbol.asyncIterator]();
+
+  assert.equal((await iterator.next()).value?.kind, "content_delta");
+  await iterator.return?.();
+
+  assert.equal(sourceClosed, true);
+  assert.deepEqual({
+    calls: measured.snapshot().calls,
+    cancelled: measured.snapshot().cancelled_calls,
+  }, { calls: 1, cancelled: 1 });
+  assert.equal(JSON.stringify(measured.snapshot()).includes("private"), false);
+});
+
+test("chatStream timing fails a custom provider that omits its terminal", async () => {
+  const measured = measureOllamaChatProvider({
+    async chat(): Promise<OllamaChatResult> {
+      throw new Error("batch chat must not be used");
+    },
+    async *chatStream(): AsyncIterable<OllamaChatStreamEvent> {
+      yield { kind: "content_delta", model: "fake", content: "private partial" };
+    },
+  });
+
+  await assert.rejects(async () => {
+    for await (const _event of measured.provider.chatStream!(REQUEST)) {
+      // Consume through EOF so terminal validation runs.
+    }
+  }, (error) => {
+    assert.ok(error instanceof OllamaProviderError);
+    assert.equal(error.code, "INVALID_RESPONSE");
+    return true;
+  });
+  assert.deepEqual({
+    calls: measured.snapshot().calls,
+    failed: measured.snapshot().failed_calls,
+  }, { calls: 1, failed: 1 });
 });
 
 test("timing aggregation strips forged fields and normalizes unsafe numbers", () => {

@@ -101,11 +101,32 @@ export interface OllamaChatResult extends OllamaUsage {
   readonly done_reason?: string;
 }
 
+/**
+ * A chat stream exposes only assistant content while the response is in flight.
+ * Thinking and native tool calls remain terminal-only so callers cannot act on
+ * partially assembled private reasoning or tool arguments.
+ */
+export type OllamaChatStreamEvent =
+  | {
+      readonly kind: "content_delta";
+      readonly model: string;
+      readonly content: string;
+    }
+  | {
+      readonly kind: "terminal";
+      readonly result: OllamaChatResult;
+    };
+
 export interface OllamaProvider {
   probe(signal?: AbortSignal): Promise<OllamaCapabilities>;
   generate(request: OllamaGenerateRequest, signal?: AbortSignal): Promise<OllamaGenerateResult>;
   stream(request: OllamaGenerateRequest, signal?: AbortSignal): AsyncIterable<OllamaGenerateChunk>;
   chat(request: OllamaChatRequest, signal?: AbortSignal): Promise<OllamaChatResult>;
+  /** Optional so existing bounded, non-streaming providers remain compatible. */
+  chatStream?(
+    request: OllamaChatRequest,
+    signal?: AbortSignal,
+  ): AsyncIterable<OllamaChatStreamEvent>;
 }
 
 export type OllamaFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -114,5 +135,7 @@ export interface OllamaHttpProviderOptions {
   readonly model: string;
   readonly baseUrl?: string;
   readonly requestTimeoutMs?: number;
+  /** Applied to every generation unless that request explicitly overrides it. */
+  readonly defaultKeepAlive?: string | number;
   readonly fetch?: OllamaFetch;
 }

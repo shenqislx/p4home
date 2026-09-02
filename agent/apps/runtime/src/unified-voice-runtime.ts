@@ -23,7 +23,7 @@ export interface UnifiedVoiceRuntimeOptions {
   readonly stt: Omit<VoiceSttPipelineOptions, "dispatch_final" | "on_capture_open">;
   readonly interaction: Omit<
     VoiceInteractionCoordinatorOptions,
-    "device_ids" | "playback" | "present_ui" | "cancel_low_priority_cat"
+    "device_ids" | "playback" | "playback_stream" | "present_ui" | "cancel_low_priority_cat"
   >;
   readonly cat_run_registry?: LowPriorityCatRunRegistry;
 }
@@ -50,6 +50,13 @@ export class UnifiedVoiceRuntime {
       ...options.interaction,
       device_ids: deviceIds,
       playback: async (deviceId, pcm, signal) => await server.playback(deviceId, pcm, signal),
+      ...(options.interaction.render_tts_stream === undefined
+        ? {}
+        : {
+            playback_stream: async (
+              deviceId: string, source: AsyncIterable<Uint8Array>, signal: AbortSignal,
+            ) => await server.playbackStream(deviceId, source, signal),
+          }),
       present_ui: async (deviceId, update, signal) => {
         if (signal.aborted) throw signal.reason;
         return await server.presentConversationUi(deviceId, update, undefined, signal);

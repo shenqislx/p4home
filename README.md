@@ -72,7 +72,13 @@ Tailscale Serve 占用而未进入业务。改用已预检可绑定的 9444 后�
 P4、STT、Qwen、HA、三轮 UI 与 artifact 审计。首轮模型调用合计 `15.282 s`，其中 Qwen 冷加载
 `10.928 s`；热态 write/chat 模型阶段分别为 `2.001 s / 1.703 s`，STT 为
 `1.338–1.785 s`，UI ACK 为 `145–247 ms`。因此首次语言交互慢的主因已确认是 Qwen 冷加载；
-P4 wake/VAD 收口仍未拆分，响应优化与长停顿句人工确认未关闭。Phase 5 继续保持
+后续候选已将 Human 链路改为 Qwen NDJSON 增量文本 → 有界中文分段 → 常驻 Kokoro worker →
+增量 PCM → P4 credit 驱动播放，并保留 barge-in、累计安全策略、partial delivery 审计与旧 provider
+兼容。产品 readiness 前会真实预热 Qwen，并用 `keep_alive=-1` 消除空闲后的冷加载，代价是模型约
+`22–25 GB` 持续驻留。Node 24 类型检查、497 项全量测试及真实 Kokoro 非静音流式测试均通过；
+本机热态无 P4 播放链路测得首个安全句段约 `562 ms`、首个 PCM 约 `842 ms`、模型/TTS 流终态约
+`1.069 s`。真实 P4 首声延迟、连续听感和长停顿句仍待人工复验；P4 wake/VAD 收口也仍未拆分。
+Phase 5 继续保持
 `pending_real_environment`，默认 SR 仍关闭。2026-08-24 用户明确授权 Phase 6
 先完成编码、确定性测试与模拟验证。Phase 6A–6E
 本地门禁现已完成：Memory contract/SQLite、

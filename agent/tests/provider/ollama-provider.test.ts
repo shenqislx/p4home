@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   OllamaHttpProvider,
   OllamaProviderError,
+  type OllamaChatStreamEvent,
   type OllamaFetch,
 } from "@p4home/provider-ollama";
 
@@ -77,6 +78,121 @@ test("probe reports a missing model without attempting show or generation", asyn
   assert.equal(capabilities.structuredOutput, false);
   assert.equal(capabilities.structuredOutputApi, false);
   assert.deepEqual(capabilities.declaredCapabilities, []);
+});
+
+test("provider default keep_alive covers every generation and explicit requests override it", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const fetch: OllamaFetch = async (input, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    bodies.push(body);
+    const streaming = body.stream === true;
+    const chat = new URL(input.toString()).pathname === "/api/chat";
+    const value = chat
+      ? { model: MODEL, message: { role: "assistant", content: "ok" }, done: true }
+      : { model: MODEL, response: "ok", thinking: "", done: true };
+    return new Response(streaming ? `${JSON.stringify(value)}\n` : JSON.stringify(value));
+  };
+  const provider = new OllamaHttpProvider({
+    model: MODEL,
+    defaultKeepAlive: " 30m ",
+    fetch,
+  });
+
+  await provider.generate({ prompt: "generate" });
+  await provider.chat({ messages: [{ role: "user", content: "chat" }] });
+  for await (const _event of provider.chatStream({
+    messages: [{ role: "user", content: "chat stream" }],
+  })) {
+    // Consume the terminal.
+  }
+  for await (const _chunk of provider.stream({ prompt: "generate stream" })) {
+    // Consume the terminal.
+  }
+  await provider.chat({
+    messages: [{ role: "user", content: "override" }],
+    keep_alive: 0,
+  });
+
+  assert.deepEqual(bodies.map((body) => body.keep_alive), ["30m", "30m", "30m", "30m", 0]);
+});
+
+test("warmup performs one strict body-free model evaluation", async () => {
+  let calls = 0;
+  let request: Record<string, unknown> | undefined;
+  const provider = new OllamaHttpProvider({
+    model: MODEL,
+    defaultKeepAlive: "30m",
+    fetch: async (_input, init) => {
+      calls++;
+      request = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return jsonResponse({
+        model: MODEL,
+        message: { role: "assistant", content: "private warmup output", thinking: "" },
+        done: true,
+      });
+    },
+  });
+
+  await Promise.all([provider.warmup(), provider.warmup()]);
+  await provider.warmup();
+
+  assert.equal(calls, 1);
+  assert.equal(request?.think, false);
+  assert.equal(request?.keep_alive, "30m");
+  assert.equal(request?.tools, undefined);
+  assert.equal(request?.stream, false);
+});
+
+test("warmup fails readiness closed on identity thinking or tool output", async (context) => {
+  const invalid = [
+    {
+      name: "empty content",
+      response: { model: MODEL, message: { role: "assistant", content: "  " }, done: true },
+    },
+    {
+      name: "model identity",
+      response: { model: "other:latest", message: { role: "assistant", content: "ok" }, done: true },
+    },
+    {
+      name: "thinking",
+      response: {
+        model: MODEL,
+        message: { role: "assistant", content: "ok", thinking: "private" },
+        done: true,
+      },
+    },
+    {
+      name: "tool call",
+      response: {
+        model: MODEL,
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [{ function: { name: "unexpected", arguments: {} } }],
+        },
+        done: true,
+      },
+    },
+  ] as const;
+  for (const fixture of invalid) {
+    await context.test(fixture.name, async () => {
+      let calls = 0;
+      const provider = new OllamaHttpProvider({
+        model: MODEL,
+        fetch: async () => {
+          calls++;
+          return jsonResponse(fixture.response);
+        },
+      });
+      await assert.rejects(provider.warmup(), (error) => (
+        assertProviderError(error, "INVALID_RESPONSE")
+      ));
+      await assert.rejects(provider.warmup(), (error) => (
+        assertProviderError(error, "INVALID_RESPONSE")
+      ));
+      assert.equal(calls, 1);
+    });
+  }
 });
 
 test("generate sends a non-streaming request and normalizes usage metrics", async () => {
@@ -370,6 +486,238 @@ test("chat validates tool messages and supports cancellation", async () => {
   );
   controller.abort(new Error("test cancellation"));
   await assert.rejects(pending, (error) => assertProviderError(error, "CANCELLED"));
+});
+
+test("chatStream preserves UTF-8 deltas and returns one complete terminal result", async () => {
+  const encoder = new TextEncoder();
+  const payload = [
+    JSON.stringify({
+      model: MODEL,
+      message: { role: "assistant", content: "你", thinking: "想" },
+      done: false,
+    }),
+    JSON.stringify({
+      model: MODEL,
+      message: {
+        role: "assistant",
+        content: "好",
+        thinking: "好了",
+        tool_calls: [
+          { function: { index: 0, name: "character.say", arguments: { text: "你好" } } },
+        ],
+      },
+      done: false,
+    }),
+    JSON.stringify({
+      model: MODEL,
+      message: { role: "assistant", content: "！" },
+      done: true,
+      done_reason: "stop",
+      total_duration: 20,
+      load_duration: 2,
+      prompt_eval_count: 4,
+      prompt_eval_duration: 5,
+      eval_count: 3,
+      eval_duration: 7,
+    }),
+  ].join("\n");
+  const bytes = encoder.encode(payload);
+  const multibyteStart = bytes.findIndex((byte) => byte >= 0x80);
+  assert.notEqual(multibyteStart, -1);
+  let requestBody: Record<string, unknown> | undefined;
+  const fetch: OllamaFetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, multibyteStart + 1));
+        controller.enqueue(bytes.slice(multibyteStart + 1));
+        controller.close();
+      },
+    }));
+  };
+  const provider = new OllamaHttpProvider({ model: MODEL, fetch });
+
+  const events: OllamaChatStreamEvent[] = [];
+  for await (const event of provider.chatStream({
+    messages: [{ role: "user", content: "打个招呼" }],
+    think: false,
+  })) {
+    events.push(event);
+  }
+
+  assert.equal(requestBody?.stream, true);
+  assert.deepEqual(events.slice(0, 3), [
+    { kind: "content_delta", model: MODEL, content: "你" },
+    { kind: "content_delta", model: MODEL, content: "好" },
+    { kind: "content_delta", model: MODEL, content: "！" },
+  ]);
+  assert.deepEqual(events[3], {
+    kind: "terminal",
+    result: {
+      model: MODEL,
+      message: {
+        role: "assistant",
+        content: "你好！",
+        thinking: "想好了",
+        tool_calls: [
+          {
+            type: "function",
+            function: {
+              index: 0,
+              name: "character.say",
+              arguments: { text: "你好" },
+            },
+          },
+        ],
+      },
+      done_reason: "stop",
+      total_duration_ns: 20,
+      load_duration_ns: 2,
+      prompt_eval_count: 4,
+      prompt_eval_duration_ns: 5,
+      eval_count: 3,
+      eval_duration_ns: 7,
+    },
+  });
+});
+
+test("chatStream fails closed on invalid UTF-8", async () => {
+  const prefix = Buffer.from(
+    `{"model":"${MODEL}","message":{"role":"assistant","content":"`,
+    "utf8",
+  );
+  const suffix = Buffer.from('"},"done":true}\n', "utf8");
+  const invalid = Buffer.concat([prefix, Buffer.from([0xc3, 0x28]), suffix]);
+  const provider = new OllamaHttpProvider({
+    model: MODEL,
+    fetch: async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(invalid);
+        controller.close();
+      },
+    })),
+  });
+
+  await assert.rejects(async () => {
+    for await (const _event of provider.chatStream({
+      messages: [{ role: "user", content: "回答" }],
+    })) {
+      // Consume through EOF so the fatal decoder validates every byte.
+    }
+  }, (error) => assertProviderError(error, "INVALID_RESPONSE"));
+});
+
+test("chatStream fails closed on identity and terminal framing violations", async (context) => {
+  const consume = async (provider: OllamaHttpProvider): Promise<void> => {
+    for await (const _event of provider.chatStream({
+      messages: [{ role: "user", content: "回答" }],
+    })) {
+      // Consume through EOF so framing validation runs.
+    }
+  };
+
+  await context.test("model identity mismatch", async () => {
+    const provider = new OllamaHttpProvider({
+      model: MODEL,
+      fetch: async () => new Response(`${JSON.stringify({
+        model: "other:latest",
+        message: { role: "assistant", content: "wrong" },
+        done: true,
+      })}\n`),
+    });
+    await assert.rejects(consume(provider), (error) => assertProviderError(error, "INVALID_RESPONSE"));
+  });
+
+  await context.test("missing terminal", async () => {
+    const provider = new OllamaHttpProvider({
+      model: MODEL,
+      fetch: async () => new Response(`${JSON.stringify({
+        model: MODEL,
+        message: { role: "assistant", content: "partial" },
+        done: false,
+      })}\n`),
+    });
+    await assert.rejects(consume(provider), (error) => assertProviderError(error, "INVALID_RESPONSE"));
+  });
+
+  await context.test("data after terminal", async () => {
+    const provider = new OllamaHttpProvider({
+      model: MODEL,
+      fetch: async () => new Response([
+        JSON.stringify({
+          model: MODEL,
+          message: { role: "assistant", content: "done" },
+          done: true,
+        }),
+        JSON.stringify({
+          model: MODEL,
+          message: { role: "assistant", content: "late" },
+          done: false,
+        }),
+      ].join("\n")),
+    });
+    await assert.rejects(consume(provider), (error) => assertProviderError(error, "INVALID_RESPONSE"));
+  });
+});
+
+test("chatStream validates aggregated structured output before terminal", async () => {
+  const provider = new OllamaHttpProvider({
+    model: MODEL,
+    fetch: async () => new Response([
+      JSON.stringify({
+        model: MODEL,
+        message: { role: "assistant", content: '{"answer":' },
+        done: false,
+      }),
+      JSON.stringify({
+        model: MODEL,
+        message: { role: "assistant", content: "1}" },
+        done: true,
+      }),
+    ].join("\n")),
+  });
+  const events: OllamaChatStreamEvent[] = [];
+  await assert.rejects(async () => {
+    for await (const event of provider.chatStream({
+      messages: [{ role: "user", content: "回答" }],
+      format: {
+        type: "object",
+        required: ["answer"],
+        properties: { answer: { type: "string" } },
+        additionalProperties: false,
+      },
+    })) {
+      events.push(event);
+    }
+  }, (error) => assertProviderError(error, "INVALID_RESPONSE"));
+  assert.equal(events.some((event) => event.kind === "terminal"), false);
+});
+
+test("closing chatStream early cancels its response reader", async () => {
+  const encoder = new TextEncoder();
+  let cancelled = false;
+  const provider = new OllamaHttpProvider({
+    model: MODEL,
+    fetch: async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(`${JSON.stringify({
+          model: MODEL,
+          message: { role: "assistant", content: "first" },
+          done: false,
+        })}\n`));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    })),
+  });
+  const iterator = provider.chatStream({
+    messages: [{ role: "user", content: "等待" }],
+  })[Symbol.asyncIterator]();
+
+  assert.equal((await iterator.next()).value?.kind, "content_delta");
+  await iterator.return?.();
+  assert.equal(cancelled, true);
 });
 
 test("stream parses NDJSON across transport chunk boundaries", async () => {

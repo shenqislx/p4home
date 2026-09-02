@@ -43,6 +43,26 @@ export interface TtsSynthesisResult extends TtsSegmentIdentity {
   readonly duration_ms: number;
 }
 
+/**
+ * One increment of synthesized PCM. Ownership of `pcm` transfers to the
+ * consumer when the chunk is yielded; the consumer must zero it after the
+ * bytes have either been copied to the next bounded transport buffer or
+ * discarded.
+ */
+export interface TtsPcmChunk extends TtsSegmentIdentity {
+  readonly schema_version: 1;
+  readonly kind: "pcm_chunk";
+  readonly voice: TtsVoice;
+  readonly chunk_index: number;
+  readonly pcm: Uint8Array;
+  readonly sample_rate_hz: typeof TTS_SAMPLE_RATE_HZ;
+  readonly channels: typeof TTS_CHANNELS;
+  readonly sample_bits: typeof TTS_SAMPLE_BITS;
+  readonly samples: number;
+  readonly duration_ms: number;
+  readonly final: false;
+}
+
 export interface TtsSynthesisOptions {
   readonly signal?: AbortSignal;
 }
@@ -52,6 +72,18 @@ export interface TtsProvider {
     request: TtsSynthesisRequest,
     options?: TtsSynthesisOptions,
   ): Promise<TtsSynthesisResult>;
+  /** Optional so existing bounded, non-streaming providers remain compatible. */
+  stream?(
+    request: TtsSynthesisRequest,
+    options?: TtsSynthesisOptions,
+  ): AsyncIterable<TtsPcmChunk>;
+}
+
+export interface StreamingTtsProvider extends TtsProvider {
+  stream(
+    request: TtsSynthesisRequest,
+    options?: TtsSynthesisOptions,
+  ): AsyncIterable<TtsPcmChunk>;
 }
 
 export type TtsProviderErrorCode =

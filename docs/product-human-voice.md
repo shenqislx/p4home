@@ -13,8 +13,11 @@
 - Agent 不读取 HA URL、token 或 policy，也不构造 Robot HA 客户端；
 - Human 没有执行型 Tool，不能控制灯具；
 - `ui_output=required`，P4 必须确认 UI revision；
-- `audio_output=required`，回复经固定 Kokoro TTS 生成后由 P4 扬声器播放；
+- `audio_output=required`，Human 回复按安全中文分段进入常驻 Kokoro worker；每段 PCM 增量生成后
+  立即按 P4 credit 播放，不再等待整轮模型回复和整段音频全部完成；
 - Role Router 与 Human 的每次 Qwen API 请求都显式携带 `think: false`，不依赖模型默认值；
+- Agent readiness 前真实预热 Qwen，并以 `keep_alive=-1` 持续驻留；这会长期占用约 `22–25 GB`
+  主机内存，直至显式卸载模型或重启 Ollama；
 - 原始 PCM 不落盘，审计与 private Memory 写入受现有生产策略约束。
 
 ## 一次性安装
@@ -76,7 +79,12 @@ Phase 5A/5B validation marker 和 Device Agent transport。工作流会在刷写
 2. 清楚地说 `Hi ESP`；
 3. 听到 Human 人声“在呢”或看到“请说话…”后开始说中文，例如“陪我聊两句吧”；
 4. P4 对话框依次显示“请说话… → 正在识别… → 正在思考…”；
-5. Human final transcript 与回复显示在同一对话框中，并通过外接扬声器播放。
+5. Human final transcript 与回复显示在同一对话框中；扬声器会在模型完整回复结束前开始播放已完成的
+   安全语句。
+
+这里的“流式”是端到端的增量文本、clause 级 Kokoro 生成和 PCM 帧级传输。Kokoro 仍会先完成一个
+有界 clause 的声学生成，再输出该 clause 的 PCM，因此不等同于声学模型逐帧推理；实际首声延迟和
+句间连续性必须以 P4 扬声器人工听感为准。
 
 “在呢”结束到远端 capture 打开之间使用 800 ms 的 PSRAM 环形预卷；预卷按时间顺序以 2×
 实时速率追赶，避免一次性灌满 Voice 帧队列。它用于保护稍早开口的句首，但不鼓励在提示人声播放时

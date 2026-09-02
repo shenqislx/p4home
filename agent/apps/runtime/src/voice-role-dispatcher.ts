@@ -13,9 +13,11 @@ import type { RobotHaWriteRuntime } from "./robot-ha-write-runner.ts";
 import type { RoleMemoryRuntime } from "./role-memory.ts";
 import type { LowPriorityCatRunRegistry } from "./low-priority-cat-run-registry.ts";
 import type { RoleTaskCompletionNotice } from "./role-orchestrator.ts";
+import type { HumanSpeechSegment } from "./role-runner.ts";
 
 export interface UnifiedVoiceRoleDispatcherOptions {
-  readonly provider: Pick<OllamaProvider, "chat">;
+  readonly provider: Pick<OllamaProvider, "chat">
+    & Partial<Pick<OllamaProvider, "chatStream">>;
   readonly sessions: RoleSessionRegistry;
   readonly scheduler: RoleScheduler;
   readonly timeout_ms?: number;
@@ -47,6 +49,10 @@ export class UnifiedVoiceRoleDispatcher {
   public async dispatch(
     interaction: UserTextInteraction,
     signal: AbortSignal,
+    onHumanSpeechSegment?: (
+      segment: HumanSpeechSegment,
+      signal: AbortSignal | undefined,
+    ) => void | Promise<void>,
   ): Promise<RunRoleInteractionResult> {
     if (interaction.source !== "voice") {
       throw new TypeError("unified voice dispatcher accepts only voice interactions");
@@ -76,6 +82,9 @@ export class UnifiedVoiceRoleDispatcher {
       ...(this.#options.on_task_complete === undefined
         ? {}
         : { on_task_complete: this.#options.on_task_complete }),
+      ...(onHumanSpeechSegment === undefined
+        ? {}
+        : { on_human_speech_segment: onHumanSpeechSegment }),
     });
     await this.#options.on_result?.(result, interaction);
     return result;

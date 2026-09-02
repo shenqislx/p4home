@@ -26,14 +26,15 @@ test("live pinned Kokoro worker emits bounded non-silent 16 kHz PCM without a ra
   const worker = absoluteEnv("P4HOME_TTS_WORKER");
   const model = absoluteEnv("P4HOME_TTS_MODEL");
 
-  const result = await new PythonTtsProvider({
+  const provider = new PythonTtsProvider({
     python_executable: python,
     worker_script: worker,
     model_path: model,
     model_revision: TTS_MODEL_REVISION,
     provider_version: TTS_PROVIDER_VERSION,
     timeout_ms: 120_000,
-  }).synthesize({
+  });
+  const request = {
     interaction_id: "tts:live:human:1",
     assignment_id: "assignment:human:1",
     segment_index: 0,
@@ -44,14 +45,28 @@ test("live pinned Kokoro worker emits bounded non-silent 16 kHz PCM without a ra
     sample_rate_hz: 16_000,
     channels: 1,
     sample_bits: 16,
-  });
-
-  assert.equal(result.sample_rate_hz, 16_000);
-  assert.equal(result.channels, 1);
-  assert.equal(result.sample_bits, 16);
-  assert.equal(result.pcm.byteLength, result.samples * 2);
-  assert.ok(result.pcm.byteLength > 640);
-  assert.ok(result.pcm.byteLength <= 1_920_000);
-  assert.ok(result.pcm.some((byte) => byte !== 0));
-  assert.equal("path" in result, false);
+  } as const;
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  let nonzero = false;
+  try {
+    for await (const chunk of provider.stream(request)) {
+      assert.equal(chunk.chunk_index, chunks.length);
+      assert.equal(chunk.sample_rate_hz, 16_000);
+      assert.equal(chunk.channels, 1);
+      assert.equal(chunk.sample_bits, 16);
+      assert.equal(chunk.pcm.byteLength, chunk.samples * 2);
+      assert.equal("path" in chunk, false);
+      bytes += chunk.pcm.byteLength;
+      nonzero ||= chunk.pcm.some((byte) => byte !== 0);
+      chunks.push(chunk.pcm);
+    }
+    assert.ok(chunks.length > 1);
+    assert.ok(bytes > 640);
+    assert.ok(bytes <= 1_920_000);
+    assert.equal(nonzero, true);
+  } finally {
+    for (const chunk of chunks) chunk.fill(0);
+    provider.close();
+  }
 });

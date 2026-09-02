@@ -1,4 +1,4 @@
-"""Pure integer bounds shared by the one-shot TTS worker and regression tests."""
+"""Pure integer bounds shared by the persistent TTS worker and regression tests."""
 
 MAX_PCM_BYTES = 1_920_000
 MAX_SOURCE_SAMPLES_24K = (MAX_PCM_BYTES // 2) * 3 // 2

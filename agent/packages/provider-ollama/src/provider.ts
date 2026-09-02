@@ -10,6 +10,7 @@ import type {
   OllamaChatMessage,
   OllamaChatRequest,
   OllamaChatResult,
+  OllamaChatStreamEvent,
   OllamaFetch,
   OllamaGenerateChunk,
   OllamaGenerateRequest,
@@ -24,6 +25,7 @@ const DEFAULT_BASE_URL = "http://127.0.0.1:11434";
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MIN_TIMEOUT_MS = 100;
 const MAX_TIMEOUT_MS = 600_000;
+const MAX_NDJSON_LINE_BYTES = 1024 * 1024;
 
 interface RequestScope {
   readonly signal: AbortSignal;
@@ -81,6 +83,29 @@ function optionalIndex(value: unknown, field: string): number | undefined {
 
 function compact(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value).filter((entry) => entry[1] !== undefined));
+}
+
+function decodeNdjsonUtf8(
+  decoder: TextDecoder,
+  value: Uint8Array | undefined,
+  stream: boolean,
+  context: string,
+): string {
+  try {
+    return value === undefined ? decoder.decode() : decoder.decode(value, { stream });
+  } catch (error) {
+    throw new OllamaProviderError(
+      "INVALID_RESPONSE", `${context} contains invalid UTF-8`, { cause: error },
+    );
+  }
+}
+
+function assertBoundedNdjsonLine(line: string, context: string): void {
+  if (Buffer.byteLength(line, "utf8") > MAX_NDJSON_LINE_BYTES) {
+    throw new OllamaProviderError(
+      "INVALID_RESPONSE", `${context} contains an oversized NDJSON line`,
+    );
+  }
 }
 
 function formatSchemaErrors(errors: ErrorObject[] | null | undefined): string {
@@ -142,6 +167,16 @@ function validateTimeout(timeoutMs: number): number {
   return timeoutMs;
 }
 
+function validateKeepAlive(value: string | number): string | number {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (normalized.length === 0) throw new TypeError("keep_alive must not be empty");
+    return normalized;
+  }
+  if (!Number.isFinite(value)) throw new TypeError("keep_alive must be finite");
+  return value;
+}
+
 function validateGenerateRequest(request: OllamaGenerateRequest): void {
   if (request.prompt.trim().length === 0) {
     throw new TypeError("prompt must not be empty");
@@ -190,7 +225,12 @@ function usageFrom(record: Record<string, unknown>): OllamaUsage {
   }) as OllamaUsage;
 }
 
-function generateBody(model: string, request: OllamaGenerateRequest, stream: boolean): string {
+function generateBody(
+  model: string,
+  request: OllamaGenerateRequest,
+  stream: boolean,
+  defaultKeepAlive: string | number | undefined,
+): string {
   return JSON.stringify(
     compact({
       model,
@@ -199,13 +239,18 @@ function generateBody(model: string, request: OllamaGenerateRequest, stream: boo
       format: request.format,
       options: request.options,
       think: request.think,
-      keep_alive: request.keep_alive,
+      keep_alive: request.keep_alive ?? defaultKeepAlive,
       stream,
     }),
   );
 }
 
-function chatBody(model: string, request: OllamaChatRequest): string {
+function chatBody(
+  model: string,
+  request: OllamaChatRequest,
+  stream: boolean,
+  defaultKeepAlive: string | number | undefined,
+): string {
   return JSON.stringify(
     compact({
       model,
@@ -214,8 +259,8 @@ function chatBody(model: string, request: OllamaChatRequest): string {
       format: request.format,
       options: request.options,
       think: request.think,
-      keep_alive: request.keep_alive,
-      stream: false,
+      keep_alive: request.keep_alive ?? defaultKeepAlive,
+      stream,
     }),
   );
 }
@@ -288,6 +333,28 @@ function parseChatResult(value: unknown): OllamaChatResult {
     message: parseChatMessage(record.message),
     ...usageFrom(record),
   } satisfies OllamaChatResult;
+  const doneReason = optionalString(record.done_reason, "done_reason");
+  return doneReason === undefined ? base : { ...base, done_reason: doneReason };
+}
+
+interface OllamaChatWireChunk extends OllamaUsage {
+  readonly model: string;
+  readonly message: OllamaChatMessage & { readonly role: "assistant" };
+  readonly done: boolean;
+  readonly done_reason?: string;
+}
+
+function parseChatChunk(value: unknown): OllamaChatWireChunk {
+  const record = requireRecord(value, "Ollama chat stream response");
+  if (typeof record.done !== "boolean") {
+    throw new OllamaProviderError("INVALID_RESPONSE", "done must be a boolean");
+  }
+  const base = {
+    model: requireString(record.model, "model"),
+    message: parseChatMessage(record.message),
+    done: record.done,
+    ...usageFrom(record),
+  } satisfies OllamaChatWireChunk;
   const doneReason = optionalString(record.done_reason, "done_reason");
   return doneReason === undefined ? base : { ...base, done_reason: doneReason };
 }
@@ -383,7 +450,9 @@ export class OllamaHttpProvider implements OllamaProvider {
   readonly #model: string;
   readonly #baseUrl: URL;
   readonly #requestTimeoutMs: number;
+  readonly #defaultKeepAlive: string | number | undefined;
   readonly #fetch: OllamaFetch;
+  #warmupPromise: Promise<void> | null = null;
 
   public constructor(options: OllamaHttpProviderOptions) {
     const model = options.model.trim();
@@ -400,7 +469,41 @@ export class OllamaHttpProvider implements OllamaProvider {
     this.#model = model;
     this.#baseUrl = new URL(baseUrl.origin);
     this.#requestTimeoutMs = validateTimeout(options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+    this.#defaultKeepAlive = options.defaultKeepAlive === undefined
+      ? undefined
+      : validateKeepAlive(options.defaultKeepAlive);
     this.#fetch = options.fetch ?? fetch;
+  }
+
+  /**
+   * Forces a real model evaluation before product readiness. The fulfilled
+   * promise retains no model output, and callers can safely share one warmup.
+   */
+  public warmup(signal?: AbortSignal): Promise<void> {
+    this.#warmupPromise ??= this.#runWarmup(signal);
+    return this.#warmupPromise;
+  }
+
+  async #runWarmup(signal: AbortSignal | undefined): Promise<void> {
+    const result = await this.chat({
+      messages: [{ role: "user", content: "Reply with one short greeting." }],
+      options: { temperature: 0, num_predict: 4 },
+      think: false,
+    }, signal);
+    if (result.model !== this.#model) {
+      throw new OllamaProviderError(
+        "INVALID_RESPONSE", `Ollama warmup model identity mismatch: expected ${this.#model}`,
+      );
+    }
+    if (result.message.content.trim().length === 0) {
+      throw new OllamaProviderError("INVALID_RESPONSE", "Ollama warmup returned empty content");
+    }
+    if ((result.message.thinking?.trim().length ?? 0) > 0) {
+      throw new OllamaProviderError("INVALID_RESPONSE", "Ollama warmup returned thinking content");
+    }
+    if ((result.message.tool_calls?.length ?? 0) > 0) {
+      throw new OllamaProviderError("INVALID_RESPONSE", "Ollama warmup returned tool calls");
+    }
   }
 
   public async probe(signal?: AbortSignal): Promise<OllamaCapabilities> {
@@ -474,7 +577,7 @@ export class OllamaHttpProvider implements OllamaProvider {
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: generateBody(this.#model, request, false),
+        body: generateBody(this.#model, request, false, this.#defaultKeepAlive),
       },
       signal,
       request.timeout_ms,
@@ -498,7 +601,7 @@ export class OllamaHttpProvider implements OllamaProvider {
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: chatBody(this.#model, request),
+        body: chatBody(this.#model, request, false, this.#defaultKeepAlive),
       },
       signal,
       request.timeout_ms,
@@ -508,6 +611,146 @@ export class OllamaHttpProvider implements OllamaProvider {
       validateStructuredOutput?.(parsed.message.content);
     }
     return parsed;
+  }
+
+  public async *chatStream(
+    request: OllamaChatRequest,
+    signal?: AbortSignal,
+  ): AsyncIterable<OllamaChatStreamEvent> {
+    validateChatRequest(request);
+    const validateStructuredOutput = structuredOutputValidator(
+      request.format,
+      "structured chat stream response",
+    );
+    const scope = this.#scope(signal, request.timeout_ms);
+    let response: Response;
+    try {
+      response = await this.#fetch(this.#url("/api/chat"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: chatBody(this.#model, request, true, this.#defaultKeepAlive),
+        signal: scope.signal,
+      });
+    } catch (error) {
+      throw asTransportError(error, signal, scope.timeoutSignal, scope.signal);
+    }
+    if (!response.ok) {
+      scope.controller.abort(new Error("request failed"));
+      throw await this.#httpError(response, true);
+    }
+    if (response.body === null) {
+      scope.controller.abort(new Error("response body missing"));
+      throw new OllamaProviderError("INVALID_RESPONSE", "chat stream response has no body");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let buffer = "";
+    let terminalChunk: OllamaChatWireChunk | undefined;
+    let content = "";
+    let thinking = "";
+    let sawThinking = false;
+    const toolCalls: OllamaToolCall[] = [];
+
+    const consumeLine = (line: string): OllamaChatStreamEvent | undefined => {
+      if (terminalChunk !== undefined) {
+        throw new OllamaProviderError(
+          "INVALID_RESPONSE",
+          "Ollama chat stream contains data after its terminal chunk",
+        );
+      }
+      const chunk = this.#parseChatStreamLine(line);
+      if (chunk.model !== this.#model) {
+        throw new OllamaProviderError(
+          "INVALID_RESPONSE",
+          `Ollama chat stream model identity mismatch: expected ${this.#model}`,
+        );
+      }
+      content += chunk.message.content;
+      if (chunk.message.thinking !== undefined) {
+        sawThinking = true;
+        thinking += chunk.message.thinking;
+      }
+      if (chunk.message.tool_calls !== undefined) {
+        toolCalls.push(...chunk.message.tool_calls);
+      }
+      if (chunk.done) {
+        terminalChunk = chunk;
+      }
+      return chunk.message.content.length === 0
+        ? undefined
+        : {
+            kind: "content_delta",
+            model: chunk.model,
+            content: chunk.message.content,
+          };
+    };
+
+    try {
+      while (true) {
+        let readResult: ReadableStreamReadResult<Uint8Array>;
+        try {
+          readResult = await reader.read();
+        } catch (error) {
+          throw asTransportError(error, signal, scope.timeoutSignal, scope.signal);
+        }
+        if (readResult.done) {
+          buffer += decodeNdjsonUtf8(decoder, undefined, false, "Ollama chat stream");
+          break;
+        }
+        buffer += decodeNdjsonUtf8(
+          decoder, readResult.value, true, "Ollama chat stream",
+        );
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        assertBoundedNdjsonLine(buffer, "Ollama chat stream");
+        for (const line of lines) {
+          if (line.trim().length === 0) continue;
+          assertBoundedNdjsonLine(line, "Ollama chat stream");
+          const event = consumeLine(line);
+          if (event !== undefined) yield event;
+        }
+      }
+      if (buffer.trim().length > 0) {
+        assertBoundedNdjsonLine(buffer, "Ollama chat stream");
+        const event = consumeLine(buffer);
+        if (event !== undefined) yield event;
+      }
+      if (terminalChunk === undefined) {
+        throw new OllamaProviderError(
+          "INVALID_RESPONSE",
+          "Ollama chat stream ended without a terminal chunk",
+        );
+      }
+      const message = {
+        role: "assistant",
+        content,
+        ...(sawThinking ? { thinking } : {}),
+        ...(toolCalls.length === 0 ? {} : { tool_calls: toolCalls }),
+      } satisfies OllamaChatMessage & { readonly role: "assistant" };
+      const resultBase = {
+        model: terminalChunk.model,
+        message,
+        ...compact({
+          total_duration_ns: terminalChunk.total_duration_ns,
+          load_duration_ns: terminalChunk.load_duration_ns,
+          prompt_eval_count: terminalChunk.prompt_eval_count,
+          prompt_eval_duration_ns: terminalChunk.prompt_eval_duration_ns,
+          eval_count: terminalChunk.eval_count,
+          eval_duration_ns: terminalChunk.eval_duration_ns,
+        }),
+      } satisfies OllamaChatResult;
+      const result = terminalChunk.done_reason === undefined
+        ? resultBase
+        : { ...resultBase, done_reason: terminalChunk.done_reason };
+      if (toolCalls.length === 0) {
+        validateStructuredOutput?.(content);
+      }
+      yield { kind: "terminal", result };
+    } finally {
+      scope.controller.abort(new Error("chat stream consumer closed"));
+      void reader.cancel().catch(() => undefined);
+    }
   }
 
   public async *stream(
@@ -525,7 +768,7 @@ export class OllamaHttpProvider implements OllamaProvider {
       response = await this.#fetch(this.#url("/api/generate"), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: generateBody(this.#model, request, true),
+        body: generateBody(this.#model, request, true, this.#defaultKeepAlive),
         signal: scope.signal,
       });
     } catch (error) {
@@ -541,7 +784,7 @@ export class OllamaHttpProvider implements OllamaProvider {
     }
 
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let buffer = "";
     let terminal = false;
     let responseText = "";
@@ -554,12 +797,13 @@ export class OllamaHttpProvider implements OllamaProvider {
           throw asTransportError(error, signal, scope.timeoutSignal, scope.signal);
         }
         if (readResult.done) {
-          buffer += decoder.decode();
+          buffer += decodeNdjsonUtf8(decoder, undefined, false, "Ollama stream");
           break;
         }
-        buffer += decoder.decode(readResult.value, { stream: true });
+        buffer += decodeNdjsonUtf8(decoder, readResult.value, true, "Ollama stream");
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
+        assertBoundedNdjsonLine(buffer, "Ollama stream");
         for (const line of lines) {
           if (line.trim().length === 0) {
             continue;
@@ -570,6 +814,7 @@ export class OllamaHttpProvider implements OllamaProvider {
               "Ollama stream contains data after its terminal chunk",
             );
           }
+          assertBoundedNdjsonLine(line, "Ollama stream");
           const chunk = this.#parseStreamLine(line);
           responseText += chunk.response;
           if (chunk.done) {
@@ -580,6 +825,7 @@ export class OllamaHttpProvider implements OllamaProvider {
         }
       }
       if (buffer.trim().length > 0) {
+        assertBoundedNdjsonLine(buffer, "Ollama stream");
         if (terminal) {
           throw new OllamaProviderError(
             "INVALID_RESPONSE",
@@ -602,11 +848,7 @@ export class OllamaHttpProvider implements OllamaProvider {
       }
     } finally {
       scope.controller.abort(new Error("stream consumer closed"));
-      try {
-        await reader.cancel();
-      } catch {
-        // The body may already be errored or fully consumed.
-      }
+      void reader.cancel().catch(() => undefined);
     }
   }
 
@@ -675,5 +917,21 @@ export class OllamaHttpProvider implements OllamaProvider {
       throw new OllamaProviderError("HTTP_ERROR", value.error.slice(0, 512));
     }
     return parseGenerateChunk(value);
+  }
+
+  #parseChatStreamLine(line: string): OllamaChatWireChunk {
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      throw new OllamaProviderError(
+        "INVALID_RESPONSE",
+        "Ollama chat stream contains invalid NDJSON",
+      );
+    }
+    if (isRecord(value) && typeof value.error === "string") {
+      throw new OllamaProviderError("HTTP_ERROR", value.error.slice(0, 512));
+    }
+    return parseChatChunk(value);
   }
 }

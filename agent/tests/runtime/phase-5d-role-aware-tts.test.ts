@@ -118,6 +118,57 @@ test("Human prose cannot create a Robot voice segment or forge Robot execution p
   assert.equal(result.segments[0]?.robot_tool_terminals.length, 0);
 });
 
+test("streaming Human segment validates identity and transfers PCM chunks incrementally", async () => {
+  const requests: TtsSynthesisRequest[] = [];
+  const generated = [new Uint8Array(320).fill(3), new Uint8Array(640).fill(4)];
+  const provider: TtsProvider = {
+    async synthesize(): Promise<TtsSynthesisResult> { throw new Error("unused"); },
+    async *stream(request) {
+      requests.push(structuredClone(request));
+      for (const [chunkIndex, pcm] of generated.entries()) {
+        yield {
+          schema_version: 1,
+          kind: "pcm_chunk",
+          interaction_id: request.interaction_id,
+          assignment_id: request.assignment_id,
+          segment_index: request.segment_index,
+          role_id: request.role_id,
+          voice: request.voice,
+          chunk_index: chunkIndex,
+          pcm,
+          sample_rate_hz: 16_000,
+          channels: 1,
+          sample_bits: 16,
+          samples: pcm.byteLength / 2,
+          duration_ms: pcm.byteLength / 2 / 16_000 * 1_000,
+          final: false,
+        };
+      }
+    },
+  };
+  const received: Uint8Array[] = [];
+  for await (const pcm of new RoleAwareTtsPipeline(provider).streamHumanSegment(
+    "voice:interaction:stream",
+    {
+      schema_version: 1,
+      interaction_id: "voice:interaction:stream",
+      assignment_id: "assignment:human:stream",
+      segment_index: 2,
+      role_id: "human",
+      text: "现在就开始说。",
+    },
+  )) {
+    received.push(pcm.slice());
+    pcm.fill(0);
+  }
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.voice, TTS_ROLE_VOICES.human);
+  assert.equal(requests[0]?.text, "现在就开始说。");
+  assert.deepEqual(received.map((pcm) => pcm.byteLength), [320, 640]);
+  assert.ok(generated.every((pcm) => pcm.every((value) => value === 0)));
+});
+
 test("Robot error and unknown terminals override model prose with deterministic truth", async () => {
   const provider = new FakeTtsProvider();
   const response = mixedResponse();

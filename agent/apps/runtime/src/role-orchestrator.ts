@@ -1,4 +1,8 @@
-import { OllamaProviderError, type OllamaProvider } from "@p4home/provider-ollama";
+import {
+  OllamaProviderError,
+  type OllamaChatStreamEvent,
+  type OllamaProvider,
+} from "@p4home/provider-ollama";
 import { createHash } from "node:crypto";
 import type { ToolFailureResult } from "@p4home/core";
 import type { RunAuditTrace } from "@p4home/storage-sqlite";
@@ -15,6 +19,7 @@ import {
 import {
   runAssignedRole,
   RoleRunAuditFinalizeError,
+  type HumanSpeechSegment,
   type RoleRunError,
   type RoleRunResult,
 } from "./role-runner.ts";
@@ -48,7 +53,8 @@ export interface RunRoleInteractionOptions {
   readonly interaction: UserTextInteraction;
   readonly route_plan_id: string;
   readonly run_id: string;
-  readonly provider: Pick<OllamaProvider, "chat">;
+  readonly provider: Pick<OllamaProvider, "chat">
+    & Partial<Pick<OllamaProvider, "chatStream">>;
   readonly sessions: RoleSessionRegistry;
   readonly scheduler: RoleScheduler;
   readonly timeout_ms?: number;
@@ -61,6 +67,10 @@ export interface RunRoleInteractionOptions {
   readonly human_only?: boolean;
   readonly cat_run_registry?: LowPriorityCatRunRegistry;
   readonly on_task_complete?: (notice: RoleTaskCompletionNotice) => void;
+  readonly on_human_speech_segment?: (
+    segment: HumanSpeechSegment,
+    signal: AbortSignal | undefined,
+  ) => void | Promise<void>;
 }
 
 export interface RunRoleInteractionResult {
@@ -177,6 +187,25 @@ function settleOnAbort<T>(
       (error: unknown) => finish(() => reject(error)),
     );
   });
+}
+
+async function* settleStreamOnAbort(
+  stream: AsyncIterable<OllamaChatStreamEvent>,
+  signal: AbortSignal | undefined,
+): AsyncIterable<OllamaChatStreamEvent> {
+  const iterator = stream[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      const next = await settleOnAbort(async () => await iterator.next(), signal);
+      if (next.done) return;
+      yield next.value;
+    }
+  } finally {
+    const close = iterator.return;
+    if (typeof close === "function") {
+      void Promise.resolve(close.call(iterator)).catch(() => undefined);
+    }
+  }
 }
 
 interface AssignmentAuditTracker {
@@ -307,8 +336,16 @@ export async function runRoleInteraction(
     chat: async (request, signal) => await settleOnAbort(
       async () => await options.provider.chat(request, signal), signal,
     ),
+    ...(options.provider.chatStream === undefined
+      ? {}
+      : {
+          chatStream: (request, signal) => settleStreamOnAbort(
+            options.provider.chatStream!(request, signal), signal,
+          ),
+        }),
   });
-  const boundedProvider: Pick<OllamaProvider, "chat"> = measuredProvider.provider;
+  const boundedProvider: Pick<OllamaProvider, "chat">
+    & Partial<Pick<OllamaProvider, "chatStream">> = measuredProvider.provider;
   const routing = await routeInteraction({
     interaction: options.interaction,
     route_plan_id: options.route_plan_id,
@@ -319,6 +356,9 @@ export async function runRoleInteraction(
     ...(options.human_only === undefined ? {} : { human_only: options.human_only }),
   });
   const auditTrackers: AssignmentAuditTracker[] = [];
+  const streamSingleHuman = routing.plan.assignments.length === 1
+    && routing.plan.assignments[0]?.role_id === "human"
+    && routing.plan.assignments[0]?.mode === "respond";
   const scheduled = routing.plan.assignments.map(async (assignment, index): Promise<AssignmentRunResult> => {
     const runId = assignmentRunId(options.run_id, index, routing.plan.assignments.length);
     const auditTracker: AssignmentAuditTracker = {
@@ -348,6 +388,9 @@ export async function runRoleInteraction(
           ...(assignmentAudit === undefined ? {} : { audit: assignmentAudit }),
           ...(options.robot_ha === undefined ? {} : { robot_ha: options.robot_ha }),
           ...(options.memory === undefined ? {} : { memory: options.memory }),
+          ...(streamSingleHuman && options.on_human_speech_segment !== undefined
+            ? { on_human_speech_segment: options.on_human_speech_segment }
+            : {}),
           on_side_effect_dispatched: () => {
             auditTracker.dispatched = true;
           },

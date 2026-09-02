@@ -325,6 +325,7 @@ export class RoleRunAuditTrail {
           role_id: result.role_id,
           outcome: result.outcome,
           capability_available: result.capability_available,
+          ...(result.status === "completed" ? {} : { delivery_status: "partial" }),
         })];
     const event = this.#event(`role.run.${result.status}`, {
       interaction_id: this.#interaction.interaction_id,
@@ -337,6 +338,9 @@ export class RoleRunAuditTrail {
       tool_call_count: result.tool_results.length,
       capability_available: result.capability_available,
       error_code: result.error?.code ?? null,
+      ...(result.status !== "completed" && result.final_text.length > 0
+        ? { spoken_prefix_retained: true }
+        : {}),
     });
     await this.#store.writeBatch({
       messages: [...pending.messages, ...messages],

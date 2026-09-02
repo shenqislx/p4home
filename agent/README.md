@@ -81,6 +81,11 @@ playback。`ui_output=required` 与 `audio_output=required` 必须分别完成�
   `http/ws` 场景可显式设置 `P4HOME_HA_ALLOW_INSECURE=1`；
 - 审计/Memory：`P4HOME_PRODUCT_AUDIT_DB`，自动使用 review 已批准的 quota/retention revision 1。
 
+产品入口在发布 readiness 前会执行一次不进入 session/audit 的真实 Qwen warmup，并为
+Router、Human、Robot 的后续请求统一设置 `keep_alive=-1`。这会消除空闲后的冷加载，但也会让
+`qwen3.6:35b-mlx` 在 Ollama 中持续占用约 22–25 GB 内存，直至显式卸载模型或重启 Ollama；这是
+实时语音延迟与主机资源占用之间的产品级取舍。单次显式设置 `keep_alive` 的调用仍可覆盖该默认值。
+
 启动日志只输出聚合状态，不输出语音文本、回复正文或凭证。该入口和本地测试通过仍不等于 5E
 实机门禁通过；必须另有真实 P4 串口中的 `VERIFY:phase5e:ui_conversation:PASS` 与
 `VERIFY:phase5e:ui_applied:PASS` 证据。

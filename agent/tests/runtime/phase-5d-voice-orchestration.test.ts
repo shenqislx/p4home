@@ -17,6 +17,7 @@ import {
   VoiceInteractionCoordinator,
   bindVoiceInteractionCoordinator,
   type ComposedRoleResponse,
+  type HumanSpeechSegment,
   type RunRoleInteractionResult,
   type UserTextInteraction,
   type VoiceCaptureSummary,
@@ -156,6 +157,24 @@ function unknownRobotResponse(): ComposedRoleResponse {
   };
 }
 
+function humanResponse(text = "当然可以。你今天过得怎么样？"): ComposedRoleResponse {
+  return {
+    schema_version: 1,
+    status: "completed",
+    text,
+    parts: [{
+      assignment_id: "assignment:human:stream",
+      role_id: "human",
+      source_span: { start: 0, end: 4 },
+      status: "completed",
+      outcome: "response",
+      text,
+      error_code: null,
+      tool_results: [],
+    }],
+  };
+}
+
 let playbackSequence = 10;
 function playbackSummary(deviceId: string, status: VoicePlaybackSummary["status"] = "completed"):
 VoicePlaybackSummary {
@@ -271,6 +290,63 @@ test("unified voice result renders and plays Human then Robot without retaining 
   });
   assert.ok(provider.generated.every((pcm) => pcm.every((sample) => sample === 0)));
   assert.equal(coordinator.active_count, 0);
+});
+
+test("single Human response synthesizes and plays safe segments before model terminal", async () => {
+  const events: string[] = [];
+  const response = humanResponse();
+  const segments = ["当然可以。", "你今天过得怎么样？"];
+  const coordinator = new VoiceInteractionCoordinator({
+    device_ids: [DEVICE_ID],
+    dispatch_role: async (_value, signal, onSpeech) => {
+      assert.ok(onSpeech !== undefined);
+      for (const [segmentIndex, text] of segments.entries()) {
+        events.push(`model:${segmentIndex}`);
+        await onSpeech({
+          schema_version: 1,
+          interaction_id: "voice:coordinator:101",
+          assignment_id: "assignment:human:stream",
+          segment_index: segmentIndex,
+          role_id: "human",
+          text,
+        } satisfies HumanSpeechSegment, signal);
+      }
+      events.push("model:terminal");
+      return roleResult(response);
+    },
+    render_tts: async () => { throw new Error("batch TTS must not run"); },
+    playback: async () => { throw new Error("batch playback must not run"); },
+    render_tts_stream: (_id, segment) => (async function* (): AsyncIterable<Uint8Array> {
+      events.push(`tts:${segment.segment_index}:first`);
+      yield new Uint8Array(320).fill(segment.segment_index + 1);
+      events.push(`tts:${segment.segment_index}:second`);
+      yield new Uint8Array(320).fill(segment.segment_index + 1);
+    })(),
+    playback_stream: async (deviceId, source) => {
+      let bytes = 0;
+      for await (const pcm of source) {
+        bytes += pcm.byteLength;
+        pcm.fill(0);
+      }
+      const summary = playbackSummary(deviceId);
+      events.push(`playback:${summary.session_id}:${bytes}`);
+      return summary;
+    },
+    cancel_low_priority_cat: () => undefined,
+  });
+  coordinator.onCaptureOpen(summary(101));
+  const result = await coordinator.run(
+    interaction(101), new AbortController().signal, context(101),
+  );
+
+  assert.equal(result.outcome, "completed");
+  assert.equal(result.tts_pcm_bytes, 1_280);
+  assert.equal(result.tts_duration_ms, 40);
+  assert.equal(result.playback_segments.length, 2);
+  assert.equal(result.metrics.stages.tts.status, "completed");
+  assert.equal(result.metrics.stages.playback_transport.status, "completed");
+  assert.ok(events.indexOf("tts:0:first") < events.indexOf("model:1"));
+  assert.ok(events.indexOf("model:terminal") > events.findIndex((item) => item.startsWith("playback:")));
 });
 
 test("speakerless product mode completes only after role execution and Conversation UI delivery", async () => {

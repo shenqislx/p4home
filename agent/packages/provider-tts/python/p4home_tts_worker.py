@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-shot, memory-only MLX Kokoro worker for the Phase 5D TTS boundary."""
+"""Persistent, memory-only MLX Kokoro worker with bounded NDJSON PCM chunks."""
 
 from __future__ import annotations
 
@@ -16,6 +16,11 @@ import sys
 
 import numpy as np
 
+# Model libraries may print while their lazy generators are being advanced.
+# Keep protocol output pinned to the original stdout so redirecting provider
+# diagnostics can never swallow PCM chunks into stderr.
+PROTOCOL_STDOUT = sys.stdout
+
 BOUNDS_PATH = pathlib.Path(__file__).resolve().with_name("tts_bounds.py")
 if not BOUNDS_PATH.is_file() or BOUNDS_PATH.is_symlink():
     raise SystemExit("TTS bounds module is unavailable")
@@ -23,8 +28,12 @@ BOUNDS = runpy.run_path(str(BOUNDS_PATH))
 MAX_PCM_BYTES = BOUNDS["MAX_PCM_BYTES"]
 checked_source_total = BOUNDS["checked_source_total"]
 
+WORKER_SCHEMA_VERSION = 2
 MAX_REQUEST_BYTES = 8_192
 MAX_TEXT_CHARS = 1_024
+PCM_CHUNK_BYTES = 640
+MAX_CLAUSE_CHARS = 80
+SOFT_CLAUSE_CHARS = 24
 MODEL_ID = "mlx-community/Kokoro-82M-bf16"
 MODEL_REVISION = "a71e4d38b236d968966a2002c4c895dbd12b1c3c"
 PROVIDER_VERSION = "0.4.8"
@@ -37,6 +46,8 @@ REQUIRED_FILES = (
 ROLE_VOICES = {"human": "zf_xiaobei", "robot": "zm_yunxi"}
 CONTRACT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+STRONG_BOUNDARIES = frozenset("。！？!?；;：:\n")
+SOFT_BOUNDARIES = frozenset("，,、")
 
 
 def sha256(path: pathlib.Path) -> str:
@@ -53,9 +64,8 @@ def model_verified(model: pathlib.Path) -> bool:
         if (
             not model.is_dir()
             or model.is_symlink()
-            or {entry.name for entry in model.iterdir()} != {
-                "config.json", "kokoro-v1_0.safetensors", "voices", "p4home-model-manifest.json"
-            }
+            or {entry.name for entry in model.iterdir()}
+            != {"config.json", "kokoro-v1_0.safetensors", "voices", "p4home-model-manifest.json"}
             or not voices.is_dir()
             or voices.is_symlink()
             or {entry.name for entry in voices.iterdir()}
@@ -89,8 +99,10 @@ def model_verified(model: pathlib.Path) -> bool:
 
 
 def emit(value: dict[str, object]) -> None:
-    sys.stdout.write(json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n")
-    sys.stdout.flush()
+    PROTOCOL_STDOUT.write(
+        json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n"
+    )
+    PROTOCOL_STDOUT.flush()
 
 
 def identity(request: dict[str, object]) -> dict[str, object]:
@@ -104,13 +116,17 @@ def identity(request: dict[str, object]) -> dict[str, object]:
 
 
 def fail(code: str, request: dict[str, object]) -> None:
-    emit({"schema_version": 1, "status": "error", **identity(request), "error_code": code})
+    emit({
+        "schema_version": WORKER_SCHEMA_VERSION,
+        "status": "error",
+        **identity(request),
+        "error_code": code,
+    })
 
 
-def parse_request() -> dict[str, object]:
-    raw = sys.stdin.buffer.readline(MAX_REQUEST_BYTES + 1)
-    if len(raw) == 0 or len(raw) > MAX_REQUEST_BYTES or sys.stdin.buffer.read(1):
-        raise ValueError("invalid request")
+def parse_request(raw: bytes) -> dict[str, object]:
+    if len(raw) == 0 or len(raw) > MAX_REQUEST_BYTES or not raw.endswith(b"\n"):
+        raise ValueError("invalid request framing")
     request = json.loads(raw)
     expected = {
         "schema_version", "interaction_id", "assignment_id", "segment_index", "role_id",
@@ -120,7 +136,7 @@ def parse_request() -> dict[str, object]:
         raise ValueError("invalid request")
     role = request.get("role_id")
     if (
-        request.get("schema_version") != 1
+        request.get("schema_version") != WORKER_SCHEMA_VERSION
         or not isinstance(request.get("interaction_id"), str)
         or CONTRACT_ID.fullmatch(request["interaction_id"]) is None
         or not isinstance(request.get("assignment_id"), str)
@@ -143,6 +159,27 @@ def parse_request() -> dict[str, object]:
     return request
 
 
+def split_text_for_streaming(text: str) -> list[str]:
+    """Keep all characters while bounding the first and subsequent Kokoro clauses."""
+    clauses: list[str] = []
+    current: list[str] = []
+    for character in text:
+        current.append(character)
+        length = len(current)
+        if (
+            character in STRONG_BOUNDARIES
+            or (character in SOFT_BOUNDARIES and length >= SOFT_CLAUSE_CHARS)
+            or length >= MAX_CLAUSE_CHARS
+        ):
+            clauses.append("".join(current))
+            current = []
+    if current:
+        clauses.append("".join(current))
+    if not clauses or "".join(clauses) != text or any(len(clause) > MAX_CLAUSE_CHARS for clause in clauses):
+        raise ValueError("invalid streaming clauses")
+    return clauses
+
+
 def downsample_24k_to_16k(audio: np.ndarray) -> np.ndarray:
     """Apply deterministic polyphase anti-alias filtering at the exact 2/3 ratio."""
     if audio.ndim != 1 or audio.size < 2 or not np.isfinite(audio).all():
@@ -155,68 +192,136 @@ def downsample_24k_to_16k(audio: np.ndarray) -> np.ndarray:
     return resampled.astype(np.float32)
 
 
+def synthesize(model: object, model_path: pathlib.Path, request: dict[str, object]) -> None:
+    source_samples = 0
+    output_bytes = 0
+    output_samples = 0
+    chunk_index = 0
+    clauses = split_text_for_streaming(str(request["text"]))
+    voice_path = model_path / "voices" / f"{request['voice']}.safetensors"
+    with contextlib.redirect_stdout(sys.stderr):
+        generated = model.generate(
+            clauses,
+            voice=str(voice_path),
+            speed=1.0,
+            lang_code="z",
+            split_pattern=None,
+        )
+        for result in generated:
+            if result.sample_rate != 24_000:
+                raise ValueError("unexpected sample rate")
+            source = np.asarray(result.audio, dtype=np.float32).reshape(-1).copy()
+            if source.size == 0 or not np.isfinite(source).all():
+                source.fill(0)
+                raise ValueError("invalid provider audio")
+            source_samples = checked_source_total(source_samples, int(source.size))
+            resampled = downsample_24k_to_16k(source)
+            source.fill(0)
+            pcm_array = np.rint(np.clip(resampled, -1.0, 1.0) * 32767.0).astype("<i2")
+            resampled.fill(0)
+            pcm = bytearray(pcm_array.tobytes())
+            pcm_array.fill(0)
+            try:
+                if len(pcm) == 0 or len(pcm) % 2 != 0 or output_bytes + len(pcm) > MAX_PCM_BYTES:
+                    raise ValueError("PCM outside bounds")
+                for offset in range(0, len(pcm), PCM_CHUNK_BYTES):
+                    piece = bytearray(pcm[offset : offset + PCM_CHUNK_BYTES])
+                    try:
+                        samples = len(piece) // 2
+                        encoded = base64.b64encode(piece).decode("ascii")
+                        emit({
+                            "schema_version": WORKER_SCHEMA_VERSION,
+                            "status": "chunk",
+                            **identity(request),
+                            "chunk_index": chunk_index,
+                            "pcm_base64": encoded,
+                            "sample_rate_hz": 16_000,
+                            "channels": 1,
+                            "sample_bits": 16,
+                            "samples": samples,
+                            "duration_ms": samples / 16_000 * 1000,
+                            "final": False,
+                        })
+                        del encoded
+                        chunk_index += 1
+                        output_bytes += len(piece)
+                        output_samples += samples
+                    finally:
+                        piece[:] = b"\x00" * len(piece)
+            finally:
+                pcm[:] = b"\x00" * len(pcm)
+    if chunk_index < 1 or output_bytes < 2 or output_samples != output_bytes // 2:
+        raise ValueError("provider returned no audio")
+    emit({
+        "schema_version": WORKER_SCHEMA_VERSION,
+        "status": "completed",
+        **identity(request),
+        "chunk_count": chunk_index,
+        "pcm_bytes": output_bytes,
+        "sample_rate_hz": 16_000,
+        "channels": 1,
+        "sample_bits": 16,
+        "samples": output_samples,
+        "duration_ms": output_samples / 16_000 * 1000,
+        "python_version": ".".join(str(part) for part in sys.version_info[:3]),
+    })
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True, type=pathlib.Path)
     args = parser.parse_args()
-    try:
-        request = parse_request()
-    except (TypeError, ValueError, json.JSONDecodeError):
-        # Invalid requests cannot be identity-bound, so exit without protocol output.
-        return 2
-
     if (
         os.environ.get("P4HOME_TTS_PROVIDER_VERSION") != PROVIDER_VERSION
         or os.environ.get("P4HOME_TTS_MODEL_REVISION") != MODEL_REVISION
         or not model_verified(args.model)
     ):
-        fail("MODEL_UNAVAILABLE", request)
+        emit({
+            "schema_version": WORKER_SCHEMA_VERSION,
+            "status": "startup_error",
+            "error_code": "MODEL_UNAVAILABLE",
+        })
         return 2
-
     try:
         with contextlib.redirect_stdout(sys.stderr):
             from mlx_audio.tts.utils import load_model
 
             model = load_model(args.model)
-            chunks = []
-            source_samples = 0
-            voice_path = args.model / "voices" / f"{request['voice']}.safetensors"
-            for result in model.generate(
-                request["text"], voice=str(voice_path), speed=1.0, lang_code="z"
-            ):
-                if result.sample_rate != 24_000:
-                    raise ValueError("unexpected sample rate")
-                chunk = np.asarray(result.audio, dtype=np.float32).reshape(-1)
-                if chunk.size == 0 or not np.isfinite(chunk).all():
-                    raise ValueError("invalid provider audio")
-                source_samples = checked_source_total(source_samples, int(chunk.size))
-                chunks.append(chunk)
-        if not chunks:
-            raise ValueError("provider returned no audio")
-        audio = downsample_24k_to_16k(np.concatenate(chunks))
-        pcm = np.rint(np.clip(audio, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
-        if len(pcm) == 0 or len(pcm) > MAX_PCM_BYTES or len(pcm) % 2 != 0:
-            raise ValueError("PCM outside bounds")
     except Exception as error:
-        sys.stderr.write(f"TTS provider failed type={type(error).__name__}\n")
+        sys.stderr.write(f"TTS startup failed type={type(error).__name__}\n")
         sys.stderr.flush()
-        fail("PROCESS_ERROR", request)
+        emit({
+            "schema_version": WORKER_SCHEMA_VERSION,
+            "status": "startup_error",
+            "error_code": "PROCESS_ERROR",
+        })
         return 1
-
-    samples = len(pcm) // 2
     emit({
-        "schema_version": 1,
-        "status": "completed",
-        **identity(request),
-        "pcm_base64": base64.b64encode(pcm).decode("ascii"),
-        "sample_rate_hz": 16_000,
-        "channels": 1,
-        "sample_bits": 16,
-        "samples": samples,
-        "duration_ms": round(samples / 16_000 * 1000, 3),
+        "schema_version": WORKER_SCHEMA_VERSION,
+        "status": "ready",
+        "provider_version": PROVIDER_VERSION,
+        "model_revision": MODEL_REVISION,
         "python_version": ".".join(str(part) for part in sys.version_info[:3]),
     })
-    return 0
+    while True:
+        raw = sys.stdin.buffer.readline(MAX_REQUEST_BYTES + 1)
+        if len(raw) == 0:
+            return 0
+        try:
+            request = parse_request(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            # An unbound protocol violation makes the persistent channel unsafe.
+            return 2
+        raw = b""
+        try:
+            synthesize(model, args.model, request)
+        except Exception as error:
+            sys.stderr.write(f"TTS provider failed type={type(error).__name__}\n")
+            sys.stderr.flush()
+            fail("PROCESS_ERROR", request)
+            request["text"] = ""
+            return 1
+        request["text"] = ""
 
 
 if __name__ == "__main__":

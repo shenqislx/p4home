@@ -6,12 +6,14 @@ import {
   TTS_SAMPLE_RATE_HZ,
   TtsProviderError,
   type TtsProvider,
+  type TtsPcmChunk,
   type TtsRole,
   type TtsSynthesisRequest,
   type TtsSynthesisResult,
 } from "@p4home/provider-tts";
 
 import type { ComposedResponsePart, ComposedRoleResponse } from "./role-response-composer.ts";
+import type { HumanSpeechSegment } from "./role-runner.ts";
 
 const MAX_TTS_SEGMENTS = 8;
 
@@ -164,6 +166,98 @@ export class RoleAwareTtsPipeline {
 
   public constructor(provider: TtsProvider) {
     this.#provider = provider;
+  }
+
+  public async *streamHumanSegment(
+    interactionId: string,
+    segment: HumanSpeechSegment,
+    signal?: AbortSignal,
+  ): AsyncIterable<Uint8Array> {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(interactionId)
+        || segment.schema_version !== 1 || segment.interaction_id !== interactionId
+        || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(segment.assignment_id)
+        || !Number.isInteger(segment.segment_index) || segment.segment_index < 0
+        || segment.segment_index > 63 || segment.role_id !== "human"
+        || segment.text.trim() !== segment.text || segment.text.length < 1
+        || segment.text.length > 1_024) {
+      throw new RoleAwareTtsError(
+        "INVALID_COMPOSITION", "streaming Human TTS segment identity or text is invalid",
+      );
+    }
+    const stream = this.#provider.stream;
+    if (stream === undefined) {
+      throw new RoleAwareTtsError("PROVIDER_ERROR", "TTS provider does not support streaming");
+    }
+    if (isAborted(signal)) aborted(signal);
+    const request = {
+      interaction_id: interactionId,
+      assignment_id: segment.assignment_id,
+      segment_index: segment.segment_index,
+      role_id: "human",
+      text: segment.text,
+      voice: TTS_ROLE_VOICES.human,
+      language: "zh",
+      sample_rate_hz: TTS_SAMPLE_RATE_HZ,
+      channels: TTS_CHANNELS,
+      sample_bits: TTS_SAMPLE_BITS,
+    } satisfies TtsSynthesisRequest;
+    let chunkIndex = 0;
+    let totalBytes = 0;
+    try {
+      for await (const chunk of stream.call(
+        this.#provider, request, signal === undefined ? {} : { signal },
+      )) {
+        this.#assertStreamChunk(chunk, request, chunkIndex);
+        if (isAborted(signal)) {
+          chunk.pcm.fill(0);
+          aborted(signal);
+        }
+        totalBytes += chunk.pcm.byteLength;
+        if (totalBytes > TTS_MAX_PCM_BYTES) {
+          chunk.pcm.fill(0);
+          throw new RoleAwareTtsError(
+            "LIMIT_EXCEEDED", "streaming Human TTS PCM exceeded the total bound",
+          );
+        }
+        chunkIndex++;
+        yield chunk.pcm;
+      }
+      if (chunkIndex === 0) {
+        throw new RoleAwareTtsError("PROVIDER_ERROR", "streaming Human TTS returned no PCM");
+      }
+    } catch (error) {
+      if (error instanceof RoleAwareTtsError) throw error;
+      if (isAborted(signal) || (error instanceof TtsProviderError && error.code === "CANCELLED")) {
+        aborted(signal);
+      }
+      throw new RoleAwareTtsError(
+        "PROVIDER_ERROR", "streaming Human TTS provider failed", { cause: error },
+      );
+    }
+  }
+
+  #assertStreamChunk(
+    chunk: TtsPcmChunk,
+    request: TtsSynthesisRequest,
+    chunkIndex: number,
+  ): void {
+    const expectedDurationMs = chunk.samples / TTS_SAMPLE_RATE_HZ * 1_000;
+    if (chunk.schema_version !== 1 || chunk.kind !== "pcm_chunk" || chunk.final !== false
+        || chunk.interaction_id !== request.interaction_id
+        || chunk.assignment_id !== request.assignment_id
+        || chunk.segment_index !== request.segment_index || chunk.role_id !== "human"
+        || chunk.voice !== TTS_ROLE_VOICES.human || chunk.chunk_index !== chunkIndex
+        || chunk.sample_rate_hz !== TTS_SAMPLE_RATE_HZ || chunk.channels !== TTS_CHANNELS
+        || chunk.sample_bits !== TTS_SAMPLE_BITS || !(chunk.pcm instanceof Uint8Array)
+        || chunk.pcm.byteLength < 2 || chunk.pcm.byteLength % 2 !== 0
+        || !Number.isInteger(chunk.samples) || chunk.samples !== chunk.pcm.byteLength / 2
+        || !Number.isFinite(chunk.duration_ms) || chunk.duration_ms <= 0
+        || Math.abs(chunk.duration_ms - expectedDurationMs) > 0.000_51) {
+      if (chunk.pcm instanceof Uint8Array) chunk.pcm.fill(0);
+      throw new RoleAwareTtsError(
+        "PROVIDER_ERROR", "streaming Human TTS returned invalid identity or PCM geometry",
+      );
+    }
   }
 
   public async render(

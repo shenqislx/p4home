@@ -31,8 +31,22 @@ export interface VoicePlaybackIdentity {
 
 export interface VoicePlaybackWire {
   sendControl(message: VoiceControlMessage): void;
+  /** Takes ownership of message and must clear it after the transport send settles. */
   sendBinary(message: Uint8Array): void;
 }
+
+interface VoicePlaybackSenderCommonOptions {
+  readonly device_id: string;
+  readonly identity: VoicePlaybackIdentity;
+  readonly wire: VoicePlaybackWire;
+  readonly max_inflight_frames?: number;
+  readonly timeout_ms?: number;
+}
+
+type VoicePlaybackSenderOptions = VoicePlaybackSenderCommonOptions & (
+  | { readonly pcm: Uint8Array; readonly pcm_stream?: never }
+  | { readonly pcm?: never; readonly pcm_stream: AsyncIterable<Uint8Array> }
+);
 
 export interface VoicePlaybackSummary {
   readonly schema_version: 1;
@@ -97,13 +111,24 @@ function signalAborted(signal: AbortSignal | undefined): boolean {
 export class VoicePlaybackSender {
   readonly #deviceId: string;
   readonly #identity: VoicePlaybackIdentity;
-  readonly #pcm: Uint8Array;
+  readonly #source: AsyncIterator<Uint8Array>;
   readonly #wire: VoicePlaybackWire;
   readonly #flow = new VoiceSessionFlowTracker();
   readonly #timeoutMs: number;
   readonly #maxInflightFrames: number;
+  readonly #framePcm = new Uint8Array(VOICE_FRAME_PAYLOAD_BYTES);
+  #ownedInput: Uint8Array | null = null;
+  #sourceChunk: Uint8Array | null = null;
+  #sourceChunkOffset = 0;
+  #frameBytes = 0;
+  #sourceBytes = 0;
+  #sourceDone = false;
+  #sourceStopped = false;
+  #pumpRunning = false;
+  #pumpRequested = false;
+  #eosFrameSent = false;
   #sequence = 0;
-  #offset = 0;
+  #bytes = 0;
   #frames = 0;
   #settled = false;
   #started = false;
@@ -113,20 +138,19 @@ export class VoicePlaybackSender {
   #resolve: ((summary: VoicePlaybackSummary) => void) | null = null;
   #reject: ((error: VoicePlaybackError) => void) | null = null;
 
-  public constructor(options: {
-    readonly device_id: string;
-    readonly identity: VoicePlaybackIdentity;
-    readonly pcm: Uint8Array;
-    readonly wire: VoicePlaybackWire;
-    readonly max_inflight_frames?: number;
-    readonly timeout_ms?: number;
-  }) {
+  public constructor(options: VoicePlaybackSenderOptions) {
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(options.device_id)) {
       throw new TypeError("playback device_id is invalid");
     }
-    if (!(options.pcm instanceof Uint8Array) || options.pcm.byteLength < 2
-        || options.pcm.byteLength > PLAYBACK_MAX_PCM_BYTES || options.pcm.byteLength % 2 !== 0) {
+    const staticPcm = options.pcm;
+    if (staticPcm !== undefined && (!(staticPcm instanceof Uint8Array) || staticPcm.byteLength < 2
+        || staticPcm.byteLength > PLAYBACK_MAX_PCM_BYTES || staticPcm.byteLength % 2 !== 0)) {
       throw new RangeError("playback PCM must be non-empty, even and at most 1,920,000 bytes");
+    }
+    if (staticPcm === undefined
+        && (options.pcm_stream === null || options.pcm_stream === undefined
+          || typeof options.pcm_stream[Symbol.asyncIterator] !== "function")) {
+      throw new TypeError("playback PCM stream must be an AsyncIterable");
     }
     if (!/^[0-9a-f]{32}$/.test(options.identity.session_id)
         || options.identity.session_id === "0".repeat(32)
@@ -149,7 +173,15 @@ export class VoicePlaybackSender {
       ...options.identity,
       session_id_bytes: options.identity.session_id_bytes.slice(),
     };
-    this.#pcm = options.pcm.slice();
+    if (staticPcm !== undefined) {
+      this.#ownedInput = staticPcm.slice();
+      const ownedInput = this.#ownedInput;
+      this.#source = (async function* (): AsyncGenerator<Uint8Array> {
+        yield ownedInput;
+      })();
+    } else {
+      this.#source = options.pcm_stream[Symbol.asyncIterator]();
+    }
     this.#wire = options.wire;
     this.#maxInflightFrames = maxInflight;
     this.#timeoutMs = timeout;
@@ -160,7 +192,15 @@ export class VoicePlaybackSender {
   }
 
   public get retained_pcm_bytes(): number {
-    return this.#pcm.some((value) => value !== 0) ? this.#pcm.byteLength : 0;
+    let retained = 0;
+    if (this.#ownedInput?.some((value) => value !== 0) === true) {
+      retained += this.#ownedInput.byteLength;
+    }
+    if (this.#sourceChunk?.some((value) => value !== 0) === true) {
+      retained += this.#sourceChunk.byteLength - this.#sourceChunkOffset;
+    }
+    if (this.#framePcm.some((value) => value !== 0)) retained += this.#frameBytes;
+    return retained;
   }
 
   public matches(message: VoiceControlMessage): boolean {
@@ -174,7 +214,7 @@ export class VoicePlaybackSender {
     this.#started = true;
     if (signalAborted(signal)) {
       this.#settled = true;
-      this.#pcm.fill(0);
+      this.#stopSource();
       return Promise.reject(new VoicePlaybackError("CANCELLED", "playback was cancelled before open"));
     }
     const result = new Promise<VoicePlaybackSummary>((resolve, reject) => {
@@ -228,15 +268,17 @@ export class VoicePlaybackSender {
       }
       this.#flow.acceptControl(message);
       if (message.type === "session.ready" || message.type === "credit") {
-        this.#pump();
+        this.#requestPump();
         return;
       }
       if (message.type === "session.cancel") {
         this.#terminalStatus = "cancelled";
+        this.#stopSource();
         return;
       }
       if (message.type === "error") {
         this.#terminalStatus = "failed";
+        this.#stopSource();
         return;
       }
       if (message.type === "session.closed") {
@@ -262,6 +304,7 @@ export class VoicePlaybackSender {
 
   public cancel(reason: "barge_in" | "timeout" | "disconnect" | "provider_error" | "user"): void {
     if (this.#settled) return;
+    this.#stopSource();
     const state = this.#flow.state;
     if (state === "cancelled" && this.#terminalStatus === "cancelled") return;
     if (state === "opened" || state === "ready" || state === "eos") {
@@ -285,13 +328,35 @@ export class VoicePlaybackSender {
     this.#fail(new VoicePlaybackError("DISCONNECTED", "playback transport disconnected"));
   }
 
-  #pump(): void {
-    while (!this.#settled && this.#flow.state === "ready" && this.#flow.availableCredit > 0
-           && this.#offset < this.#pcm.byteLength) {
-      const remaining = this.#pcm.byteLength - this.#offset;
-      const payloadBytes = Math.min(remaining, VOICE_FRAME_PAYLOAD_BYTES);
+  #requestPump(): void {
+    if (this.#pumpRunning) {
+      this.#pumpRequested = true;
+      return;
+    }
+    this.#pumpRunning = true;
+    void this.#pump().catch((error: unknown) => {
+      this.#beginSourceFailure(new VoicePlaybackError(
+        "UNAVAILABLE", "playback PCM source failed", { cause: error },
+      ));
+    }).finally(() => {
+      this.#pumpRunning = false;
+      if (this.#pumpRequested && !this.#settled) {
+        this.#pumpRequested = false;
+        this.#requestPump();
+      }
+    });
+  }
+
+  async #pump(): Promise<void> {
+    while (!this.#settled && !this.#sourceStopped && this.#flow.state === "ready"
+           && this.#flow.availableCredit > 0 && !this.#eosFrameSent) {
+      const prepared = await this.#prepareFrame();
+      if (prepared === null || this.#settled || this.#sourceStopped
+          || this.#flow.state !== "ready" || this.#flow.availableCredit <= 0) {
+        return;
+      }
+      const { payloadBytes, eos } = prepared;
       const frameSamples = payloadBytes / 2;
-      const eos = this.#offset + payloadBytes === this.#pcm.byteLength;
       const header: VoiceFrameHeader = {
         kind: "playback_pcm",
         flags: eos ? VOICE_FLAG_END_OF_STREAM : 0,
@@ -308,7 +373,7 @@ export class VoicePlaybackSender {
       };
       const message = new Uint8Array(VOICE_HEADER_BYTES + payloadBytes);
       message.set(encodeVoiceFrameHeader(header));
-      message.set(this.#pcm.subarray(this.#offset, this.#offset + payloadBytes), VOICE_HEADER_BYTES);
+      message.set(this.#framePcm.subarray(0, payloadBytes), VOICE_HEADER_BYTES);
       this.#flow.recordFrameSent(header);
       try {
         this.#wire.sendBinary(message);
@@ -316,16 +381,126 @@ export class VoicePlaybackSender {
         message.fill(0);
         throw error;
       }
-      this.#offset += payloadBytes;
+      this.#framePcm.fill(0, 0, payloadBytes);
+      this.#frameBytes = 0;
+      this.#bytes += payloadBytes;
       this.#frames++;
       this.#sequence++;
-      if (eos) break;
+      if (eos) {
+        this.#eosFrameSent = true;
+        break;
+      }
     }
     this.#sendEosWhenPriorFramesAreAcknowledged();
   }
 
+  async #prepareFrame(): Promise<{ readonly payloadBytes: number; readonly eos: boolean } | null> {
+    while (!this.#settled && !this.#sourceStopped) {
+      while (this.#frameBytes < VOICE_FRAME_PAYLOAD_BYTES && this.#sourceChunk !== null) {
+        const available = this.#sourceChunk.byteLength - this.#sourceChunkOffset;
+        const copied = Math.min(VOICE_FRAME_PAYLOAD_BYTES - this.#frameBytes, available);
+        this.#framePcm.set(
+          this.#sourceChunk.subarray(this.#sourceChunkOffset, this.#sourceChunkOffset + copied),
+          this.#frameBytes,
+        );
+        this.#sourceChunk.fill(0, this.#sourceChunkOffset, this.#sourceChunkOffset + copied);
+        this.#sourceChunkOffset += copied;
+        this.#frameBytes += copied;
+        if (this.#sourceChunkOffset === this.#sourceChunk.byteLength) {
+          this.#sourceChunk.fill(0);
+          this.#sourceChunk = null;
+          this.#sourceChunkOffset = 0;
+        }
+      }
+
+      if (this.#frameBytes === VOICE_FRAME_PAYLOAD_BYTES && this.#sourceChunk !== null) {
+        return { payloadBytes: this.#frameBytes, eos: false };
+      }
+      if (this.#sourceDone) {
+        if (this.#frameBytes === 0) {
+          if (this.#sourceBytes === 0) {
+            this.#beginSourceFailure(new VoicePlaybackError(
+              "UNAVAILABLE", "playback PCM stream ended without audio",
+            ));
+          }
+          return null;
+        }
+        if (this.#frameBytes % 2 !== 0) {
+          this.#beginSourceFailure(new VoicePlaybackError(
+            "LIMIT_EXCEEDED", "playback PCM stream has an odd final byte count",
+          ));
+          return null;
+        }
+        return { payloadBytes: this.#frameBytes, eos: true };
+      }
+
+      const loaded = await this.#loadSourceChunk();
+      if (!loaded && !this.#sourceDone) return null;
+      if (this.#frameBytes === VOICE_FRAME_PAYLOAD_BYTES && this.#sourceChunk !== null) {
+        return { payloadBytes: this.#frameBytes, eos: false };
+      }
+    }
+    return null;
+  }
+
+  async #loadSourceChunk(): Promise<boolean> {
+    let item: IteratorResult<Uint8Array>;
+    try {
+      item = await this.#source.next();
+    } catch (error) {
+      if (!this.#sourceStopped && !this.#settled) {
+        this.#beginSourceFailure(new VoicePlaybackError(
+          "UNAVAILABLE", "playback PCM source failed", { cause: error },
+        ));
+      }
+      return false;
+    }
+    if (item.done === true) {
+      this.#sourceDone = true;
+      return false;
+    }
+    const chunk: unknown = item.value;
+    if (!(chunk instanceof Uint8Array)) {
+      this.#beginSourceFailure(new VoicePlaybackError(
+        "UNAVAILABLE", "playback PCM source yielded a non-Uint8Array chunk",
+      ));
+      return false;
+    }
+    let retained: Uint8Array | null = null;
+    try {
+      if (chunk.byteLength === 0) {
+        this.#beginSourceFailure(new VoicePlaybackError(
+          "UNAVAILABLE", "playback PCM source yielded an empty chunk",
+        ));
+        return false;
+      }
+      if (this.#sourceBytes + chunk.byteLength > PLAYBACK_MAX_PCM_BYTES) {
+        this.#beginSourceFailure(new VoicePlaybackError(
+          "LIMIT_EXCEEDED", "playback PCM stream exceeded 1,920,000 bytes",
+        ));
+        return false;
+      }
+      retained = chunk.slice();
+      this.#sourceBytes += retained.byteLength;
+    } finally {
+      try {
+        chunk.fill(0);
+      } catch (error) {
+        retained?.fill(0);
+        throw error;
+      }
+    }
+    if (this.#sourceStopped || this.#settled) {
+      retained?.fill(0);
+      return false;
+    }
+    this.#sourceChunk = retained;
+    this.#sourceChunkOffset = 0;
+    return true;
+  }
+
   #sendEosWhenPriorFramesAreAcknowledged(): void {
-    if (this.#flow.state !== "ready" || this.#offset !== this.#pcm.byteLength
+    if (this.#flow.state !== "ready" || !this.#eosFrameSent
         || this.#flow.outstandingFrames > 1) return;
     const eosControl = validateVoiceControlMessage({
       ...base(this.#identity),
@@ -341,7 +516,7 @@ export class VoicePlaybackSender {
     if (this.#settled) return;
     this.#settled = true;
     this.#clearTimer();
-    this.#pcm.fill(0);
+    this.#stopSource();
     this.#resolve?.({
       schema_version: 1,
       device_id: this.#deviceId,
@@ -350,7 +525,7 @@ export class VoicePlaybackSender {
       epoch: this.#identity.epoch,
       status,
       frames: this.#frames,
-      bytes: this.#offset,
+      bytes: this.#bytes,
       dropped_frames: droppedFrames,
     });
     this.#resolve = null;
@@ -361,7 +536,7 @@ export class VoicePlaybackSender {
     if (this.#settled) return;
     this.#settled = true;
     this.#clearTimer();
-    this.#pcm.fill(0);
+    this.#stopSource();
     this.#reject?.(error);
     this.#resolve = null;
     this.#reject = null;
@@ -380,9 +555,24 @@ export class VoicePlaybackSender {
     this.#scheduleTerminalGrace();
   }
 
+  #beginSourceFailure(error: VoicePlaybackError): void {
+    if (this.#settled || this.#pendingError !== null || this.#sourceStopped) return;
+    this.#pendingError = error;
+    this.#stopSource();
+    try {
+      this.cancel("provider_error");
+    } catch {
+      this.#rejectPendingError();
+      return;
+    }
+    if (this.#settled) return;
+    this.#scheduleTerminalGrace();
+  }
+
   #beginProtocolFailure(error: VoicePlaybackError): void {
     if (this.#settled || this.#pendingError !== null) return;
     this.#pendingError = error;
+    this.#stopSource();
     try {
       if (this.#flow.state === "cancelled" || this.#flow.state === "error") {
         this.#scheduleTerminalGrace();
@@ -412,10 +602,30 @@ export class VoicePlaybackSender {
     this.#pendingError = null;
     this.#settled = true;
     this.#clearTimer();
-    this.#pcm.fill(0);
+    this.#stopSource();
     this.#reject?.(error);
     this.#resolve = null;
     this.#reject = null;
+  }
+
+  #stopSource(): void {
+    if (!this.#sourceStopped) {
+      this.#sourceStopped = true;
+      try {
+        const close = this.#source.return;
+        if (typeof close === "function") {
+          void Promise.resolve(close.call(this.#source)).catch(() => undefined);
+        }
+      } catch {
+        // Source cleanup is best-effort; owned PCM is still synchronously wiped below.
+      }
+    }
+    this.#ownedInput?.fill(0);
+    this.#sourceChunk?.fill(0);
+    this.#sourceChunk = null;
+    this.#sourceChunkOffset = 0;
+    this.#framePcm.fill(0);
+    this.#frameBytes = 0;
   }
 
   #clearTimer(): void {

@@ -163,6 +163,13 @@ Device JSON、HA、触摸、固定命令和 UI 主链不回归。
 - [ ] 分别报告 wake/VAD/STT/Router/Human/Robot/Composer/TTS/播放和端到端延迟、丢帧、取消指标；
   - [x] `VoiceInteractionResult` schema v2 与 Phase 5E artifact schema v2 固定 11 个阶段，并将 Agent
     可测耗时、角色/UI/播放状态和 drop/cancel 与业务真值交叉校验；
+  - [x] Human 产品链路支持 Ollama NDJSON 增量文本、有界中文分段、常驻 Kokoro、增量 PCM 和
+    P4 credit 驱动播放；产品 readiness 前执行无 session/audit 的真实 Qwen warmup，并以
+    `keep_alive=-1` 保持驻留。本地类型检查、497 项全量测试与真实 Kokoro 流式测试通过，安全前缀的
+    失败/取消 result、audit、session 一致性及非合作流取消均有回归覆盖；热态无 P4 播放测得首个
+    安全句段约 `562 ms`、首个 PCM 约 `842 ms`、模型/TTS 流终态约 `1.069 s`；
+  - [ ] 真实 P4 复验首声延迟、句间连续听感和 barge-in；Kokoro 当前是 clause 级生成，不宣称
+    神经声学模型逐帧生成；
   - [ ] P4 wake/VAD/实体播放继续显式 `hardware_pending`，待真实 run 提供可信硬件时序；
 - [ ] 在真实 P4 + Agent + HA 完成本地唤醒到一次只读和一次隔离低风险家控语音闭环，并核对 HA
   result/state change、P4 回刷、分角色播放和审计关联；

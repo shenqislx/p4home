@@ -48,6 +48,7 @@ class FakeWire implements VoicePlaybackWire {
 
   sendBinary(message: Uint8Array): void {
     this.binaries.push(message.slice());
+    message.fill(0);
   }
 }
 
@@ -59,6 +60,23 @@ function sender(pcm: Uint8Array, wire: VoicePlaybackWire): VoicePlaybackSender {
     wire,
     timeout_ms: 5_000,
   });
+}
+
+function streamSender(
+  pcmStream: AsyncIterable<Uint8Array>,
+  wire: VoicePlaybackWire,
+): VoicePlaybackSender {
+  return new VoicePlaybackSender({
+    device_id: "p4-lab",
+    identity: IDENTITY,
+    pcm_stream: pcmStream,
+    wire,
+    timeout_ms: 5_000,
+  });
+}
+
+async function settlePlaybackPump(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 class SocketInbox {
@@ -126,6 +144,7 @@ test("playback sender opens, obeys credit, emits exact EOS PCM and waits for ter
   assert.equal(wire.controls[0]?.direction, "playback");
 
   playback.handleControl(control("session.ready", { initial_credit_frames: 1 }));
+  await settlePlaybackPump();
   assert.equal(wire.binaries.length, 1);
   assert.equal(wire.controls.length, 1);
   const first = decodeVoiceFrame(wire.binaries[0]!);
@@ -135,6 +154,7 @@ test("playback sender opens, obeys credit, emits exact EOS PCM and waits for ter
   assert.deepEqual(first.payload, pcm.subarray(0, 640));
 
   playback.handleControl(control("credit", { ack_sequence: 0, grant_frames: 1 }));
+  await settlePlaybackPump();
   assert.equal(wire.binaries.length, 2);
   const second = decodeVoiceFrame(wire.binaries[1]!);
   assert.equal(second.header.sequence, 1);
@@ -163,9 +183,11 @@ test("playback sender accepts in-flight credits before emitting EOS control", as
   const pending = playback.start();
 
   playback.handleControl(control("session.ready", { initial_credit_frames: 8 }));
+  await settlePlaybackPump();
   assert.equal(wire.binaries.length, 8);
   playback.handleControl(control("credit", { ack_sequence: 0, grant_frames: 1 }));
   playback.handleControl(control("credit", { ack_sequence: 1, grant_frames: 1 }));
+  await settlePlaybackPump();
   assert.equal(wire.binaries.length, 10);
   assert.equal(decodeVoiceFrame(wire.binaries.at(-1)!).header.flags, VOICE_FLAG_END_OF_STREAM);
   assert.equal(wire.controls.some((message) => message.type === "session.eos"), false);
@@ -173,6 +195,7 @@ test("playback sender accepts in-flight credits before emitting EOS control", as
   for (let sequence = 2; sequence <= 8; sequence++) {
     playback.handleControl(control("credit", { ack_sequence: sequence, grant_frames: 1 }));
   }
+  await settlePlaybackPump();
   assert.equal(wire.controls.at(-1)?.type, "session.eos");
   assert.equal(wire.controls.at(-1)?.final_sequence, 9);
 
@@ -186,8 +209,10 @@ test("playback sender emits EOS control when a cumulative credit acknowledges th
   const pending = playback.start();
 
   playback.handleControl(control("session.ready", { initial_credit_frames: 8 }));
+  await settlePlaybackPump();
   playback.handleControl(control("credit", { ack_sequence: 0, grant_frames: 1 }));
   playback.handleControl(control("credit", { ack_sequence: 1, grant_frames: 1 }));
+  await settlePlaybackPump();
   assert.equal(wire.controls.some((message) => message.type === "session.eos"), false);
 
   playback.handleControl(control("credit", { ack_sequence: 9, grant_frames: 1 }));
@@ -203,6 +228,7 @@ test("P4 barge-in terminal stops further frames and preserves cancelled truth", 
   const playback = sender(new Uint8Array(1_920), wire);
   const pending = playback.start();
   playback.handleControl(control("session.ready", { initial_credit_frames: 1 }));
+  await settlePlaybackPump();
   assert.equal(wire.binaries.length, 1);
   assert.equal(playback.retained_pcm_bytes, 0);
   playback.handleControl(control("session.cancel", { reason: "barge_in" }));
@@ -219,6 +245,7 @@ test("P4 speaker shutdown failure uses one coherent failed terminal", async () =
   const playback = sender(new Uint8Array(640), wire);
   const pending = playback.start();
   playback.handleControl(control("session.ready", { initial_credit_frames: 1 }));
+  await settlePlaybackPump();
   playback.handleControl(control("error", { code: "UNAVAILABLE" }));
   playback.handleControl(control("session.closed", { status: "failed", dropped_frames: 0 }));
 
@@ -266,6 +293,7 @@ test("a synchronous binary wire failure wipes the temporary PCM frame", async ()
   const playback = sender(Uint8Array.from({ length: 640 }, () => 5), wire);
   const pending = playback.start();
   playback.handleControl(control("session.ready", { initial_credit_frames: 1 }));
+  await settlePlaybackPump();
   assert.notEqual(retainedFrame, null);
   assert.ok((retainedFrame as unknown as Uint8Array).every((value) => value === 0));
   playback.disconnect();
@@ -289,6 +317,157 @@ test("playback timeout keeps its identity alive long enough to absorb P4 termina
   playback.handleControl(control("session.closed", { status: "cancelled", dropped_frames: 0 }));
   await assert.rejects(pending, (error: unknown) => (
     error instanceof Error && "code" in error && error.code === "TIMEOUT"
+  ));
+});
+
+test("streaming playback reassembles arbitrary chunks into exact credit-driven frames", async () => {
+  const wire = new FakeWire();
+  const chunks = [
+    Uint8Array.from({ length: 100 }, (_, index) => index % 251),
+    Uint8Array.from({ length: 700 }, (_, index) => (index + 17) % 251),
+    Uint8Array.from({ length: 480 }, (_, index) => (index + 31) % 251),
+  ];
+  const expected = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+  async function* source(): AsyncGenerator<Uint8Array> {
+    for (const chunk of chunks) yield chunk;
+  }
+  const playback = streamSender(source(), wire);
+  const pending = playback.start();
+
+  playback.handleControl(control("session.ready", { initial_credit_frames: 1 }));
+  await settlePlaybackPump();
+  assert.equal(wire.binaries.length, 1);
+  assert.equal(decodeVoiceFrame(wire.binaries[0]!).header.flags, 0);
+  assert.ok(chunks[0]!.every((value) => value === 0));
+  assert.ok(chunks[1]!.every((value) => value === 0));
+  assert.ok(chunks[2]!.some((value) => value !== 0));
+
+  playback.handleControl(control("credit", { ack_sequence: 0, grant_frames: 1 }));
+  await settlePlaybackPump();
+  assert.equal(wire.binaries.length, 2);
+  const frames = wire.binaries.map((message) => decodeVoiceFrame(message));
+  assert.equal(frames[1]!.header.flags, VOICE_FLAG_END_OF_STREAM);
+  assert.equal(frames[1]!.header.payloadBytes, 640);
+  assert.deepEqual(Buffer.concat(frames.map((frame) => Buffer.from(frame.payload))), expected);
+  assert.ok(chunks.every((chunk) => chunk.every((value) => value === 0)));
+  assert.equal(wire.controls.at(-1)?.type, "session.eos");
+
+  playback.handleControl(control("session.closed", { status: "completed", dropped_frames: 0 }));
+  assert.equal((await pending).bytes, 1_280);
+  assert.equal(playback.retained_pcm_bytes, 0);
+});
+
+test("streaming playback permits only the final PCM frame to be short", async () => {
+  const wire = new FakeWire();
+  const chunks = [new Uint8Array(300).fill(3), new Uint8Array(400).fill(7)];
+  async function* source(): AsyncGenerator<Uint8Array> {
+    for (const chunk of chunks) yield chunk;
+  }
+  const playback = streamSender(source(), wire);
+  const pending = playback.start();
+
+  playback.handleControl(control("session.ready", { initial_credit_frames: 2 }));
+  await settlePlaybackPump();
+  const frames = wire.binaries.map((message) => decodeVoiceFrame(message));
+  assert.equal(frames.length, 2);
+  assert.equal(frames[0]!.header.payloadBytes, 640);
+  assert.equal(frames[0]!.header.flags, 0);
+  assert.equal(frames[1]!.header.payloadBytes, 60);
+  assert.equal(frames[1]!.header.frameSamples, 30);
+  assert.equal(frames[1]!.header.flags, VOICE_FLAG_END_OF_STREAM);
+  assert.ok(chunks.every((chunk) => chunk.every((value) => value === 0)));
+
+  playback.handleControl(control("credit", { ack_sequence: 0, grant_frames: 1 }));
+  await settlePlaybackPump();
+  assert.equal(wire.controls.at(-1)?.type, "session.eos");
+  playback.handleControl(control("session.closed", { status: "completed", dropped_frames: 0 }));
+  assert.equal((await pending).bytes, 700);
+});
+
+test("barge-in while awaiting source lookahead stops output and clears late chunks", async () => {
+  const wire = new FakeWire();
+  const first = new Uint8Array(640).fill(4);
+  const second = new Uint8Array(640).fill(8);
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  async function* source(): AsyncGenerator<Uint8Array> {
+    yield first;
+    await blocked;
+    yield second;
+  }
+  const playback = streamSender(source(), wire);
+  const pending = playback.start();
+  playback.handleControl(control("session.ready", { initial_credit_frames: 1 }));
+  await settlePlaybackPump();
+  assert.equal(wire.binaries.length, 0);
+  assert.ok(first.every((value) => value === 0));
+
+  playback.handleControl(control("session.cancel", { reason: "barge_in" }));
+  release();
+  await settlePlaybackPump();
+  assert.equal(wire.binaries.length, 0);
+  assert.ok(second.every((value) => value === 0));
+  playback.handleControl(control("session.closed", { status: "cancelled", dropped_frames: 0 }));
+  assert.equal((await pending).status, "cancelled");
+  assert.equal(playback.retained_pcm_bytes, 0);
+});
+
+test("stream source failure sends bounded provider cancellation and rejects after terminal", async () => {
+  const wire = new FakeWire();
+  const chunk = new Uint8Array(700).fill(6);
+  async function* source(): AsyncGenerator<Uint8Array> {
+    yield chunk;
+    throw new Error("injected source failure");
+  }
+  const playback = streamSender(source(), wire);
+  const pending = playback.start();
+  playback.handleControl(control("session.ready", { initial_credit_frames: 2 }));
+  await settlePlaybackPump();
+  assert.equal(wire.binaries.length, 1);
+  assert.equal(wire.controls.at(-1)?.type, "session.cancel");
+  assert.equal(wire.controls.at(-1)?.reason, "provider_error");
+  assert.ok(chunk.every((value) => value === 0));
+
+  playback.handleControl(control("session.closed", { status: "cancelled", dropped_frames: 0 }));
+  await assert.rejects(pending, (error: unknown) => (
+    error instanceof Error && "code" in error && error.code === "UNAVAILABLE"
+  ));
+  assert.equal(playback.retained_pcm_bytes, 0);
+});
+
+test("stream total-byte overflow clears the rejected chunk and fails closed", async () => {
+  const wire = new FakeWire();
+  const oversized = new Uint8Array(1_920_001).fill(5);
+  async function* source(): AsyncGenerator<Uint8Array> { yield oversized; }
+  const playback = streamSender(source(), wire);
+  const pending = playback.start();
+  playback.handleControl(control("session.ready", { initial_credit_frames: 1 }));
+  await settlePlaybackPump();
+  assert.equal(wire.binaries.length, 0);
+  assert.equal(wire.controls.at(-1)?.type, "session.cancel");
+  assert.ok(oversized.every((value) => value === 0));
+
+  playback.handleControl(control("session.closed", { status: "cancelled", dropped_frames: 0 }));
+  await assert.rejects(pending, (error: unknown) => (
+    error instanceof Error && "code" in error && error.code === "LIMIT_EXCEEDED"
+  ));
+});
+
+test("stream rejects an odd final PCM byte without emitting a short invalid frame", async () => {
+  const wire = new FakeWire();
+  const odd = new Uint8Array(639).fill(11);
+  async function* source(): AsyncGenerator<Uint8Array> { yield odd; }
+  const playback = streamSender(source(), wire);
+  const pending = playback.start();
+  playback.handleControl(control("session.ready", { initial_credit_frames: 1 }));
+  await settlePlaybackPump();
+  assert.equal(wire.binaries.length, 0);
+  assert.equal(wire.controls.at(-1)?.type, "session.cancel");
+  assert.ok(odd.every((value) => value === 0));
+
+  playback.handleControl(control("session.closed", { status: "cancelled", dropped_frames: 0 }));
+  await assert.rejects(pending, (error: unknown) => (
+    error instanceof Error && "code" in error && error.code === "LIMIT_EXCEEDED"
   ));
 });
 
@@ -316,6 +495,38 @@ test("real WebSocket playback is bounded, credit-driven and closes without retai
   assert.equal(eos.type, "session.eos");
   socket.send(reply(open, "session.closed", { status: "completed", dropped_frames: 0 }));
   assert.equal((await pending).status, "completed");
+  assert.equal(server.playback_count, 0);
+});
+
+test("real WebSocket playbackStream incrementally emits reassembled PCM", async (t) => {
+  const server = new VoiceWebSocketServer({
+    host: "127.0.0.1",
+    port: 0,
+    device_tokens: { "p4-playback-test": "phase-5d-test-token-0123456789abcdef" },
+    allow_insecure_loopback_test: true,
+  });
+  const { socket, inbox } = await connectPlaybackTestServer(server);
+  t.after(async () => { socket.terminate(); await server.close(); });
+  const chunks = [new Uint8Array(333).fill(2), new Uint8Array(367).fill(9)];
+  async function* source(): AsyncGenerator<Uint8Array> {
+    for (const chunk of chunks) yield chunk;
+  }
+
+  const pending = server.playbackStream("p4-playback-test", source());
+  const open = await inbox.control();
+  socket.send(reply(open, "session.ready", { initial_credit_frames: 2 }));
+  const first = decodeVoiceFrame(new Uint8Array((await inbox.next()).data as Buffer));
+  const final = decodeVoiceFrame(new Uint8Array((await inbox.next()).data as Buffer));
+  assert.equal(first.header.payloadBytes, 640);
+  assert.equal(first.header.flags, 0);
+  assert.equal(final.header.payloadBytes, 60);
+  assert.equal(final.header.flags, VOICE_FLAG_END_OF_STREAM);
+  assert.ok(chunks.every((chunk) => chunk.every((value) => value === 0)));
+
+  socket.send(reply(open, "credit", { ack_sequence: 0, grant_frames: 1 }));
+  assert.equal((await inbox.control()).type, "session.eos");
+  socket.send(reply(open, "session.closed", { status: "completed", dropped_frames: 0 }));
+  assert.equal((await pending).bytes, 700);
   assert.equal(server.playback_count, 0);
 });
 

@@ -660,6 +660,22 @@ export class VoiceWebSocketServer {
     pcm: Uint8Array,
     signal?: AbortSignal,
   ): Promise<VoicePlaybackSummary> {
+    return await this.#playbackSource(deviceId, { pcm }, signal);
+  }
+
+  public async playbackStream(
+    deviceId: string,
+    source: AsyncIterable<Uint8Array>,
+    signal?: AbortSignal,
+  ): Promise<VoicePlaybackSummary> {
+    return await this.#playbackSource(deviceId, { pcm_stream: source }, signal);
+  }
+
+  async #playbackSource(
+    deviceId: string,
+    source: { readonly pcm: Uint8Array } | { readonly pcm_stream: AsyncIterable<Uint8Array> },
+    signal?: AbortSignal,
+  ): Promise<VoicePlaybackSummary> {
     const webSocket = this.#connections.get(deviceId);
     if (webSocket === undefined || webSocket.readyState !== WebSocket.OPEN) {
       throw new VoicePlaybackError("UNAVAILABLE", "paired P4 voice socket is unavailable");
@@ -671,7 +687,7 @@ export class VoiceWebSocketServer {
     sender = new VoicePlaybackSender({
       device_id: deviceId,
       identity: createVoicePlaybackIdentity(),
-      pcm,
+      ...source,
       wire: {
         sendControl: (message) => {
           const text = JSON.stringify(message);

@@ -14,9 +14,13 @@ export class OllamaProviderError extends Error {
   public constructor(
     code: OllamaProviderErrorCode,
     message: string,
-    options: { readonly retryable?: boolean; readonly status?: number } = {},
+    options: {
+      readonly retryable?: boolean;
+      readonly status?: number;
+      readonly cause?: unknown;
+    } = {},
   ) {
-    super(message);
+    super(message, { cause: options.cause });
     this.name = "OllamaProviderError";
     this.code = code;
     this.retryable = options.retryable ?? false;

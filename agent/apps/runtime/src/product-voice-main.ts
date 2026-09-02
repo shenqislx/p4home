@@ -17,7 +17,7 @@ import {
 import { SqliteAuditStore } from "@p4home/storage-sqlite";
 import { RobotHaClient, loadRobotHaRuntimeConfig } from "@p4home/transport-ha";
 
-import { DEFAULT_OLLAMA_MODEL } from "./model-config.ts";
+import { DEFAULT_OLLAMA_MODEL, PRODUCT_OLLAMA_KEEP_ALIVE } from "./model-config.ts";
 import { CatAutonomyControlServer } from "./cat-autonomy-control-server.ts";
 import {
   parseProductCatAutonomyConfig,
@@ -128,6 +128,7 @@ async function main(): Promise<void> {
   let autonomy: ProductCatAutonomyRuntime | null = null;
   let autonomyControl: CatAutonomyControlServer | null = null;
   let autonomyControlTokenBytes: Buffer | null = null;
+  let tts: PythonTtsProvider | null = null;
   try {
     const roleMode = resolveProductVoiceRoleMode(process.env.P4HOME_PRODUCT_ROLE_MODE);
     const robotEnabled = productVoiceAllowsRobot(roleMode);
@@ -140,11 +141,15 @@ async function main(): Promise<void> {
       model,
       baseUrl: process.env.OLLAMA_BASE_URL?.trim() || "http://127.0.0.1:11434",
       requestTimeoutMs: modelTimeoutMs,
+      defaultKeepAlive: PRODUCT_OLLAMA_KEEP_ALIVE,
     });
     const capabilities = await provider.probe();
     if (!capabilities.modelAvailable || !capabilities.toolCalling) {
       throw new Error("ollama_model_unavailable_or_missing_tool_calling");
     }
+    // This is a real, non-audited model evaluation before sessions/storage are
+    // created. A malformed or failed warmup keeps product readiness closed.
+    await provider.warmup(shutdown.signal);
     if (robotEnabled) {
       const haConfig = await loadRobotHaRuntimeConfig({
         url: requiredEnvironment("P4HOME_HA_URL"),
@@ -264,7 +269,7 @@ async function main(): Promise<void> {
       provider_version: STT_PROVIDER_VERSION,
       timeout_ms: optionalInteger("P4HOME_STT_TIMEOUT_MS", 120_000, 1_000, 120_000),
     });
-    const tts = new PythonTtsProvider({
+    tts = new PythonTtsProvider({
       python_executable: absolutePath("P4HOME_TTS_PYTHON"),
       worker_script: absolutePath("P4HOME_TTS_WORKER"),
       model_path: absolutePath("P4HOME_TTS_MODEL"),
@@ -272,9 +277,9 @@ async function main(): Promise<void> {
       provider_version: TTS_PROVIDER_VERSION,
       timeout_ms: optionalInteger("P4HOME_TTS_TIMEOUT_MS", 120_000, 1_000, 120_000),
     });
-    // Fail closed before advertising readiness and shift one-shot MLX cold
-    // startup out of the first live interaction. Sequential warmup avoids
-    // retaining workers or overlapping the two model memory peaks.
+    // Fail closed before advertising readiness and retain the verified TTS
+    // model for low-latency streaming. Warm models are initialized
+    // sequentially to avoid overlapping the two MLX startup memory peaks.
     await stt.warmup({ signal: shutdown.signal });
     await tts.warmup({ signal: shutdown.signal });
     const ttsPipeline = new RoleAwareTtsPipeline(tts);
@@ -295,9 +300,14 @@ async function main(): Promise<void> {
         ),
       },
       interaction: {
-        dispatch_role: async (interaction, signal) => await dispatcher.dispatch(interaction, signal),
+        dispatch_role: async (interaction, signal, onHumanSpeechSegment) => (
+          await dispatcher.dispatch(interaction, signal, onHumanSpeechSegment)
+        ),
         render_tts: async (interactionId, response, signal) => (
           await ttsPipeline.render(interactionId, response, signal)
+        ),
+        render_tts_stream: (interactionId, segment, signal) => (
+          ttsPipeline.streamHumanSegment(interactionId, segment, signal)
         ),
         ui_output: "required",
         audio_output: "required",
@@ -327,6 +337,7 @@ async function main(): Promise<void> {
     const runtimeClose = runtime?.close().catch(() => undefined);
     const autonomyClose = autonomy?.close().catch(() => undefined);
     await Promise.all([runtimeClose, autonomyClose]);
+    tts?.close();
     await deviceHub?.close().catch(() => undefined);
     await store?.closeAsync().catch(() => undefined);
     scheduler?.close();

@@ -2,6 +2,7 @@ import {
   OllamaProviderError,
   type OllamaChatRequest,
   type OllamaChatResult,
+  type OllamaChatStreamEvent,
   type OllamaProvider,
 } from "@p4home/provider-ollama";
 
@@ -56,7 +57,7 @@ export interface OllamaChatTimingSummary {
 }
 
 export interface MeasuredOllamaChatProvider {
-  readonly provider: Pick<OllamaProvider, "chat">;
+  readonly provider: Pick<OllamaProvider, "chat" | "chatStream">;
   snapshot(): OllamaChatTimingSummary;
 }
 
@@ -183,31 +184,92 @@ export function summarizeOllamaChatTimings(
 }
 
 export function measureOllamaChatProvider(
-  provider: Pick<OllamaProvider, "chat">,
+  provider: Pick<OllamaProvider, "chat"> & Partial<Pick<OllamaProvider, "chatStream">>,
   now: () => number = () => performance.now(),
 ): MeasuredOllamaChatProvider {
   const calls: OllamaChatCallTiming[] = [];
+  const recordCompleted = (startedAt: number, result: OllamaChatResult): void => {
+    calls.push({
+      schema_version: 1,
+      status: "completed",
+      request_duration_ms: durationMs(startedAt, now),
+      ollama: usageFrom(result),
+    });
+  };
+  const recordFailed = (
+    startedAt: number,
+    error: unknown,
+    signal: AbortSignal | undefined,
+  ): void => {
+    calls.push({
+      schema_version: 1,
+      status: statusFrom(error, signal),
+      request_duration_ms: durationMs(startedAt, now),
+      ollama: emptyUsage(),
+    });
+  };
   return {
     provider: {
       async chat(request: OllamaChatRequest, signal?: AbortSignal): Promise<OllamaChatResult> {
         const startedAt = now();
         try {
           const result = await provider.chat(request, signal);
-          calls.push({
-            schema_version: 1,
-            status: "completed",
-            request_duration_ms: durationMs(startedAt, now),
-            ollama: usageFrom(result),
-          });
+          recordCompleted(startedAt, result);
           return result;
         } catch (error) {
-          calls.push({
-            schema_version: 1,
-            status: statusFrom(error, signal),
-            request_duration_ms: durationMs(startedAt, now),
-            ollama: emptyUsage(),
-          });
+          recordFailed(startedAt, error, signal);
           throw error;
+        }
+      },
+      async *chatStream(
+        request: OllamaChatRequest,
+        signal?: AbortSignal,
+      ): AsyncIterable<OllamaChatStreamEvent> {
+        const startedAt = now();
+        let recorded = false;
+        let terminal = false;
+        try {
+          const stream = provider.chatStream === undefined
+            ? (async function* (): AsyncIterable<OllamaChatStreamEvent> {
+                const result = await provider.chat(request, signal);
+                yield { kind: "terminal", result };
+              })()
+            : provider.chatStream(request, signal);
+          for await (const event of stream) {
+            if (terminal) {
+              throw new OllamaProviderError(
+                "INVALID_RESPONSE",
+                "Ollama chat stream contains data after its terminal event",
+              );
+            }
+            if (event.kind === "terminal") {
+              terminal = true;
+              recordCompleted(startedAt, event.result);
+              recorded = true;
+            }
+            yield event;
+          }
+          if (!terminal) {
+            throw new OllamaProviderError(
+              "INVALID_RESPONSE",
+              "Ollama chat stream ended without a terminal event",
+            );
+          }
+        } catch (error) {
+          if (!recorded) {
+            recordFailed(startedAt, error, signal);
+            recorded = true;
+          }
+          throw error;
+        } finally {
+          if (!recorded) {
+            calls.push({
+              schema_version: 1,
+              status: "cancelled",
+              request_duration_ms: durationMs(startedAt, now),
+              ollama: emptyUsage(),
+            });
+          }
         }
       },
     },

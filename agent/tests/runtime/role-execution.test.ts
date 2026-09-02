@@ -4,6 +4,7 @@ import test from "node:test";
 import type {
   OllamaChatRequest,
   OllamaChatResult,
+  OllamaChatStreamEvent,
 } from "@p4home/provider-ollama";
 import { OllamaProviderError } from "@p4home/provider-ollama";
 import { SqliteAuditStore } from "@p4home/storage-sqlite";
@@ -166,6 +167,200 @@ test("product role entrypoint composes routing, bounded scheduling and the assig
     eval_count: 9,
     eval_duration_ns: 11,
   });
+  scheduler.close();
+});
+
+test("single Human respond streams complete safe speech segments before model terminal", async () => {
+  const sessions = registry();
+  const scheduler = new RoleScheduler(2);
+  const value = interaction("interaction:human-stream", "陪我聊两句");
+  const delivered: string[] = [];
+  let humanChatFallbacks = 0;
+  const result = await runRoleInteraction({
+    interaction: value,
+    route_plan_id: "route:human-stream",
+    run_id: "run:human-stream",
+    sessions,
+    scheduler,
+    provider: {
+      async chat(request): Promise<OllamaChatResult> {
+        if (request.messages[0]?.content.includes("Role Router") !== true) {
+          humanChatFallbacks++;
+          throw new Error("Human should use chatStream");
+        }
+        return {
+          model: "fake",
+          message: {
+            role: "assistant",
+            content: '{"assignments":[{"role":"human","text":"陪我聊两句"}]}',
+          },
+        };
+      },
+      async *chatStream(): AsyncIterable<OllamaChatStreamEvent> {
+        yield { kind: "content_delta", model: "fake", content: "当然可以。" };
+        yield { kind: "content_delta", model: "fake", content: "你今天过得怎么样？" };
+        yield {
+          kind: "terminal",
+          result: {
+            model: "fake",
+            message: {
+              role: "assistant",
+              content: "当然可以。你今天过得怎么样？",
+              thinking: "",
+            },
+          },
+        };
+      },
+    },
+    on_human_speech_segment: async (segment) => {
+      delivered.push(segment.text);
+    },
+    clock: () => 1_001,
+  });
+
+  assert.equal(result.response.status, "completed");
+  assert.equal(result.response.text, "当然可以。你今天过得怎么样？");
+  assert.deepEqual(delivered, ["当然可以。", "你今天过得怎么样？"]);
+  assert.equal(humanChatFallbacks, 0);
+  assert.equal(result.model_timing.calls, 2);
+  assert.equal(sessions.get("human").history().at(-1)?.content, result.response.text);
+  scheduler.close();
+});
+
+test("Human streaming refuses an unsafe sentence before speech delivery", async () => {
+  const value = interaction("interaction:human-stream-policy", "客厅怎么样");
+  const delivered: string[] = [];
+  const result = await runAssignedRole({
+    run_id: "run:human-stream-policy",
+    interaction: value,
+    plan: plan(value, "human"),
+    session: registry().get("human"),
+    provider: {
+      async chat(): Promise<OllamaChatResult> {
+        throw new Error("unused");
+      },
+      async *chatStream(): AsyncIterable<OllamaChatStreamEvent> {
+        yield { kind: "content_delta", model: "fake", content: "客厅灯已经打开了。" };
+        yield {
+          kind: "terminal",
+          result: {
+            model: "fake",
+            message: { role: "assistant", content: "客厅灯已经打开了。", thinking: "" },
+          },
+        };
+      },
+    },
+    on_human_speech_segment: (segment) => { delivered.push(segment.text); },
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.error?.source, "model");
+  assert.equal(result.error?.code, "ROLE_POLICY_VIOLATION");
+  assert.deepEqual(delivered, []);
+});
+
+test("Human partial delivery keeps one safe prefix consistent across result audit and session", async () => {
+  using store = new SqliteAuditStore(":memory:");
+  const sessions = registry();
+  const value = interaction("interaction:human-stream-partial-policy", "陪我聊聊客厅");
+  const safePrefix = `${"好".repeat(91)}客厅灯已经`;
+  const delivered: string[] = [];
+  const result = await runAssignedRole({
+    run_id: "run:human-stream-partial-policy",
+    interaction: value,
+    plan: plan(value, "human"),
+    session: sessions.get("human"),
+    provider: {
+      async chat(): Promise<OllamaChatResult> {
+        throw new Error("unused");
+      },
+      async *chatStream(): AsyncIterable<OllamaChatStreamEvent> {
+        yield { kind: "content_delta", model: "fake", content: safePrefix };
+        yield { kind: "content_delta", model: "fake", content: "打开了。" };
+        yield {
+          kind: "terminal",
+          result: {
+            model: "fake",
+            message: {
+              role: "assistant",
+              content: `${safePrefix}打开了。`,
+              thinking: "",
+            },
+          },
+        };
+      },
+    },
+    on_human_speech_segment: (segment) => { delivered.push(segment.text); },
+    audit: { store, clock: () => 1_100 },
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.outcome, "error");
+  assert.equal(result.error?.code, "ROLE_POLICY_VIOLATION");
+  assert.equal(result.final_text, safePrefix);
+  assert.deepEqual(delivered, [safePrefix]);
+  assert.equal(sessions.get("human").history().at(-1)?.content, safePrefix);
+  const trace = await store.getRunTrace("run:human-stream-partial-policy");
+  assert.ok(trace !== null);
+  assert.equal(trace.run.status, "failed");
+  const assistant = trace.messages.find((message) => message.role === "assistant");
+  assert.equal(assistant?.content, safePrefix);
+  assert.equal(assistant?.metadata.delivery_status, "partial");
+  assert.equal(trace.events.at(-1)?.type, "role.run.failed");
+  assert.equal(trace.events.at(-1)?.payload.spoken_prefix_retained, true);
+});
+
+test("abort does not wait for a non-cooperative chatStream iterator return", async () => {
+  const controller = new AbortController();
+  const scheduler = new RoleScheduler(1);
+  const value = interaction("interaction:human-stream-stuck-return", "陪我聊两句");
+  let streamStarted = false;
+  const pending = runRoleInteraction({
+    interaction: value,
+    route_plan_id: "route:human-stream-stuck-return",
+    run_id: "run:human-stream-stuck-return",
+    sessions: registry(),
+    scheduler,
+    signal: controller.signal,
+    provider: {
+      async chat(): Promise<OllamaChatResult> {
+        return {
+          model: "fake",
+          message: {
+            role: "assistant",
+            content: '{"assignments":[{"role":"human","text":"陪我聊两句"}]}',
+          },
+        };
+      },
+      chatStream(): AsyncIterable<OllamaChatStreamEvent> {
+        return {
+          [Symbol.asyncIterator]() {
+            return {
+              next() {
+                streamStarted = true;
+                return new Promise<IteratorResult<OllamaChatStreamEvent>>(() => undefined);
+              },
+              return() {
+                return new Promise<IteratorResult<OllamaChatStreamEvent>>(() => undefined);
+              },
+            };
+          },
+        };
+      },
+    },
+    on_human_speech_segment: () => undefined,
+  });
+  while (!streamStarted) await new Promise<void>((resolve) => setImmediate(resolve));
+  controller.abort(new Error("test cancellation"));
+
+  const result = await Promise.race([
+    pending,
+    new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error("cancelled stream waited for iterator.return")), 250);
+    }),
+  ]);
+  assert.equal(result.run.status, "cancelled");
+  assert.equal(result.run.error?.code, "CANCELLED");
   scheduler.close();
 });
 
