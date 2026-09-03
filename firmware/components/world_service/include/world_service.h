@@ -175,6 +175,9 @@ esp_err_t world_service_set_object_occupied(const char *object_id, bool occupied
 
 esp_err_t world_service_submit(const world_action_request_t *request,
                                world_action_event_t *event);
+/* Returns the latest immutable lifecycle event for a retained action. */
+esp_err_t world_service_get_action_event(const char *action_id,
+                                         world_action_event_t *event);
 esp_err_t world_service_start_next(world_action_event_t *event);
 esp_err_t world_service_complete_active(world_action_event_t *event);
 /* Returns one expired accepted/started action per call. Call until NOT_FOUND. */

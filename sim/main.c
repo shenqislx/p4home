@@ -11,6 +11,7 @@
 #include "ui_home_actor_test.h"
 #include "ui_home_rooms.h"
 #include "ui_pages.h"
+#include "ui_pixel_art.h"
 #include "ui_pixel_fx.h"
 #include "ui_time_source.h"
 #include "world_service.h"
@@ -302,16 +303,224 @@ static int sim_verify_object_gate(void)
     world_action_request_t go_desk = sim_object_request(
         "sim-3d-go-desk", WORLD_ACTION_CHARACTER_GO_TO_OBJECT, "study.desk");
     if (!sim_begin_object_action(&go_desk, WORLD_OBJECT_ANIMATION_CAT_WALK) ||
-        !sim_complete_object_action() || !sim_wait_for_actor(256U)) {
+        !sim_complete_object_action()) {
         fprintf(stderr, "VERIFY:phase3d:sim_object_anchor:FAIL reason=go_to_desk\n");
+        return 1;
+    }
+    ui_home_actor_get_render_snapshot(&render);
+    if (!render.moving ||
+        (render.art_x == 94 && render.floor_y == 46)) {
+        fprintf(stderr, "VERIFY:phase3d:sim_object_anchor:FAIL reason=go_to_desk_teleport\n");
+        return 1;
+    }
+
+    /* A cancelled action must not survive in the UI's deferred queue. */
+    world_action_request_t cancelled_interact = sim_object_request(
+        "sim-3d-cancelled-interact-desk", WORLD_ACTION_CHARACTER_INTERACT,
+        "study.desk");
+    world_action_event_t cancelled_interact_event = {0};
+    if (world_service_submit(&cancelled_interact, &cancelled_interact_event) != ESP_OK ||
+        cancelled_interact_event.status != WORLD_ACTION_STATUS_ACCEPTED ||
+        world_service_start_next(&cancelled_interact_event) != ESP_OK ||
+        cancelled_interact_event.status != WORLD_ACTION_STATUS_STARTED) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=cancelled_deferred_start\n");
+        return 1;
+    }
+    sim_advance(UI_FX_TICK_MS);
+    world_service_snapshot_t repeated_started_snapshot = {0};
+    world_service_get_snapshot(&repeated_started_snapshot);
+    ui_home_actor_apply_snapshot(&repeated_started_snapshot);
+    ui_home_actor_apply_snapshot(&repeated_started_snapshot);
+    if (world_service_cancel(cancelled_interact.action_id,
+                             &cancelled_interact_event) != ESP_OK ||
+        cancelled_interact_event.status != WORLD_ACTION_STATUS_FAILED ||
+        cancelled_interact_event.error != WORLD_ACTION_ERROR_CANCELLED) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=cancelled_deferred_terminal\n");
+        return 1;
+    }
+    sim_advance(UI_FX_TICK_MS);
+    ui_home_actor_get_render_snapshot(&render);
+    if (!render.moving || render.animation != WORLD_OBJECT_ANIMATION_CAT_WALK) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=cancelled_deferred_overlap\n");
+        return 1;
+    }
+
+    /* The protocol sequence can start and finish a short interaction while a
+     * cross-storey go_to is still rendering. UI must retain the walk and defer
+     * the interaction frames until the Human reaches the desk. */
+    world_action_request_t interact_desk = sim_object_request(
+        "sim-3d-interact-desk-during-walk", WORLD_ACTION_CHARACTER_INTERACT,
+        "study.desk");
+    world_action_event_t interact_event = {0};
+    if (world_service_submit(&interact_desk, &interact_event) != ESP_OK ||
+        interact_event.status != WORLD_ACTION_STATUS_ACCEPTED ||
+        world_service_start_next(&interact_event) != ESP_OK ||
+        interact_event.status != WORLD_ACTION_STATUS_STARTED) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=deferred_interact_start\n");
+        return 1;
+    }
+    sim_advance(UI_FX_TICK_MS);
+    world_service_get_snapshot(&repeated_started_snapshot);
+    ui_home_actor_apply_snapshot(&repeated_started_snapshot);
+    ui_home_actor_apply_snapshot(&repeated_started_snapshot);
+    ui_home_actor_get_render_snapshot(&render);
+    if (!render.moving || render.animation != WORLD_OBJECT_ANIMATION_CAT_WALK ||
+        world_service_complete_active(&interact_event) != ESP_OK ||
+        interact_event.status != WORLD_ACTION_STATUS_COMPLETED) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=deferred_interact_overlap\n");
+        return 1;
+    }
+    sim_advance(UI_FX_TICK_MS);
+    ui_home_actor_get_render_snapshot(&render);
+    if (!render.moving || render.animation != WORLD_OBJECT_ANIMATION_CAT_WALK ||
+        !sim_wait_for_actor(256U)) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=deferred_interact_walk\n");
         return 1;
     }
     ui_home_actor_get_render_snapshot(&render);
     /* Study is the centre upper bay: origin (60,14), plus anchor (34,32). */
     if (render.art_x != 94 || render.floor_y != 46 ||
         render.facing != WORLD_OBJECT_FACING_LEFT ||
-        strcmp(render.target_object_id, "study.desk") != 0) {
+        strcmp(render.target_object_id, "study.desk") != 0 ||
+        render.animation != WORLD_OBJECT_ANIMATION_CAT_PAW) {
         fprintf(stderr, "VERIFY:phase3d:sim_object_anchor:FAIL reason=left_anchor\n");
+        return 1;
+    }
+    for (size_t frame = 0U; frame < ACTOR_PAW_FRAME_COUNT / 2U; ++frame) {
+        sim_advance(UI_FX_TICK_MS);
+        ui_home_actor_get_render_snapshot(&render);
+        if (render.animation != WORLD_OBJECT_ANIMATION_CAT_PAW) {
+            fprintf(stderr,
+                    "VERIFY:phase3d:sim_animation_bindings:FAIL reason=deferred_interact_frames\n");
+            return 1;
+        }
+    }
+    sim_advance(UI_FX_TICK_MS);
+    ui_home_actor_get_render_snapshot(&render);
+    if (render.animation == WORLD_OBJECT_ANIMATION_CAT_PAW) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=deferred_cancel_or_dedupe\n");
+        return 1;
+    }
+
+    /* A newer go_to must invalidate animation work for the previous target. */
+    world_action_request_t go_sofa_again = sim_object_request(
+        "sim-3d-go-sofa-again", WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
+        "living_room.sofa");
+    if (!sim_begin_object_action(&go_sofa_again, WORLD_OBJECT_ANIMATION_CAT_WALK) ||
+        !sim_complete_object_action()) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=retarget_go_sofa\n");
+        return 1;
+    }
+    world_action_request_t stale_sofa_interact = sim_object_request(
+        "sim-3d-stale-sofa-interact", WORLD_ACTION_CHARACTER_INTERACT,
+        "living_room.sofa");
+    world_action_event_t stale_sofa_event = {0};
+    if (world_service_submit(&stale_sofa_interact, &stale_sofa_event) != ESP_OK ||
+        stale_sofa_event.status != WORLD_ACTION_STATUS_ACCEPTED ||
+        world_service_start_next(&stale_sofa_event) != ESP_OK ||
+        stale_sofa_event.status != WORLD_ACTION_STATUS_STARTED) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=retarget_interact_start\n");
+        return 1;
+    }
+    sim_advance(UI_FX_TICK_MS);
+    if (world_service_complete_active(&stale_sofa_event) != ESP_OK ||
+        stale_sofa_event.status != WORLD_ACTION_STATUS_COMPLETED) {
+        return 1;
+    }
+    sim_advance(UI_FX_TICK_MS);
+    world_action_request_t go_desk_again = sim_object_request(
+        "sim-3d-go-desk-again", WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
+        "study.desk");
+    if (!sim_begin_object_action(&go_desk_again, WORLD_OBJECT_ANIMATION_CAT_WALK) ||
+        !sim_complete_object_action() || !sim_wait_for_actor(256U)) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=retarget_go_desk\n");
+        return 1;
+    }
+    ui_home_actor_get_render_snapshot(&render);
+    if (render.art_x != 94 || render.floor_y != 46 ||
+        strcmp(render.target_object_id, "study.desk") != 0 ||
+        render.animation == WORLD_OBJECT_ANIMATION_CAT_PAW) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=stale_target_animation\n");
+        return 1;
+    }
+
+    /* Fill the bounded UI queue, repeat one started snapshot, then exceed the
+     * capacity once. It must play only the retained eight actions and settle. */
+    world_action_request_t capacity_go = sim_object_request(
+        "sim-3d-capacity-go-sofa", WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
+        "living_room.sofa");
+    if (!sim_begin_object_action(&capacity_go, WORLD_OBJECT_ANIMATION_CAT_WALK) ||
+        !sim_complete_object_action()) {
+        return 1;
+    }
+    char capacity_action_ids[WORLD_SERVICE_ACTION_QUEUE_CAPACITY + 1U][48];
+    for (size_t index = 0U;
+         index < WORLD_SERVICE_ACTION_QUEUE_CAPACITY + 1U; ++index) {
+        snprintf(capacity_action_ids[index], sizeof(capacity_action_ids[index]),
+                 "sim-3d-capacity-interact-%u", (unsigned)index);
+        world_action_request_t capacity_interact = sim_object_request(
+            capacity_action_ids[index], WORLD_ACTION_CHARACTER_INTERACT,
+            "living_room.sofa");
+        world_action_event_t capacity_event = {0};
+        if (world_service_submit(&capacity_interact, &capacity_event) != ESP_OK ||
+            capacity_event.status != WORLD_ACTION_STATUS_ACCEPTED ||
+            world_service_start_next(&capacity_event) != ESP_OK ||
+            capacity_event.status != WORLD_ACTION_STATUS_STARTED) {
+            fprintf(stderr,
+                    "VERIFY:phase3d:sim_animation_bindings:FAIL reason=capacity_start\n");
+            return 1;
+        }
+        sim_advance(UI_FX_TICK_MS);
+        if (index == 0U) {
+            world_service_get_snapshot(&repeated_started_snapshot);
+            ui_home_actor_apply_snapshot(&repeated_started_snapshot);
+            ui_home_actor_apply_snapshot(&repeated_started_snapshot);
+        }
+        if (world_service_complete_active(&capacity_event) != ESP_OK ||
+            capacity_event.status != WORLD_ACTION_STATUS_COMPLETED) {
+            return 1;
+        }
+        sim_advance(UI_FX_TICK_MS);
+    }
+    /* The oldest seen-id slot has now wrapped. Queue membership must still
+     * reject a late duplicate of that retained action. */
+    ui_home_actor_apply_snapshot(&repeated_started_snapshot);
+    ui_home_actor_apply_snapshot(&repeated_started_snapshot);
+    if (!sim_wait_for_actor(256U)) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=capacity_walk\n");
+        return 1;
+    }
+    ui_home_actor_get_render_snapshot(&render);
+    if (render.animation != WORLD_OBJECT_ANIMATION_CAT_PAW) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=capacity_first\n");
+        return 1;
+    }
+    size_t deferred_ticks = 0U;
+    while (render.animation == WORLD_OBJECT_ANIMATION_CAT_PAW &&
+           deferred_ticks <= WORLD_SERVICE_ACTION_QUEUE_CAPACITY * 3U) {
+        sim_advance(UI_FX_TICK_MS);
+        deferred_ticks++;
+        ui_home_actor_get_render_snapshot(&render);
+    }
+    if (deferred_ticks != WORLD_SERVICE_ACTION_QUEUE_CAPACITY * 3U ||
+        render.animation != WORLD_OBJECT_ANIMATION_NONE ||
+        render.pose != WORLD_CHARACTER_POSE_STANDING) {
+        fprintf(stderr,
+                "VERIFY:phase3d:sim_animation_bindings:FAIL reason=capacity_terminal ticks=%u\n",
+                (unsigned)deferred_ticks);
         return 1;
     }
 
@@ -332,6 +541,8 @@ static int sim_verify_object_gate(void)
     printf("VERIFY:phase3d:sim_object_anchor:PASS targets=sofa,desk facing=right,left\n");
     printf("VERIFY:phase3d:sim_object_pose:PASS pose=sitting floor_anchor=stable\n");
     printf("VERIFY:phase3d:sim_animation_bindings:PASS animations=walk,sit,look,paw fps=8\n");
+    printf("VERIFY:phase3d:sim_deferred_sequence:PASS cancel=drop duplicate=dedupe "
+           "retarget=clear capacity=8 overflow=drop_newest\n");
     printf("VERIFY:phase3d:sim_cancel:PASS restored=sitting\n");
     printf("VERIFY:phase3d:sim_occupancy_conflict:PASS error=OBJECT_OCCUPIED\n");
     return 0;
@@ -371,6 +582,59 @@ static int sim_verify_pet_autonomy(void)
     if (world_service_set_agent_connected(true) != ESP_OK) {
         return 1;
     }
+
+    /* Human deferred-animation transitions share the LVGL timer callback with
+     * Cat. They must never skip Cat's independently-owned timer tick. */
+    uint64_t cat_timer_start_ms = s_virtual_ms;
+    world_action_request_t timer_human_go = sim_object_request(
+        "sim-pet-timer-human-go-desk", WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
+        "study.desk");
+    if (!sim_begin_object_action(&timer_human_go, WORLD_OBJECT_ANIMATION_CAT_WALK) ||
+        !sim_complete_object_action()) {
+        fprintf(stderr,
+                "VERIFY:pet_autonomy:human_isolation:FAIL reason=deferred_timer_go\n");
+        return 1;
+    }
+    world_action_request_t timer_human_interact = sim_object_request(
+        "sim-pet-timer-human-interact", WORLD_ACTION_CHARACTER_INTERACT,
+        "study.desk");
+    world_action_event_t timer_human_event = {0};
+    if (world_service_submit(&timer_human_interact, &timer_human_event) != ESP_OK ||
+        timer_human_event.status != WORLD_ACTION_STATUS_ACCEPTED ||
+        world_service_start_next(&timer_human_event) != ESP_OK ||
+        timer_human_event.status != WORLD_ACTION_STATUS_STARTED) {
+        return 1;
+    }
+    sim_advance(UI_FX_TICK_MS);
+    if (world_service_complete_active(&timer_human_event) != ESP_OK ||
+        timer_human_event.status != WORLD_ACTION_STATUS_COMPLETED) {
+        return 1;
+    }
+    sim_advance(UI_FX_TICK_MS);
+    if (!sim_wait_for_actor(64U)) {
+        return 1;
+    }
+    for (size_t tick = 0U; tick < ACTOR_PAW_FRAME_COUNT / 2U + 1U; ++tick) {
+        sim_advance(UI_FX_TICK_MS);
+    }
+    ui_home_actor_render_snapshot_t after_deferred = {0};
+    ui_home_actor_get_render_snapshot(&after_deferred);
+    uint32_t elapsed_cat_ticks =
+        (uint32_t)((s_virtual_ms - cat_timer_start_ms) / UI_FX_TICK_MS);
+    if (elapsed_cat_ticks >= before_human.pet_ticks_until_target ||
+        after_deferred.pet_moving ||
+        after_deferred.pet_target_revision != before_human.pet_target_revision ||
+        after_deferred.pet_ticks_until_target !=
+            before_human.pet_ticks_until_target - elapsed_cat_ticks) {
+        fprintf(stderr,
+                "VERIFY:pet_autonomy:timer_gate:FAIL reason=human_tick_interference "
+                "elapsed=%u before=%u after=%u\n",
+                (unsigned)elapsed_cat_ticks,
+                (unsigned)before_human.pet_ticks_until_target,
+                (unsigned)after_deferred.pet_ticks_until_target);
+        return 1;
+    }
+
     world_action_request_t human_go = sim_object_request(
         "sim-human-go-sofa", WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
         "living_room.sofa");

@@ -24,6 +24,7 @@ static const char *TAG = "ui_actor";
 #define UI_ACTOR_PET_ART_H 6
 #define UI_ACTOR_PET_IDLE_TICKS 80U
 #define UI_ACTOR_PET_ROOM_MARGIN 8
+#define UI_ACTOR_DEFERRED_ANIMATION_CAPACITY WORLD_SERVICE_ACTION_QUEUE_CAPACITY
 
 /* Floor lines the actor stands on, in house art pixels. */
 #define UI_ACTOR_UPPER_FLOOR_Y (UI_HOME_UPPER_ART_Y + UI_HOME_ROOM_ART_H - UI_ACTOR_ART_H - 2)
@@ -73,6 +74,30 @@ static uint8_t s_idle_frame;
 static uint16_t s_blink_countdown = 60U;
 static bool s_blinking;
 
+typedef struct {
+    world_object_animation_t animation;
+    char action_id[WORLD_SERVICE_ACTION_ID_MAX_BYTES + 1U];
+    char target_object_id[WORLD_OBJECT_ID_MAX_BYTES + 1U];
+} ui_actor_deferred_animation_t;
+
+typedef enum {
+    UI_ACTOR_DEFERRED_WAIT = 0,
+    UI_ACTOR_DEFERRED_READY,
+    UI_ACTOR_DEFERRED_DROP,
+} ui_actor_deferred_status_t;
+
+static ui_actor_deferred_animation_t
+    s_deferred_animations[UI_ACTOR_DEFERRED_ANIMATION_CAPACITY];
+static size_t s_deferred_animation_head;
+static size_t s_deferred_animation_count;
+static uint8_t s_deferred_animation_frames_remaining;
+static bool s_deferred_animation_playing;
+static char s_deferred_playing_action_id[WORLD_SERVICE_ACTION_ID_MAX_BYTES + 1U];
+static char s_seen_deferred_action_ids[UI_ACTOR_DEFERRED_ANIMATION_CAPACITY]
+                                      [WORLD_SERVICE_ACTION_ID_MAX_BYTES + 1U];
+static size_t s_seen_deferred_action_head;
+static size_t s_seen_deferred_action_count;
+
 static ui_actor_point_t s_pet_pos;
 static ui_actor_point_t s_pet_target;
 static ui_actor_point_t s_pet_waypoint;
@@ -110,6 +135,174 @@ static const lv_image_dsc_t *const s_pet_frames[] = PET_IDLE_FRAMES;
 
 static void ui_home_actor_set_render_state(ui_actor_render_state_t state);
 static void ui_home_actor_say(const char *text, uint32_t accent, bool log_text);
+static ui_actor_render_state_t ui_home_actor_desired_rest_state(
+    world_speech_tone_t tone);
+
+static bool ui_home_actor_is_deferred_animation(world_object_animation_t animation)
+{
+    return animation == WORLD_OBJECT_ANIMATION_CAT_SIT ||
+           animation == WORLD_OBJECT_ANIMATION_CAT_LOOK ||
+           animation == WORLD_OBJECT_ANIMATION_CAT_PAW;
+}
+
+static bool ui_home_actor_has_seen_deferred_action(const char *action_id)
+{
+    if (strcmp(action_id, s_deferred_playing_action_id) == 0) {
+        return true;
+    }
+    for (size_t offset = 0U; offset < s_deferred_animation_count; ++offset) {
+        size_t index = (s_deferred_animation_head + offset) %
+                       UI_ACTOR_DEFERRED_ANIMATION_CAPACITY;
+        if (strcmp(action_id, s_deferred_animations[index].action_id) == 0) {
+            return true;
+        }
+    }
+    for (size_t offset = 0U; offset < s_seen_deferred_action_count; ++offset) {
+        size_t index = (s_seen_deferred_action_head + offset) %
+                       UI_ACTOR_DEFERRED_ANIMATION_CAPACITY;
+        if (strcmp(action_id, s_seen_deferred_action_ids[index]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void ui_home_actor_mark_deferred_action_seen(const char *action_id)
+{
+    size_t index = 0U;
+    if (s_seen_deferred_action_count < UI_ACTOR_DEFERRED_ANIMATION_CAPACITY) {
+        index = (s_seen_deferred_action_head + s_seen_deferred_action_count) %
+                UI_ACTOR_DEFERRED_ANIMATION_CAPACITY;
+        s_seen_deferred_action_count++;
+    } else {
+        index = s_seen_deferred_action_head;
+        s_seen_deferred_action_head = (s_seen_deferred_action_head + 1U) %
+                                      UI_ACTOR_DEFERRED_ANIMATION_CAPACITY;
+    }
+    snprintf(s_seen_deferred_action_ids[index],
+             sizeof(s_seen_deferred_action_ids[index]), "%s", action_id);
+}
+
+static void ui_home_actor_clear_deferred_animations(void)
+{
+    memset(s_deferred_animations, 0, sizeof(s_deferred_animations));
+    s_deferred_animation_head = 0U;
+    s_deferred_animation_count = 0U;
+    s_deferred_animation_frames_remaining = 0U;
+    s_deferred_animation_playing = false;
+    s_deferred_playing_action_id[0] = '\0';
+    s_active_animation = WORLD_OBJECT_ANIMATION_NONE;
+}
+
+static void ui_home_actor_queue_deferred_animation(
+    const char *action_id, const char *target_object_id,
+    world_object_animation_t animation)
+{
+    if (action_id == NULL || action_id[0] == '\0' ||
+        target_object_id == NULL || target_object_id[0] == '\0' ||
+        !ui_home_actor_is_deferred_animation(animation) ||
+        ui_home_actor_has_seen_deferred_action(action_id)) {
+        return;
+    }
+    ui_home_actor_mark_deferred_action_seen(action_id);
+    if (s_deferred_animation_count >= UI_ACTOR_DEFERRED_ANIMATION_CAPACITY) {
+        ESP_LOGW(TAG, "deferred Human animation queue full; dropping action=%s",
+                 action_id);
+        return;
+    }
+    size_t tail = (s_deferred_animation_head + s_deferred_animation_count) %
+                  UI_ACTOR_DEFERRED_ANIMATION_CAPACITY;
+    s_deferred_animations[tail].animation = animation;
+    snprintf(s_deferred_animations[tail].action_id,
+             sizeof(s_deferred_animations[tail].action_id), "%s", action_id);
+    snprintf(s_deferred_animations[tail].target_object_id,
+             sizeof(s_deferred_animations[tail].target_object_id), "%s",
+             target_object_id);
+    s_deferred_animation_count++;
+}
+
+static ui_actor_deferred_status_t ui_home_actor_deferred_status(
+    const ui_actor_deferred_animation_t *deferred)
+{
+    world_action_event_t event = {0};
+    if (world_service_get_action_event(deferred->action_id, &event) != ESP_OK ||
+        event.status == WORLD_ACTION_STATUS_FAILED) {
+        return UI_ACTOR_DEFERRED_DROP;
+    }
+    return event.status == WORLD_ACTION_STATUS_COMPLETED
+               ? UI_ACTOR_DEFERRED_READY
+               : UI_ACTOR_DEFERRED_WAIT;
+}
+
+/* Returns true when WALK was replaced by an animation or the stable pose. */
+static bool ui_home_actor_begin_next_deferred_animation(void)
+{
+    while (s_deferred_animation_count > 0U) {
+        ui_actor_deferred_animation_t *deferred =
+            &s_deferred_animations[s_deferred_animation_head];
+        ui_actor_deferred_status_t status =
+            ui_home_actor_deferred_status(deferred);
+        if (status == UI_ACTOR_DEFERRED_WAIT) {
+            return false;
+        }
+        s_deferred_animation_head =
+            (s_deferred_animation_head + 1U) % UI_ACTOR_DEFERRED_ANIMATION_CAPACITY;
+        s_deferred_animation_count--;
+        if (status == UI_ACTOR_DEFERRED_DROP ||
+            strcmp(deferred->target_object_id, s_target_object_id) != 0) {
+            continue;
+        }
+        world_object_animation_t animation = deferred->animation;
+        s_deferred_animation_playing = true;
+        snprintf(s_deferred_playing_action_id,
+                 sizeof(s_deferred_playing_action_id), "%s", deferred->action_id);
+        s_active_animation = animation;
+        if (animation == WORLD_OBJECT_ANIMATION_CAT_SIT) {
+            s_deferred_animation_frames_remaining = ACTOR_SIT_FRAME_COUNT / 2U;
+            ui_home_actor_set_render_state(UI_ACTOR_RENDER_OBJECT_SIT);
+        } else if (animation == WORLD_OBJECT_ANIMATION_CAT_LOOK) {
+            s_deferred_animation_frames_remaining = ACTOR_LOOK_FRAME_COUNT / 2U;
+            ui_home_actor_set_render_state(UI_ACTOR_RENDER_OBJECT_LOOK);
+        } else {
+            s_deferred_animation_frames_remaining = ACTOR_PAW_FRAME_COUNT / 2U;
+            ui_home_actor_set_render_state(UI_ACTOR_RENDER_OBJECT_PAW);
+        }
+        return true;
+    }
+    s_deferred_animation_playing = false;
+    s_deferred_playing_action_id[0] = '\0';
+    s_active_animation = WORLD_OBJECT_ANIMATION_NONE;
+    ui_home_actor_set_render_state(
+        ui_home_actor_desired_rest_state(s_desired_tone));
+    return true;
+}
+
+static bool ui_home_actor_finish_deferred_animation_if_due(void)
+{
+    if (!s_deferred_animation_playing ||
+        s_deferred_animation_frames_remaining > 0U) {
+        return false;
+    }
+    s_deferred_animation_playing = false;
+    s_deferred_playing_action_id[0] = '\0';
+    (void)ui_home_actor_begin_next_deferred_animation();
+    return true;
+}
+
+static bool ui_home_actor_snapshot_starts_movement(
+    const world_service_snapshot_t *snapshot)
+{
+    if (snapshot->active_action_id[0] == '\0') {
+        return false;
+    }
+    world_action_event_t event = {0};
+    if (world_service_get_action_event(snapshot->active_action_id, &event) != ESP_OK ||
+        event.status != WORLD_ACTION_STATUS_STARTED) {
+        return false;
+    }
+    return event.tool == WORLD_ACTION_CHARACTER_GO_TO_ROOM ||
+           event.tool == WORLD_ACTION_CHARACTER_GO_TO_OBJECT;
+}
 
 static bool ui_home_actor_room_index(world_room_id_t room, size_t *room_index)
 {
@@ -334,6 +527,15 @@ static bool ui_home_actor_tick(uint32_t tick, void *user_data)
         return true;
     }
 
+    /* A following action may still be active when the previous deferred
+     * animation ends. Poll its retained lifecycle without losing the stable
+     * pose, then start it exactly once after it becomes terminal-success. */
+    if (!s_deferred_animation_playing && s_deferred_animation_count > 0U &&
+        s_state != UI_ACTOR_RENDER_WALK && s_pos.x == s_target.x &&
+        s_pos.y == s_target.y && ui_home_actor_begin_next_deferred_animation()) {
+        goto actor_tick_complete;
+    }
+
     switch (s_state) {
     case UI_ACTOR_RENDER_WALK: {
         ui_actor_point_t goal = s_has_waypoint ? s_waypoint : s_target;
@@ -346,6 +548,11 @@ static bool ui_home_actor_tick(uint32_t tick, void *user_data)
         } else if (s_has_waypoint) {
             s_has_waypoint = false;
         } else {
+            if (s_deferred_animation_count > 0U &&
+                ui_home_actor_begin_next_deferred_animation()) {
+                s_walk_frame = 0;
+                break;
+            }
             if (s_active_animation != WORLD_OBJECT_ANIMATION_CAT_WALK) {
                 ui_home_actor_set_render_state(
                     ui_home_actor_desired_rest_state(s_desired_tone));
@@ -371,31 +578,49 @@ static bool ui_home_actor_tick(uint32_t tick, void *user_data)
         break;
     }
     case UI_ACTOR_RENDER_OBJECT_SIT: {
+        if (ui_home_actor_finish_deferred_animation_if_due()) {
+            break;
+        }
         const size_t frames_per_direction = ACTOR_SIT_FRAME_COUNT / 2U;
         if ((tick % 8U) == 0U) {
             s_idle_frame = (uint8_t)((s_idle_frame + 1U) % frames_per_direction);
             ui_home_actor_set_pose(
                 s_sit_frames[ui_home_actor_direction_offset(frames_per_direction) +
                              s_idle_frame]);
+            if (s_deferred_animation_playing) {
+                s_deferred_animation_frames_remaining--;
+            }
         }
         break;
     }
     case UI_ACTOR_RENDER_OBJECT_LOOK: {
+        if (ui_home_actor_finish_deferred_animation_if_due()) {
+            break;
+        }
         const size_t frames_per_direction = ACTOR_LOOK_FRAME_COUNT / 2U;
         if ((tick % 2U) == 0U) {
             s_idle_frame = (uint8_t)((s_idle_frame + 1U) % frames_per_direction);
             ui_home_actor_set_pose(
                 s_look_frames[ui_home_actor_direction_offset(frames_per_direction) +
                               s_idle_frame]);
+            if (s_deferred_animation_playing) {
+                s_deferred_animation_frames_remaining--;
+            }
         }
         break;
     }
     case UI_ACTOR_RENDER_OBJECT_PAW: {
+        if (ui_home_actor_finish_deferred_animation_if_due()) {
+            break;
+        }
         const size_t frames_per_direction = ACTOR_PAW_FRAME_COUNT / 2U;
         s_idle_frame = (uint8_t)((s_idle_frame + 1U) % frames_per_direction);
         ui_home_actor_set_pose(
             s_paw_frames[ui_home_actor_direction_offset(frames_per_direction) +
                          s_idle_frame]);
+        if (s_deferred_animation_playing) {
+            s_deferred_animation_frames_remaining--;
+        }
         break;
     }
     case UI_ACTOR_RENDER_OBJECT_IDLE:
@@ -430,6 +655,7 @@ static bool ui_home_actor_tick(uint32_t tick, void *user_data)
         break;
     }
 
+actor_tick_complete:
     ui_home_actor_advance_pet(tick);
     if ((tick % 4U) == 0U && s_pet != NULL) {
         s_pet_frame = (uint8_t)((s_pet_frame + 1U) % PET_IDLE_FRAME_COUNT);
@@ -476,6 +702,10 @@ esp_err_t ui_home_actor_create(lv_obj_t *house)
 {
     ESP_RETURN_ON_FALSE(house != NULL, ESP_ERR_INVALID_ARG, TAG, "null house");
 
+    ui_home_actor_clear_deferred_animations();
+    memset(s_seen_deferred_action_ids, 0, sizeof(s_seen_deferred_action_ids));
+    s_seen_deferred_action_head = 0U;
+    s_seen_deferred_action_count = 0U;
     world_service_snapshot_t snapshot = {0};
     world_service_get_snapshot(&snapshot);
     size_t snapshot_room = 0U;
@@ -623,29 +853,32 @@ void ui_home_actor_apply_snapshot(const world_service_snapshot_t *snapshot)
     world_character_pose_t previous_pose = s_object_pose;
     world_object_animation_t previous_animation = s_active_animation;
     world_object_facing_t previous_facing = s_facing;
+    bool target_changed = strcmp(previous_target, snapshot->target_object_id) != 0;
+    if (ui_home_actor_snapshot_starts_movement(snapshot) || target_changed) {
+        /* A newer movement/target invalidates visual work queued for the old
+         * location. The authoritative snapshot below supplies the new route. */
+        ui_home_actor_clear_deferred_animations();
+    }
     s_desired_activity = snapshot->activity;
     s_desired_tone = snapshot->speech_tone;
     s_facing = snapshot->character_facing;
     s_object_pose = snapshot->character_pose;
-    s_active_animation = snapshot->active_animation;
+    world_object_animation_t incoming_animation = snapshot->active_animation;
+    if (s_state == UI_ACTOR_RENDER_WALK &&
+        ui_home_actor_is_deferred_animation(incoming_animation)) {
+        /* Device actions can complete faster than a cross-room walk. Preserve
+         * their order locally and render them only after the target is reached. */
+        ui_home_actor_queue_deferred_animation(snapshot->active_action_id,
+                                                snapshot->target_object_id,
+                                                incoming_animation);
+    } else if (!s_deferred_animation_playing) {
+        s_active_animation = incoming_animation;
+    }
     snprintf(s_target_object_id, sizeof(s_target_object_id), "%s",
              snapshot->target_object_id);
     ui_actor_point_t object_target = {0};
     if (ui_home_actor_object_target(snapshot, room_index, &object_target)) {
-        if (strcmp(previous_target, snapshot->target_object_id) != 0 &&
-            snapshot->active_animation == WORLD_OBJECT_ANIMATION_NONE) {
-            /* The service publishes the destination only in the completed
-             * snapshot. Commit that authoritative anchor immediately: the
-             * started snapshot has already rendered the bound walk frames,
-             * and a later visual walk would overlap the following sit action. */
-            s_room = room_index;
-            s_pos = object_target;
-            s_target = object_target;
-            s_has_waypoint = false;
-            ui_home_actor_place();
-            ui_home_actor_set_render_state(
-                ui_home_actor_desired_rest_state(snapshot->speech_tone));
-        } else if (object_target.x != s_pos.x || object_target.y != s_pos.y ||
+        if (object_target.x != s_pos.x || object_target.y != s_pos.y ||
             room_index != s_room) {
             ui_home_actor_go_to_target(room_index, object_target);
         } else if (s_state != UI_ACTOR_RENDER_WALK) {

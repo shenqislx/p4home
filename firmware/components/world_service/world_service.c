@@ -923,6 +923,28 @@ esp_err_t world_service_start_next(world_action_event_t *event)
     return ESP_OK;
 }
 
+esp_err_t world_service_get_action_event(const char *action_id,
+                                         world_action_event_t *event)
+{
+    if (event == NULL || !world_valid_action_id(action_id)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    portENTER_CRITICAL(&s_world_lock);
+    if (!s_world.initialized) {
+        portEXIT_CRITICAL(&s_world_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    size_t record_index = world_find_record_locked(action_id);
+    if (record_index == WORLD_NO_RECORD) {
+        portEXIT_CRITICAL(&s_world_lock);
+        return ESP_ERR_NOT_FOUND;
+    }
+    *event = s_world.records[record_index].latest_event;
+    event->from_cache = true;
+    portEXIT_CRITICAL(&s_world_lock);
+    return ESP_OK;
+}
+
 esp_err_t world_service_complete_active(world_action_event_t *event)
 {
     if (event == NULL) {
