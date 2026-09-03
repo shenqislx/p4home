@@ -11,6 +11,7 @@ WORLD_HEADER = ROOT / "firmware/components/world_service/include/world_service.h
 WORLD_SOURCE = ROOT / "firmware/components/world_service/world_service.c"
 ACTOR_HEADER = ROOT / "firmware/components/ui_pages/include/ui_home_actor.h"
 ACTOR_SOURCE = ROOT / "firmware/components/ui_pages/ui_home_actor.c"
+HOME_SOURCE = ROOT / "firmware/components/ui_pages/ui_page_home.c"
 
 
 class WorldServicePhase2CContractTests(unittest.TestCase):
@@ -62,6 +63,28 @@ class WorldServicePhase2CContractTests(unittest.TestCase):
         self.assertRegex(header, r"WORLD_SERVICE_ACTION_QUEUE_CAPACITY\s+8U")
         self.assertRegex(header, r"WORLD_SERVICE_SAY_TEXT_MAX_CHARS\s+256U")
         self.assertRegex(header, r"WORLD_SERVICE_IDEMPOTENCY_RETENTION_MS\s+600000U")
+
+    def test_human_sleep_requires_reliable_night_clock_and_ten_minutes_idle(self) -> None:
+        header = WORLD_HEADER.read_text(encoding="utf-8")
+        source = WORLD_SOURCE.read_text(encoding="utf-8")
+        home = HOME_SOURCE.read_text(encoding="utf-8")
+
+        self.assertRegex(header, r"WORLD_SERVICE_SLEEP_IDLE_MS\s+600000U")
+        sleep_due = source[
+            source.index("static bool world_sleep_due_locked") :
+            source.index("static bool world_apply_sleep_gate_locked")
+        ]
+        self.assertIn("s_world.sleep_clock_ready", sleep_due)
+        self.assertIn("s_world.sleep_is_night", sleep_due)
+        self.assertIn("!s_world.user_interaction_active", sleep_due)
+        self.assertIn("s_world.active_record == WORLD_NO_RECORD", sleep_due)
+        self.assertIn("s_world.queue_count == 0U", sleep_due)
+        self.assertNotIn("agent_connected", sleep_due)
+        self.assertNotIn("fallback_sleep_reason", sleep_due)
+        self.assertIn("hour >= 5 && hour < 8", home)
+        self.assertIn("hour >= 17 && hour < 20", home)
+        self.assertIn("world_service_update_sleep_clock(clock_ready", home)
+        self.assertIn("clock_ready && s_night", home)
 
     def test_actor_public_api_is_snapshot_only(self) -> None:
         header = ACTOR_HEADER.read_text(encoding="utf-8")

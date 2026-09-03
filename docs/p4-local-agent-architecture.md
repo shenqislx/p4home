@@ -201,7 +201,7 @@ firmware/components/
 - `world_service` 持有 Cat `room/activity/action_id`；
 - `action_executor` 负责路径、时序、取消与完成条件；
 - `ui_home_actor` 只把状态渲染成 sprite 与动画；
-- 现有“断线打盹、全屋熄灯去睡觉”等规则先保留为本地 fallback policy，后续再决定是否由 Autonomy 替代。
+- 本地 fallback 不再因断线或全屋熄灯直接触发睡眠；Human 仅在可信夜间时钟、连续空闲十分钟且无动作/会话时睡眠，HA 状态只影响提示文案。
 
 ## 5. Agent 核心对象模型
 

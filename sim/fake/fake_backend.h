@@ -47,8 +47,8 @@ typedef struct {
     void (*apply)(void);
 } fake_scenario_step_t;
 
-/* Runs the built-in walkthrough: lights on room by room, climate on, all dark,
- * offline, recover. Returns false once the script has finished. */
+/* Runs the built-in walkthrough: lights on room by room, climate on, all-dark
+ * night-idle timing, offline, recover. Returns false once the script has finished. */
 bool fake_scenario_step(uint32_t tick);
 uint32_t fake_scenario_length_ticks(void);
 const char *fake_scenario_current_label(void);

@@ -121,6 +121,78 @@ int main(void)
     CHECK(world_service_add_observer(host_observer, &s_clock) == ESP_OK);
     CHECK(world_service_add_observer(host_observer, &s_clock) == ESP_OK);
 
+    /* Human sleep is a 20:00-05:00 idle policy, not an HA connectivity state.
+     * Unknown time must fail awake; at night the full ten-minute threshold is
+     * required, and a new action wakes immediately. */
+    world_local_fallback_context_t offline_fallback = {0};
+    CHECK(world_service_update_sleep_clock(false, true) == ESP_OK);
+    CHECK(world_service_apply_local_fallback(&offline_fallback) == ESP_OK);
+    world_service_snapshot_t snapshot = {0};
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
+
+    CHECK(world_service_update_sleep_clock(true, true) == ESP_OK);
+    advance_clock(WORLD_SERVICE_SLEEP_IDLE_MS / 2U);
+    CHECK(world_service_apply_local_fallback(&offline_fallback) == ESP_OK);
+    advance_clock(WORLD_SERVICE_SLEEP_IDLE_MS / 2U - 1U);
+    CHECK(world_service_update_sleep_clock(true, true) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
+    advance_clock(1U);
+    CHECK(world_service_update_sleep_clock(true, true) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_SLEEP);
+
+    CHECK(world_service_note_user_interaction() == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
+    advance_clock(WORLD_SERVICE_SLEEP_IDLE_MS - 1U);
+    CHECK(world_service_update_sleep_clock(true, true) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
+    advance_clock(1U);
+    CHECK(world_service_update_sleep_clock(false, true) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
+
+    CHECK(world_service_update_sleep_clock(true, false) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
+    CHECK(world_service_update_sleep_clock(true, true) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_SLEEP);
+
+    world_action_event_t completed = {0};
+    world_action_request_t queued_wake = request_for(
+        "host-queued-wake", WORLD_ACTION_CHARACTER_GO_TO_ROOM);
+    queued_wake.arguments.room = WORLD_ROOM_ENTRY;
+    CHECK(world_service_submit(&queued_wake, &completed) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
+    advance_clock(WORLD_SERVICE_SLEEP_IDLE_MS);
+    CHECK(world_service_update_sleep_clock(true, true) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
+    CHECK(world_service_cancel(queued_wake.action_id, &completed) == ESP_OK);
+    CHECK(world_service_update_sleep_clock(true, true) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_SLEEP);
+
+    world_action_request_t wake_move = request_for(
+        "host-wake-move", WORLD_ACTION_CHARACTER_GO_TO_ROOM);
+    wake_move.arguments.room = WORLD_ROOM_ENTRY;
+    CHECK(world_service_submit(&wake_move, &completed) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
+    CHECK(world_service_start_next(&completed) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
+    CHECK(world_service_complete_active(&completed) == ESP_OK);
+    CHECK(completed.status == WORLD_ACTION_STATUS_COMPLETED);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.room == WORLD_ROOM_ENTRY);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
+
     world_local_fallback_context_t fallback = {
         .ha_connected = true,
         .online_entities = 12U,
@@ -129,7 +201,6 @@ int main(void)
     fallback.room_lit[WORLD_ROOM_STUDY] = true;
     fallback.room_climate_on[WORLD_ROOM_STUDY] = true;
     CHECK(world_service_apply_local_fallback(&fallback) == ESP_OK);
-    world_service_snapshot_t snapshot = {0};
     world_service_get_snapshot(&snapshot);
     CHECK(snapshot.room == WORLD_ROOM_STUDY);
     CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
@@ -144,7 +215,26 @@ int main(void)
     CHECK(snapshot.room == WORLD_ROOM_STUDY);
     CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
 
-    world_action_event_t completed = {0};
+    advance_clock(WORLD_SERVICE_SLEEP_IDLE_MS / 2U);
+    CHECK(world_service_apply_local_fallback(&fallback) == ESP_OK);
+    advance_clock(WORLD_SERVICE_SLEEP_IDLE_MS / 2U);
+    CHECK(world_service_update_sleep_clock(true, true) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_SLEEP);
+    CHECK(world_service_note_user_interaction() == ESP_OK);
+
+    /* Connectivity is not a sleep prerequisite. An active Human conversation
+     * is: it suppresses sleep without allowing unrelated refreshes to reset
+     * the idle baseline. */
+    CHECK(world_service_set_user_interaction_active(true) == ESP_OK);
+    advance_clock(WORLD_SERVICE_SLEEP_IDLE_MS);
+    CHECK(world_service_update_sleep_clock(true, true) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_IDLE);
+    CHECK(world_service_set_user_interaction_active(false) == ESP_OK);
+    world_service_get_snapshot(&snapshot);
+    CHECK(snapshot.activity == WORLD_ACTIVITY_SLEEP);
+
     world_action_request_t get_state = request_for("host-get-state", WORLD_ACTION_CHARACTER_GET_STATE);
     CHECK(run_action(&get_state, &completed) == 0);
     CHECK(completed.result.snapshot.room == WORLD_ROOM_STUDY);
@@ -158,7 +248,7 @@ int main(void)
                                                       WORLD_ACTION_CHARACTER_SET_ACTIVITY);
     set_activity.arguments.activity = WORLD_ACTIVITY_SLEEP;
     CHECK(run_action(&set_activity, &completed) == 0);
-    CHECK(completed.result.activity == WORLD_ACTIVITY_SLEEP);
+    CHECK(completed.result.activity == WORLD_ACTIVITY_IDLE);
 
     world_action_request_t say = request_for("host-say", WORLD_ACTION_CHARACTER_SAY);
     say.arguments.text = "我到餐厨了";
@@ -188,7 +278,7 @@ int main(void)
                                                        WORLD_ACTION_GET_SNAPSHOT);
     CHECK(run_action(&get_snapshot, &completed) == 0);
     CHECK(completed.result.snapshot.room == WORLD_ROOM_KITCHEN);
-    CHECK(completed.result.snapshot.activity == WORLD_ACTIVITY_SLEEP);
+    CHECK(completed.result.snapshot.activity == WORLD_ACTIVITY_IDLE);
 
     uint32_t version_before_duplicate = completed.state_version;
     world_action_event_t duplicate = {0};

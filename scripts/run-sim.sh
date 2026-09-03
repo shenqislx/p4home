@@ -21,6 +21,7 @@ clock_speed="1"
 start_hour="20"
 scenario=""
 verify_object_gate=""
+verify_human_idle=""
 zoom=""
 crop=""
 keep_ppm=""
@@ -35,6 +36,7 @@ usage: scripts/run-sim.sh [options]
   --start-hour H         wall clock hour the replay starts at (0-23)
   --scenario             replay the scripted HA event sequence
   --verify-object-gate   assert Phase 3D anchor/facing/pose/animation bindings
+  --verify-human-idle    fast-forward and assert Human night-idle sleep/wake policy
   --zoom N               upscale dumped PNGs N times (nearest neighbour)
   --crop X,Y,W,H         crop dumped PNGs to a region, in device pixels
   --keep-ppm             keep the intermediate PPM files
@@ -57,6 +59,7 @@ while [[ $# -gt 0 ]]; do
         --start-hour) start_hour="$2"; shift 2 ;;
         --scenario) scenario="1"; shift ;;
         --verify-object-gate) verify_object_gate="1"; mode="dump"; shift ;;
+        --verify-human-idle) verify_human_idle="1"; mode="dump"; shift ;;
         --zoom) zoom="$2"; shift 2 ;;
         --crop) crop="$2"; shift 2 ;;
         --keep-ppm) keep_ppm="1"; shift ;;
@@ -76,6 +79,7 @@ ninja -C "${build_dir}"
 sim_args=(--mode "${mode}" --clock-speed "${clock_speed}" --start-hour "${start_hour}")
 [[ -n "${scenario}" ]] && sim_args+=(--scenario)
 [[ -n "${verify_object_gate}" ]] && sim_args+=(--verify-object-gate)
+[[ -n "${verify_human_idle}" ]] && sim_args+=(--verify-human-idle)
 [[ -n "${frames}" ]] && sim_args+=(--frames "${frames}")
 
 if [[ "${mode}" == "dump" ]]; then

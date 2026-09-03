@@ -14,6 +14,7 @@
 #define WORLD_SERVICE_SAY_TEXT_MAX_CHARS 256U
 #define WORLD_SERVICE_SAY_TEXT_MAX_BYTES (WORLD_SERVICE_SAY_TEXT_MAX_CHARS * 4U)
 #define WORLD_SERVICE_IDEMPOTENCY_RETENTION_MS 600000U
+#define WORLD_SERVICE_SLEEP_IDLE_MS 600000U
 #define WORLD_SERVICE_OBJECT_CAPACITY 3U
 
 typedef enum {
@@ -169,6 +170,12 @@ esp_err_t world_service_add_observer(world_service_observer_cb_t observer, void 
 void world_service_get_snapshot(world_service_snapshot_t *snapshot);
 
 esp_err_t world_service_set_agent_connected(bool connected);
+/* A Human interaction wakes the avatar and restarts the night-idle deadline. */
+esp_err_t world_service_note_user_interaction(void);
+/* Keeps autonomous sleep suppressed while capture/model/TTS conversation is active. */
+esp_err_t world_service_set_user_interaction_active(bool active);
+/* Sleep is only eligible from 20:00 through 04:59 with a trustworthy clock. */
+esp_err_t world_service_update_sleep_clock(bool clock_ready, bool is_night);
 esp_err_t world_service_apply_local_fallback(const world_local_fallback_context_t *context);
 esp_err_t world_service_set_object_available(const char *object_id, bool available);
 esp_err_t world_service_set_object_occupied(const char *object_id, bool occupied);

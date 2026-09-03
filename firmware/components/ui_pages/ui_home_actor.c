@@ -358,16 +358,16 @@ static ui_actor_render_state_t ui_home_actor_desired_rest_state(world_speech_ton
     default:
         break;
     }
+    if (s_desired_activity == WORLD_ACTIVITY_SLEEP) {
+        return tone == WORLD_SPEECH_TONE_MUTED ? UI_ACTOR_RENDER_DOZE
+                                               : UI_ACTOR_RENDER_SLEEP;
+    }
     if (s_target_object_id[0] != '\0') {
         return s_object_pose == WORLD_CHARACTER_POSE_SITTING
                    ? UI_ACTOR_RENDER_OBJECT_SIT
                    : UI_ACTOR_RENDER_OBJECT_IDLE;
     }
-    if (s_desired_activity != WORLD_ACTIVITY_SLEEP) {
-        return UI_ACTOR_RENDER_IDLE;
-    }
-    return tone == WORLD_SPEECH_TONE_MUTED ? UI_ACTOR_RENDER_DOZE
-                                           : UI_ACTOR_RENDER_SLEEP;
+    return UI_ACTOR_RENDER_IDLE;
 }
 
 static int16_t ui_home_actor_room_stand_x(size_t room_index)
@@ -1048,6 +1048,8 @@ void ui_home_actor_get_render_snapshot(ui_home_actor_render_snapshot_t *snapshot
                                                 ? WORLD_OBJECT_ANIMATION_CAT_PAW
                                                 : WORLD_OBJECT_ANIMATION_NONE;
     snapshot->moving = s_state == UI_ACTOR_RENDER_WALK;
+    snapshot->sleeping = s_state == UI_ACTOR_RENDER_SLEEP ||
+                         s_state == UI_ACTOR_RENDER_DOZE;
     snprintf(snapshot->target_object_id, sizeof(snapshot->target_object_id), "%s",
              s_target_object_id);
     snapshot->pet_art_x = s_pet_pos.x;

@@ -58,7 +58,7 @@ STATIC_UI_TEXT = (
     "次卧玄关拱门客卫主卫衣帽间阳台"
     # Actor dialogue. Punctuation included on purpose: a missing ，or …renders as
     # a tofu box just like a missing glyph.
-    "灯火通明氛围值拉满在制冷好凉快去看看全屋熄灯去睡了信号断了先打个盹！，…"
+    "灯火通明氛围值拉满在制冷好凉快去看看夜深且全屋熄灯休息了先休息一下！，…"
 )
 
 COMMON_CJK_PUNCTUATION = "，。！？；：、（）【】《》“”‘’—…·"

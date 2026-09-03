@@ -558,6 +558,151 @@ static bool sim_pet_inside_house(const ui_home_actor_render_snapshot_t *render)
            render->pet_target_room < UI_HOME_ROOM_COUNT;
 }
 
+static bool sim_same_pet_state(const ui_home_actor_render_snapshot_t *left,
+                               const ui_home_actor_render_snapshot_t *right)
+{
+    return left->pet_art_x == right->pet_art_x &&
+           left->pet_floor_y == right->pet_floor_y &&
+           left->pet_target_art_x == right->pet_target_art_x &&
+           left->pet_target_floor_y == right->pet_target_floor_y &&
+           left->pet_room == right->pet_room &&
+           left->pet_target_room == right->pet_target_room &&
+           left->pet_ticks_until_target == right->pet_ticks_until_target &&
+           left->pet_target_revision == right->pet_target_revision &&
+           left->pet_moving == right->pet_moving;
+}
+
+static int sim_verify_human_idle_gate(void)
+{
+    world_service_snapshot_t world = {0};
+    ui_home_actor_render_snapshot_t render = {0};
+    world_service_get_snapshot(&world);
+    ui_home_actor_get_render_snapshot(&render);
+    if (world.activity != WORLD_ACTIVITY_IDLE || render.sleeping) {
+        fprintf(stderr, "VERIFY:human_idle:startup_awake:FAIL\n");
+        return 1;
+    }
+
+    /* Fast-forward the monotonic clock without waiting ten real minutes. */
+    sim_advance(WORLD_SERVICE_SLEEP_IDLE_MS - 1U);
+    (void)world_service_update_sleep_clock(true, true);
+    world_service_get_snapshot(&world);
+    if (world.activity != WORLD_ACTIVITY_IDLE) {
+        fprintf(stderr, "VERIFY:human_idle:threshold:FAIL reason=early_sleep\n");
+        return 1;
+    }
+    sim_advance(1U);
+    (void)world_service_update_sleep_clock(true, true);
+    world_service_get_snapshot(&world);
+    ui_home_actor_apply_snapshot(&world);
+    ui_home_actor_get_render_snapshot(&render);
+    if (world.activity != WORLD_ACTIVITY_SLEEP || !render.sleeping) {
+        fprintf(stderr, "VERIFY:human_idle:threshold:FAIL reason=no_sleep\n");
+        return 1;
+    }
+
+    ui_home_actor_render_snapshot_t cat_before = render;
+    if (world_service_note_user_interaction() != ESP_OK) {
+        return 1;
+    }
+    world_service_get_snapshot(&world);
+    ui_home_actor_apply_snapshot(&world);
+    ui_home_actor_get_render_snapshot(&render);
+    if (world.activity != WORLD_ACTIVITY_IDLE || render.sleeping ||
+        !sim_same_pet_state(&cat_before, &render)) {
+        fprintf(stderr, "VERIFY:human_idle:wake:FAIL reason=interaction_or_cat\n");
+        return 1;
+    }
+
+    sim_advance(WORLD_SERVICE_SLEEP_IDLE_MS);
+    (void)world_service_update_sleep_clock(true, true);
+    world_service_get_snapshot(&world);
+    ui_home_actor_apply_snapshot(&world);
+    ui_home_actor_get_render_snapshot(&render);
+    if (world.activity != WORLD_ACTIVITY_SLEEP) {
+        fprintf(stderr, "VERIFY:human_idle:action_wake:FAIL reason=setup\n");
+        return 1;
+    }
+
+    cat_before = render;
+    world_action_request_t move = {
+        .action_id = "sim-human-idle-wake-move",
+        .tool = WORLD_ACTION_CHARACTER_GO_TO_ROOM,
+        .arguments.room = WORLD_ROOM_KITCHEN,
+        .timeout_ms = 5000U,
+    };
+    world_action_event_t event = {0};
+    if (world_service_submit(&move, &event) != ESP_OK ||
+        world_service_start_next(&event) != ESP_OK ||
+        event.status != WORLD_ACTION_STATUS_STARTED) {
+        return 1;
+    }
+    world_service_get_snapshot(&world);
+    ui_home_actor_apply_snapshot(&world);
+    ui_home_actor_get_render_snapshot(&render);
+    if (world.activity != WORLD_ACTIVITY_IDLE || render.sleeping ||
+        !sim_same_pet_state(&cat_before, &render)) {
+        fprintf(stderr, "VERIFY:human_idle:action_wake:FAIL reason=start_or_cat\n");
+        return 1;
+    }
+    if (world_service_complete_active(&event) != ESP_OK ||
+        event.status != WORLD_ACTION_STATUS_COMPLETED) {
+        return 1;
+    }
+    world_service_get_snapshot(&world);
+    ui_home_actor_apply_snapshot(&world);
+    ui_home_actor_get_render_snapshot(&render);
+    if (world.room != WORLD_ROOM_KITCHEN ||
+        world.activity != WORLD_ACTIVITY_IDLE || render.sleeping ||
+        !sim_same_pet_state(&cat_before, &render)) {
+        fprintf(stderr, "VERIFY:human_idle:action_wake:FAIL reason=complete_or_cat\n");
+        return 1;
+    }
+
+    if (!sim_wait_for_actor(256U)) {
+        return 1;
+    }
+    /* The second cycle proves online Human sleep independently of HA fallback. */
+    if (world_service_set_agent_connected(true) != ESP_OK) {
+        return 1;
+    }
+    world_action_request_t go_to_sofa = sim_object_request(
+        "sim-human-idle-sofa", WORLD_ACTION_CHARACTER_GO_TO_OBJECT,
+        "living_room.sofa");
+    if (!sim_begin_object_action(&go_to_sofa, WORLD_OBJECT_ANIMATION_CAT_WALK) ||
+        !sim_complete_object_action() || !sim_wait_for_actor(256U)) {
+        return 1;
+    }
+    world_action_request_t sit_sofa = sim_object_request(
+        "sim-human-idle-sit", WORLD_ACTION_CHARACTER_SIT,
+        "living_room.sofa");
+    if (!sim_begin_object_action(&sit_sofa, WORLD_OBJECT_ANIMATION_CAT_SIT) ||
+        !sim_complete_object_action()) {
+        return 1;
+    }
+    (void)world_service_note_user_interaction();
+    sim_advance(WORLD_SERVICE_SLEEP_IDLE_MS);
+    cat_before = render;
+    (void)world_service_update_sleep_clock(true, true);
+    world_service_get_snapshot(&world);
+    ui_home_actor_apply_snapshot(&world);
+    ui_home_actor_get_render_snapshot(&render);
+    if (world.activity != WORLD_ACTIVITY_SLEEP || !render.sleeping ||
+        world.character_pose != WORLD_CHARACTER_POSE_SITTING ||
+        strcmp(world.target_object_id, "living_room.sofa") != 0 ||
+        strcmp(render.target_object_id, "living_room.sofa") != 0) {
+        fprintf(stderr, "VERIFY:human_idle:object_sleep:FAIL\n");
+        return 1;
+    }
+
+    printf("VERIFY:human_idle:threshold:PASS night=20:00-05:00 idle_ms=%u\n",
+           (unsigned)WORLD_SERVICE_SLEEP_IDLE_MS);
+    printf("VERIFY:human_idle:wake:PASS sources=interaction,action\n");
+    printf("VERIFY:human_idle:object_sleep:PASS target=sofa pose=sitting render=sleep\n");
+    printf("VERIFY:human_idle:cat_isolation:PASS source=local_timer\n");
+    return 0;
+}
+
 static int sim_verify_pet_autonomy(void)
 {
     ui_home_actor_render_snapshot_t before_human = {0};
@@ -713,7 +858,8 @@ static void sim_usage(const char *argv0)
     fprintf(stderr,
             "usage: %s [--mode window|dump] [--out DIR] [--frames N]\n"
             "          [--clock-speed N] [--start-hour H] [--scenario]\n"
-            "          [--verify-object-gate] [--verify-pet-autonomy]\n",
+            "          [--verify-object-gate] [--verify-pet-autonomy]\n"
+            "          [--verify-human-idle]\n",
             argv0);
 }
 
@@ -726,6 +872,7 @@ int main(int argc, char **argv)
     bool scenario = false;
     bool verify_object_gate = false;
     bool verify_pet_autonomy = false;
+    bool verify_human_idle = false;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
@@ -744,6 +891,8 @@ int main(int argc, char **argv)
             verify_object_gate = true;
         } else if (strcmp(argv[i], "--verify-pet-autonomy") == 0) {
             verify_pet_autonomy = true;
+        } else if (strcmp(argv[i], "--verify-human-idle") == 0) {
+            verify_human_idle = true;
         } else {
             sim_usage(argv[0]);
             return 2;
@@ -803,6 +952,9 @@ int main(int argc, char **argv)
     }
     if (verify_pet_autonomy) {
         return sim_verify_pet_autonomy();
+    }
+    if (verify_human_idle) {
+        return sim_verify_human_idle_gate();
     }
 
     if (frames == 0) {

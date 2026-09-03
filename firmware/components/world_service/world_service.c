@@ -29,6 +29,12 @@ typedef struct {
     world_action_event_t latest_event;
 } world_action_record_t;
 
+typedef enum {
+    WORLD_FALLBACK_SLEEP_NONE = 0,
+    WORLD_FALLBACK_SLEEP_HA_UNAVAILABLE,
+    WORLD_FALLBACK_SLEEP_HOME_DARK,
+} world_fallback_sleep_reason_t;
+
 typedef struct {
     bool initialized;
     world_service_clock_cb_t monotonic_ms;
@@ -46,6 +52,11 @@ typedef struct {
     size_t observer_count;
     bool object_external_occupied[WORLD_SERVICE_OBJECT_CAPACITY];
     bool object_character_occupied[WORLD_SERVICE_OBJECT_CAPACITY];
+    uint64_t last_user_interaction_monotonic_ms;
+    bool sleep_clock_ready;
+    bool sleep_is_night;
+    bool user_interaction_active;
+    world_fallback_sleep_reason_t fallback_sleep_reason;
 } world_service_state_t;
 
 static portMUX_TYPE s_world_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -554,6 +565,7 @@ esp_err_t world_service_init(const world_service_config_t *config)
     s_world.snapshot.speech_tone = WORLD_SPEECH_TONE_DEFAULT;
     s_world.snapshot.state_version = 1U;
     s_world.snapshot.observed_at_ms = world_wall_now();
+    s_world.last_user_interaction_monotonic_ms = world_monotonic_now();
     world_initialize_objects_locked();
     s_world.initialized = true;
     portEXIT_CRITICAL(&s_world_lock);
@@ -619,6 +631,19 @@ esp_err_t world_service_set_agent_connected(bool connected)
     }
     changed = s_world.snapshot.agent_connected != connected;
     s_world.snapshot.agent_connected = connected;
+    if (connected) {
+        s_world.fallback_sleep_reason = WORLD_FALLBACK_SLEEP_NONE;
+        if (changed) {
+            s_world.last_user_interaction_monotonic_ms = world_monotonic_now();
+            if (s_world.snapshot.activity == WORLD_ACTIVITY_SLEEP) {
+                s_world.snapshot.activity = WORLD_ACTIVITY_IDLE;
+                s_world.snapshot.speech_text[0] = '\0';
+                s_world.snapshot.speech_tone = WORLD_SPEECH_TONE_DEFAULT;
+                s_world.snapshot.speech_revision++;
+                world_increment_version_locked();
+            }
+        }
+    }
     /* The caller publishes disconnected only after the transport grace period
      * has expired. At that point the Agent no longer owns character placement,
      * so release its object anchor in the same observable state transition.
@@ -660,6 +685,111 @@ static bool world_apply_desired_locked(world_room_id_t room,
     return true;
 }
 
+static bool world_note_user_interaction_locked(uint64_t now_ms)
+{
+    s_world.last_user_interaction_monotonic_ms = now_ms;
+    if (s_world.snapshot.activity != WORLD_ACTIVITY_SLEEP) {
+        return false;
+    }
+    s_world.snapshot.activity = WORLD_ACTIVITY_IDLE;
+    s_world.snapshot.speech_text[0] = '\0';
+    s_world.snapshot.speech_tone = WORLD_SPEECH_TONE_DEFAULT;
+    s_world.snapshot.speech_revision++;
+    return true;
+}
+
+static bool world_sleep_due_locked(uint64_t now_ms)
+{
+    return s_world.sleep_clock_ready && s_world.sleep_is_night &&
+           !s_world.user_interaction_active && s_world.active_record == WORLD_NO_RECORD &&
+           s_world.queue_count == 0U &&
+           now_ms >= s_world.last_user_interaction_monotonic_ms &&
+           now_ms - s_world.last_user_interaction_monotonic_ms >=
+               WORLD_SERVICE_SLEEP_IDLE_MS;
+}
+
+static bool world_apply_sleep_gate_locked(uint64_t now_ms)
+{
+    if (world_sleep_due_locked(now_ms)) {
+        const char *speech = s_world.fallback_sleep_reason ==
+                                     WORLD_FALLBACK_SLEEP_HOME_DARK
+                                 ? "夜深且全屋熄灯，休息了"
+                                 : "夜深了，先休息一下";
+        return world_apply_desired_locked(s_world.snapshot.room, WORLD_ACTIVITY_SLEEP,
+                                          speech, WORLD_SPEECH_TONE_SLEEP);
+    }
+    if (s_world.snapshot.activity == WORLD_ACTIVITY_SLEEP) {
+        return world_apply_desired_locked(s_world.snapshot.room, WORLD_ACTIVITY_IDLE,
+                                          "", WORLD_SPEECH_TONE_DEFAULT);
+    }
+    return false;
+}
+
+esp_err_t world_service_note_user_interaction(void)
+{
+    bool changed = false;
+    portENTER_CRITICAL(&s_world_lock);
+    if (!s_world.initialized) {
+        portEXIT_CRITICAL(&s_world_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    changed = world_note_user_interaction_locked(world_monotonic_now());
+    if (changed) {
+        world_increment_version_locked();
+    }
+    portEXIT_CRITICAL(&s_world_lock);
+    if (changed) {
+        world_notify_observer();
+    }
+    return ESP_OK;
+}
+
+esp_err_t world_service_set_user_interaction_active(bool active)
+{
+    bool wake_changed = false;
+    bool gate_changed = false;
+    portENTER_CRITICAL(&s_world_lock);
+    if (!s_world.initialized) {
+        portEXIT_CRITICAL(&s_world_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (active && !s_world.user_interaction_active) {
+        wake_changed = world_note_user_interaction_locked(world_monotonic_now());
+    }
+    s_world.user_interaction_active = active;
+    if (!active) {
+        gate_changed = world_apply_sleep_gate_locked(world_monotonic_now());
+    }
+    if (wake_changed) {
+        /* The sleep gate increments its own desired-state transition. A wake
+         * performed directly by note_user_interaction_locked does not. */
+        world_increment_version_locked();
+    }
+    portEXIT_CRITICAL(&s_world_lock);
+    if (wake_changed || gate_changed) {
+        world_notify_observer();
+    }
+    return ESP_OK;
+}
+
+esp_err_t world_service_update_sleep_clock(bool clock_ready, bool is_night)
+{
+    bool changed = false;
+    portENTER_CRITICAL(&s_world_lock);
+    if (!s_world.initialized) {
+        portEXIT_CRITICAL(&s_world_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_world.sleep_clock_ready = clock_ready;
+    s_world.sleep_is_night = clock_ready && is_night;
+    changed = world_apply_sleep_gate_locked(world_monotonic_now());
+    portEXIT_CRITICAL(&s_world_lock);
+    if (changed) {
+        world_notify_observer();
+    }
+    return ESP_OK;
+}
+
 esp_err_t world_service_apply_local_fallback(const world_local_fallback_context_t *context)
 {
     if (context == NULL) {
@@ -690,15 +820,21 @@ esp_err_t world_service_apply_local_fallback(const world_local_fallback_context_
     }
 
     if (!context->ha_connected || context->online_entities == 0U) {
-        changed = world_apply_desired_locked(s_world.snapshot.room, WORLD_ACTIVITY_SLEEP,
-                                             "信号断了…先打个盹",
-                                             WORLD_SPEECH_TONE_MUTED) || changed;
+        s_world.fallback_sleep_reason = WORLD_FALLBACK_SLEEP_HA_UNAVAILABLE;
+        changed = world_apply_sleep_gate_locked(world_monotonic_now()) || changed;
     } else if (context->lights_on_total == 0U && context->climates_on_total == 0U) {
-        changed = world_apply_desired_locked(WORLD_ROOM_PRIMARY_BEDROOM,
-                                             WORLD_ACTIVITY_SLEEP,
-                                             "全屋熄灯，去睡了",
-                                             WORLD_SPEECH_TONE_SLEEP) || changed;
+        s_world.fallback_sleep_reason = WORLD_FALLBACK_SLEEP_HOME_DARK;
+        changed = world_apply_sleep_gate_locked(world_monotonic_now()) || changed;
     } else {
+        s_world.fallback_sleep_reason = WORLD_FALLBACK_SLEEP_NONE;
+        if (world_sleep_due_locked(world_monotonic_now())) {
+            changed = world_apply_sleep_gate_locked(world_monotonic_now()) || changed;
+            portEXIT_CRITICAL(&s_world_lock);
+            if (changed) {
+                world_notify_observer();
+            }
+            return ESP_OK;
+        }
         world_room_id_t destination = s_world.snapshot.room;
         bool found = false;
         for (size_t index = 0U; index < WORLD_ROOM_COUNT && !found; ++index) {
@@ -817,6 +953,7 @@ esp_err_t world_service_submit(const world_action_request_t *request,
         return ESP_ERR_INVALID_ARG;
     }
     memset(event, 0, sizeof(*event));
+    bool notify = false;
     portENTER_CRITICAL(&s_world_lock);
     if (!s_world.initialized) {
         portEXIT_CRITICAL(&s_world_lock);
@@ -862,10 +999,17 @@ esp_err_t world_service_submit(const world_action_request_t *request,
             world_event_base_locked(&record->latest_event, record, WORLD_ACTION_STATUS_ACCEPTED);
             record->latest_event.queue_position = (uint8_t)in_flight;
             s_world.queue[s_world.queue_count++] = record_index;
+            if (world_note_user_interaction_locked(now_ms)) {
+                world_increment_version_locked();
+                notify = true;
+            }
         }
     }
     *event = record->latest_event;
     portEXIT_CRITICAL(&s_world_lock);
+    if (notify) {
+        world_notify_observer();
+    }
     return ESP_OK;
 }
 
@@ -902,6 +1046,7 @@ esp_err_t world_service_start_next(world_action_event_t *event)
                                  world_object_error_retryable(object_error));
     } else {
         s_world.active_record = record_index;
+        (void)world_note_user_interaction_locked(now_ms);
         world_copy_text(s_world.snapshot.active_action_id,
                         sizeof(s_world.snapshot.active_action_id), record->action_id);
         s_world.snapshot.speaking = record->tool == WORLD_ACTION_CHARACTER_SAY;
@@ -965,15 +1110,21 @@ esp_err_t world_service_complete_active(world_action_event_t *event)
                                             ? world_object_request_error_locked(record)
                                             : WORLD_ACTION_ERROR_NONE;
     if (world_record_expired_locked(record, now_ms)) {
+        s_world.last_user_interaction_monotonic_ms = now_ms;
         world_clear_active_locked();
         world_increment_version_locked();
         world_set_failure_locked(record, WORLD_ACTION_ERROR_DEADLINE_EXCEEDED, false);
     } else if (object_error != WORLD_ACTION_ERROR_NONE) {
+        s_world.last_user_interaction_monotonic_ms = now_ms;
         world_clear_active_locked();
         world_increment_version_locked();
         world_set_failure_locked(record, object_error,
                                  world_object_error_retryable(object_error));
     } else {
+        /* Completion is the newest meaningful Human activity. This prevents a
+         * long-running action from falling straight into sleep on its terminal
+         * snapshot. */
+        s_world.last_user_interaction_monotonic_ms = now_ms;
         world_clear_active_locked();
         switch (record->tool) {
         case WORLD_ACTION_CHARACTER_GO_TO_ROOM:
@@ -981,9 +1132,16 @@ esp_err_t world_service_complete_active(world_action_event_t *event)
             s_world.snapshot.room = record->arguments.room;
             s_world.snapshot.target_object_id[0] = '\0';
             s_world.snapshot.character_pose = WORLD_CHARACTER_POSE_STANDING;
+            s_world.snapshot.activity = WORLD_ACTIVITY_IDLE;
             break;
         case WORLD_ACTION_CHARACTER_SET_ACTIVITY:
-            s_world.snapshot.activity = record->arguments.activity;
+            if (record->arguments.activity == WORLD_ACTIVITY_SLEEP) {
+                /* The legacy request cannot bypass the same night + idle gate,
+                 * and its terminal result reports the actual gated state. */
+                (void)world_apply_sleep_gate_locked(now_ms);
+            } else {
+                s_world.snapshot.activity = WORLD_ACTIVITY_IDLE;
+            }
             break;
         case WORLD_ACTION_CHARACTER_SAY:
             world_copy_text(s_world.snapshot.speech_text,
@@ -1011,6 +1169,7 @@ esp_err_t world_service_complete_active(world_action_event_t *event)
             s_world.object_character_occupied[object_index] = true;
             world_refresh_object_occupied_locked(object_index);
             s_world.snapshot.character_pose = WORLD_CHARACTER_POSE_SITTING;
+            s_world.snapshot.activity = WORLD_ACTIVITY_IDLE;
             break;
         }
         case WORLD_ACTION_CHARACTER_LOOK_AT:
@@ -1018,6 +1177,7 @@ esp_err_t world_service_complete_active(world_action_event_t *event)
             const world_object_definition_t *definition =
                 world_object_registry_find(record->arguments.target_id);
             s_world.snapshot.character_facing = definition->facing;
+            s_world.snapshot.activity = WORLD_ACTIVITY_IDLE;
             break;
         }
         case WORLD_ACTION_CHARACTER_GET_STATE:
@@ -1081,6 +1241,7 @@ esp_err_t world_service_expire_next_due(world_action_event_t *event)
     if (s_world.active_record != WORLD_NO_RECORD &&
         world_record_expired_locked(&s_world.records[s_world.active_record], now_ms)) {
         record_index = s_world.active_record;
+        s_world.last_user_interaction_monotonic_ms = now_ms;
         world_clear_active_locked();
         world_increment_version_locked();
         notify = true;
@@ -1135,6 +1296,7 @@ esp_err_t world_service_cancel(const char *action_id, world_action_event_t *even
     }
     world_remove_queued_record_locked(record_index);
     if (s_world.active_record == record_index) {
+        s_world.last_user_interaction_monotonic_ms = world_monotonic_now();
         world_clear_active_locked();
         world_increment_version_locked();
         notify = true;

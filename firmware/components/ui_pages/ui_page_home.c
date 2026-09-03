@@ -108,6 +108,9 @@ static bool s_refresh_queued;
 static bool s_conversation_show_queued;
 static bool s_ready;
 static conversation_snapshot_t s_conversation_snapshot;
+static uint32_t s_world_local_conversation_revision;
+static uint32_t s_world_conversation_epoch;
+static uint32_t s_world_conversation_revision;
 static ui_home_sky_phase_t s_sky_phase = UI_HOME_SKY_NIGHT;
 static ui_home_weather_t s_weather = UI_HOME_WEATHER_CLEAR;
 static bool s_night = true;
@@ -210,6 +213,10 @@ static void ui_page_home_apply_environment(void)
 
     ui_home_sky_phase_t phase = ui_page_home_phase_for_hour(hour);
     s_night = (phase == UI_HOME_SKY_NIGHT);
+    /* The visual falls back to a night sky before clock sync, but semantic
+     * sleep must fail awake until local wall time is trustworthy. */
+    (void)world_service_update_sleep_clock(clock_ready,
+                                           clock_ready && s_night);
 
     if (phase != s_sky_phase) {
         /* One src swap for the whole band; the gradient itself is pre-dithered
@@ -697,6 +704,37 @@ static void ui_page_home_apply_hud(const ui_home_summary_t *summary)
                                 LV_PART_MAIN);
 }
 
+/* Conversation rendering remains display-only. This page-level bridge records
+ * Human activity in World without allowing transcript content into World/Cat. */
+static void ui_page_home_apply_conversation_presence(
+    const conversation_snapshot_t *snapshot)
+{
+    if (snapshot->local_stage != CONVERSATION_LOCAL_STAGE_IDLE) {
+        if (snapshot->local_revision != s_world_local_conversation_revision) {
+            (void)world_service_set_user_interaction_active(true);
+            s_world_local_conversation_revision = snapshot->local_revision;
+        }
+        return;
+    }
+    if (!snapshot->available) {
+        (void)world_service_set_user_interaction_active(false);
+        return;
+    }
+
+    const conversation_update_t *update = &snapshot->update;
+    bool active = update->stage == CONVERSATION_STAGE_LISTENING ||
+                  update->stage == CONVERSATION_STAGE_TRANSCRIBING ||
+                  update->stage == CONVERSATION_STAGE_THINKING;
+    bool new_revision = update->epoch != s_world_conversation_epoch ||
+                        update->revision != s_world_conversation_revision;
+    if (new_revision) {
+        (void)world_service_note_user_interaction();
+        s_world_conversation_epoch = update->epoch;
+        s_world_conversation_revision = update->revision;
+    }
+    (void)world_service_set_user_interaction_active(active);
+}
+
 static void ui_page_home_refresh_locked(void)
 {
     if (!s_ready && s_root == NULL) {
@@ -712,6 +750,7 @@ static void ui_page_home_refresh_locked(void)
     }
     ui_page_home_apply_world(&summary);
     conversation_service_get_snapshot(&s_conversation_snapshot);
+    ui_page_home_apply_conversation_presence(&s_conversation_snapshot);
     ui_home_actor_apply_conversation(&s_conversation_snapshot);
     ui_page_home_apply_hud(&summary);
 }

@@ -12,6 +12,7 @@ typedef struct {
     world_character_pose_t pose;
     world_object_animation_t animation;
     bool moving;
+    bool sleeping;
     char target_object_id[WORLD_OBJECT_ID_MAX_BYTES + 1U];
     int16_t pet_art_x;
     int16_t pet_floor_y;

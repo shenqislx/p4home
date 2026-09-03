@@ -161,7 +161,7 @@ static const fake_scenario_step_t s_steps[] = {
     {"12a Agent world snapshot drives actor", 376, step_agent_world_action},
     {"12b Agent offline, local fallback resumes", 388, step_agent_offline},
     {"13 downstairs off", 392, step_downstairs_off},
-    {"14 all dark, actor goes to sleep", 420, step_all_dark},
+    {"14 all dark, night idle timer continues awake", 420, step_all_dark},
     {"15 offline", 460, step_offline},
     {"16 recovered", 492, step_recover},
 };
