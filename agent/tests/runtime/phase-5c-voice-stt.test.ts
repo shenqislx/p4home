@@ -177,6 +177,32 @@ test("only an active final transcript enters the existing user_text voice bounda
   assert.equal(dispatched.length, 1, "duplicate terminal must not create another Interaction");
 });
 
+test("provider wall time is exposed only to the matching dispatch and consumed once", async () => {
+  const provider = new FakeSttProvider();
+  const monotonicTimes = [100, 145];
+  let observedDuration: number | null = null;
+  let pipeline: VoiceSttPipeline;
+  pipeline = new VoiceSttPipeline({
+    provider,
+    monotonic_clock: () => monotonicTimes.shift() ?? 145,
+    dispatch_final: async (_interaction, _signal, context) => {
+      observedDuration = pipeline.takeProviderDurationMs(context);
+      assert.equal(pipeline.takeProviderDurationMs(context), null);
+    },
+  });
+
+  completeSession(pipeline, 1);
+  await pipeline.drain();
+
+  assert.equal(observedDuration, 45);
+  assert.equal(pipeline.takeProviderDurationMs({
+    device_id: "p4-test",
+    session_id: SESSION_ID,
+    stream_id: 7,
+    epoch: 1,
+  }), null);
+});
+
 test("device disconnect aborts in-flight STT before any final transcript dispatch", async () => {
   let providerStarted = false;
   let dispatches = 0;

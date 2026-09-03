@@ -143,6 +143,36 @@ test("warmup performs one strict body-free model evaluation", async () => {
   assert.equal(request?.stream, false);
 });
 
+test("capture refresh warmup coalesces concurrent work but refreshes a later keep-alive window", async () => {
+  let calls = 0;
+  let release: (() => void) | null = null;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const provider = new OllamaHttpProvider({
+    model: MODEL,
+    defaultKeepAlive: "10m",
+    fetch: async () => {
+      calls++;
+      if (calls === 1) await gate;
+      return jsonResponse({
+        model: MODEL,
+        message: { role: "assistant", content: "ok", thinking: "" },
+        done: true,
+      });
+    },
+  });
+
+  const first = provider.refreshWarmup();
+  const concurrent = provider.refreshWarmup();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 1);
+  assert.notEqual(release, null);
+  (release as unknown as () => void)();
+  await Promise.all([first, concurrent]);
+  await provider.refreshWarmup();
+
+  assert.equal(calls, 2);
+});
+
 test("warmup fails readiness closed on identity thinking or tool output", async (context) => {
   const invalid = [
     {

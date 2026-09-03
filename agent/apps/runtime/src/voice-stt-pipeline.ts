@@ -62,6 +62,7 @@ export interface VoiceSttPipelineOptions {
   readonly on_capture_open?: (summary: VoiceCaptureSummary) => void;
   readonly on_partial_ui?: (partial: SttPartialTranscript) => void;
   readonly clock?: () => number;
+  readonly monotonic_clock?: () => number;
   readonly vad_peak_threshold?: number;
   readonly min_speech_ms?: number;
   readonly end_silence_ms?: number;
@@ -80,7 +81,19 @@ interface CaptureState {
   tooLong: boolean;
 }
 
-function sessionKey(summary: VoiceCaptureSummary): string {
+interface VoiceIdentity {
+  readonly device_id: string;
+  readonly session_id: string;
+  readonly stream_id: number;
+  readonly epoch: number;
+}
+
+interface PendingProviderDuration {
+  readonly key: string;
+  readonly duration_ms: number;
+}
+
+function sessionKey(summary: VoiceIdentity): string {
   return `${summary.device_id}\u0000${summary.session_id}\u0000${summary.stream_id}\u0000${summary.epoch}`;
 }
 
@@ -128,6 +141,7 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
   readonly #active = new Map<string, CaptureState>();
   readonly #latestEpoch = new Map<string, number>();
   readonly #inflightByDevice = new Map<string, AbortController>();
+  readonly #providerDurationByDevice = new Map<string, PendingProviderDuration>();
   readonly #pending = new Set<Promise<void>>();
   readonly #results: VoiceSttResult[] = [];
   readonly #vadPeakThreshold: number;
@@ -185,6 +199,7 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
       throw new TypeError("voice STT session must be a new active epoch");
     }
     this.#latestEpoch.set(summary.device_id, summary.epoch);
+    this.#providerDurationByDevice.delete(summary.device_id);
     this.#inflightByDevice.get(summary.device_id)?.abort(new DOMException("superseded", "AbortError"));
     this.#inflightByDevice.delete(summary.device_id);
     this.#options.on_capture_open?.(structuredClone(summary));
@@ -254,6 +269,7 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
   public onDeviceDisconnect(deviceId: string): void {
     this.#inflightByDevice.get(deviceId)?.abort(new DOMException("device disconnected", "AbortError"));
     this.#inflightByDevice.delete(deviceId);
+    this.#providerDurationByDevice.delete(deviceId);
   }
 
   public async drain(): Promise<void> {
@@ -269,6 +285,7 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
       controller.abort(new DOMException("pipeline closed", "AbortError"));
     }
     this.#inflightByDevice.clear();
+    this.#providerDurationByDevice.clear();
     for (const state of this.#active.values()) this.#record(state, "cancelled", null, 0);
     this.#active.clear();
     this.#latestEpoch.clear();
@@ -282,6 +299,14 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
   public get known_device_count(): number { return this.#latestEpoch.size; }
   public get inflight_count(): number { return this.#inflightByDevice.size; }
   public get pending_count(): number { return this.#pending.size; }
+
+  /** Consume the provider wall time for the matching dispatch without retaining its identity. */
+  public takeProviderDurationMs(context: VoiceDispatchContext): number | null {
+    const pending = this.#providerDurationByDevice.get(context.device_id);
+    if (pending === undefined || pending.key !== sessionKey(context)) return null;
+    this.#providerDurationByDevice.delete(context.device_id);
+    return pending.duration_ms;
+  }
 
   async #transcribeAndDispatch(state: CaptureState): Promise<void> {
     if ((this.#latestEpoch.get(state.summary.device_id) ?? -1) !== state.summary.epoch) {
@@ -312,6 +337,8 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
     const providerSignal = AbortSignal.any([controller.signal, sttDeadline.signal]);
     let partialsSeen = 0;
     let lastPartialSequence = -1;
+    const monotonicClock = this.#options.monotonic_clock ?? performance.now.bind(performance);
+    const providerStartedAt = monotonicClock();
     try {
       let detachProviderAbort = (): void => undefined;
       const providerAborted = new Promise<never>((_resolve, reject) => {
@@ -353,8 +380,10 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
         },
       });
       let transcript: SttFinalTranscript;
+      let providerDurationMs: number;
       try {
         transcript = await Promise.race([providerWork, providerAborted]);
+        providerDurationMs = Math.max(0, monotonicClock() - providerStartedAt);
       } finally {
         detachProviderAbort();
         clearTimeout(timer);
@@ -388,6 +417,10 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
         source: "voice",
         received_at_ms: (this.#options.clock ?? Date.now)(),
       };
+      this.#providerDurationByDevice.set(state.summary.device_id, {
+        key: sessionKey(state.summary),
+        duration_ms: providerDurationMs,
+      });
       try {
         await this.#options.dispatch_final(interaction, controller.signal, {
           device_id: state.summary.device_id,
@@ -416,6 +449,10 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
       this.#record(state, outcome, null, partialsSeen);
     } finally {
       clearTimeout(timer);
+      const pendingDuration = this.#providerDurationByDevice.get(state.summary.device_id);
+      if (pendingDuration?.key === sessionKey(state.summary)) {
+        this.#providerDurationByDevice.delete(state.summary.device_id);
+      }
       if (this.#inflightByDevice.get(state.summary.device_id) === controller) {
         this.#inflightByDevice.delete(state.summary.device_id);
       }

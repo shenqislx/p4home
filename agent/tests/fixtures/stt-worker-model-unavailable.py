@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Emit the worker's bounded model-unavailable terminal for process-boundary tests."""
+"""Emit the persistent worker's bounded startup failure."""
 
 import sys
 
 
-sys.stdin.buffer.read()
 sys.stdout.write(
-    '{"schema_version":1,"status":"error","error_code":"MODEL_UNAVAILABLE"}\n'
+    '{"schema_version":2,"status":"startup_error","error_code":"MODEL_UNAVAILABLE"}\n'
 )
 sys.stdout.flush()
 raise SystemExit(2)

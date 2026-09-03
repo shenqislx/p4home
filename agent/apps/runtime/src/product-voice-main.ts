@@ -3,7 +3,12 @@ import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { OllamaHttpProvider } from "@p4home/provider-ollama";
+import {
+  OllamaHttpProvider,
+  type OllamaChatRequest,
+  type OllamaChatResult,
+  type OllamaChatStreamEvent,
+} from "@p4home/provider-ollama";
 import {
   PythonSttProvider,
   STT_MODEL_REVISION,
@@ -109,6 +114,26 @@ async function waitForShutdown(signal: AbortSignal): Promise<void> {
   }));
 }
 
+async function waitForModelWarmup(
+  operation: Promise<void> | null,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (operation === null) return;
+  if (signal?.aborted === true) throw signal.reason;
+  let detach = (): void => undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    if (signal === undefined) return;
+    const onAbort = (): void => reject(signal.reason);
+    detach = (): void => signal.removeEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    await Promise.race([operation, aborted]);
+  } finally {
+    detach();
+  }
+}
+
 async function main(): Promise<void> {
   const deviceId = requiredEnvironment("P4HOME_AGENT_DEVICE_ID");
   const deviceTokenBytes = await readBoundedFile(
@@ -130,6 +155,7 @@ async function main(): Promise<void> {
   let autonomy: ProductCatAutonomyRuntime | null = null;
   let autonomyControl: CatAutonomyControlServer | null = null;
   let autonomyControlTokenBytes: Buffer | null = null;
+  let stt: PythonSttProvider | null = null;
   let tts: PythonTtsProvider | null = null;
   try {
     const roleMode = resolveProductVoiceRoleMode(process.env.P4HOME_PRODUCT_ROLE_MODE);
@@ -152,6 +178,23 @@ async function main(): Promise<void> {
     // This is a real, non-audited model evaluation before sessions/storage are
     // created. A malformed or failed warmup keeps product readiness closed.
     await provider.warmup(shutdown.signal);
+    let captureWarmup: Promise<void> | null = null;
+    const voiceProvider = {
+      chat: async (
+        request: OllamaChatRequest,
+        signal?: AbortSignal,
+      ): Promise<OllamaChatResult> => {
+        await waitForModelWarmup(captureWarmup, signal);
+        return await provider.chat(request, signal);
+      },
+      chatStream: async function* (
+        request: OllamaChatRequest,
+        signal?: AbortSignal,
+      ): AsyncIterable<OllamaChatStreamEvent> {
+        await waitForModelWarmup(captureWarmup, signal);
+        yield* provider.chatStream(request, signal);
+      },
+    };
     if (robotEnabled) {
       const haConfig = await loadRobotHaRuntimeConfig({
         url: requiredEnvironment("P4HOME_HA_URL"),
@@ -274,7 +317,7 @@ async function main(): Promise<void> {
     }
     const processId = randomUUID().replaceAll("-", "").slice(0, 16);
     const dispatcher = new UnifiedVoiceRoleDispatcher({
-      provider,
+      provider: voiceProvider,
       sessions: new RoleSessionRegistry({
         robot: `product:voice:robot:${processId}`,
         human: `product:voice:human:${processId}`,
@@ -301,7 +344,7 @@ async function main(): Promise<void> {
         })}\n`);
       },
     });
-    const stt = new PythonSttProvider({
+    const sttProvider = new PythonSttProvider({
       python_executable: absolutePath("P4HOME_STT_PYTHON"),
       worker_script: absolutePath("P4HOME_STT_WORKER"),
       model_path: absolutePath("P4HOME_STT_MODEL"),
@@ -309,6 +352,7 @@ async function main(): Promise<void> {
       provider_version: STT_PROVIDER_VERSION,
       timeout_ms: optionalInteger("P4HOME_STT_TIMEOUT_MS", 120_000, 1_000, 120_000),
     });
+    stt = sttProvider;
     tts = new PythonTtsProvider({
       python_executable: absolutePath("P4HOME_TTS_PYTHON"),
       worker_script: absolutePath("P4HOME_TTS_WORKER"),
@@ -320,7 +364,7 @@ async function main(): Promise<void> {
     // Fail closed before advertising readiness and retain the verified TTS
     // model for low-latency streaming. Warm models are initialized
     // sequentially to avoid overlapping the two MLX startup memory peaks.
-    await stt.warmup({ signal: shutdown.signal });
+    await sttProvider.warmup({ signal: shutdown.signal });
     await tts.warmup({ signal: shutdown.signal });
     const ttsPipeline = new RoleAwareTtsPipeline(tts);
     runtime = new UnifiedVoiceRuntime({
@@ -334,7 +378,7 @@ async function main(): Promise<void> {
       },
       device_tokens: { [deviceId]: deviceToken },
       stt: {
-        provider: stt,
+        provider: sttProvider,
         stt_timeout_ms: optionalInteger(
           "P4HOME_STT_TIMEOUT_MS", 120_000, 1_000, 120_000,
         ),
@@ -349,10 +393,26 @@ async function main(): Promise<void> {
         render_tts_stream: (interactionId, segment, signal) => (
           ttsPipeline.streamHumanSegment(interactionId, segment, signal)
         ),
+        on_result: (result) => {
+          process.stdout.write(`${JSON.stringify({
+            event: "voice_interaction_terminal",
+            ...result,
+          })}\n`);
+        },
         ui_output: "required",
         audio_output: "required",
       },
       cat_run_registry: catRunRegistry,
+      on_capture_open: () => {
+        const operation = provider.refreshWarmup(shutdown.signal);
+        captureWarmup = operation;
+        void operation.catch(() => {
+          process.stderr.write(`${JSON.stringify({ event: "ollama_capture_warmup_failed" })}\n`);
+        });
+        void sttProvider.refreshWarmup(shutdown.signal).catch(() => {
+          process.stderr.write(`${JSON.stringify({ event: "stt_capture_warmup_failed" })}\n`);
+        });
+      },
     });
     const address = await runtime.start();
     process.stdout.write(`${JSON.stringify({
@@ -379,6 +439,7 @@ async function main(): Promise<void> {
     const runtimeClose = runtime?.close().catch(() => undefined);
     const autonomyClose = autonomy?.close().catch(() => undefined);
     await Promise.all([runtimeClose, autonomyClose]);
+    stt?.close();
     tts?.close();
     await deviceHub?.close().catch(() => undefined);
     await store?.closeAsync().catch(() => undefined);

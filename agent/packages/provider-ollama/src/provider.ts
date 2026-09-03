@@ -453,6 +453,7 @@ export class OllamaHttpProvider implements OllamaProvider {
   readonly #defaultKeepAlive: string | number | undefined;
   readonly #fetch: OllamaFetch;
   #warmupPromise: Promise<void> | null = null;
+  #refreshWarmupPromise: Promise<void> | null = null;
 
   public constructor(options: OllamaHttpProviderOptions) {
     const model = options.model.trim();
@@ -482,6 +483,22 @@ export class OllamaHttpProvider implements OllamaProvider {
   public warmup(signal?: AbortSignal): Promise<void> {
     this.#warmupPromise ??= this.#runWarmup(signal);
     return this.#warmupPromise;
+  }
+
+  /**
+   * Refreshes the finite Ollama keep-alive window when a new capture opens.
+   * Concurrent callers share one real evaluation, while later captures may
+   * refresh again after Ollama has released the model during idle time.
+   */
+  public async refreshWarmup(signal?: AbortSignal): Promise<void> {
+    if (this.#refreshWarmupPromise !== null) return await this.#refreshWarmupPromise;
+    const operation = this.#runWarmup(signal);
+    this.#refreshWarmupPromise = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.#refreshWarmupPromise === operation) this.#refreshWarmupPromise = null;
+    }
   }
 
   async #runWarmup(signal: AbortSignal | undefined): Promise<void> {

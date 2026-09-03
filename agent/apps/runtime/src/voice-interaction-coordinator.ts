@@ -120,6 +120,18 @@ export interface VoiceInteractionResult extends VoiceDispatchContext {
   readonly raw_audio_retained: false;
 }
 
+/** Privacy-safe product telemetry: deliberately excludes text and transport identity. */
+export interface VoiceInteractionTelemetry {
+  readonly schema_version: 1;
+  readonly outcome: VoiceInteractionOutcome;
+  readonly total_wall_ms: number;
+  readonly stage_metrics: VoiceInteractionMetrics;
+  readonly ui_status: VoiceUiDeliveryStatus;
+  readonly audio_status: VoiceAudioDeliveryStatus;
+  readonly segment_count: number;
+  readonly pcm_bytes: number;
+}
+
 export interface VoiceInteractionCoordinatorOptions {
   readonly device_ids: readonly string[];
   readonly dispatch_role: (
@@ -163,6 +175,7 @@ export interface VoiceInteractionCoordinatorOptions {
   ) => Promise<ConversationUiDeliverySummary>;
   readonly clock?: () => number;
   readonly stt_duration_ms?: (context: VoiceDispatchContext) => number | null;
+  readonly on_result?: (result: VoiceInteractionTelemetry) => void;
   readonly max_results?: number;
 }
 
@@ -634,82 +647,134 @@ export class VoiceInteractionCoordinator {
     let streamedTtsWallMs = 0;
     let streamedPlaybackWallMs = 0;
     let streamingError: unknown = null;
+    let streamingFailureStage: "tts" | "playback" | null = null;
+    let speechQueueTail = Promise.resolve();
+    const queuedSpeechJobs: Promise<void>[] = [];
+    const maxQueuedSpeechSegments = 2;
+    const playSpeechSegment = async (segment: HumanSpeechSegment): Promise<void> => {
+      const render = this.#options.render_tts_stream!;
+      const play = this.#options.playback_stream!;
+      let segmentBytes = 0;
+      let ttsWallMs = 0;
+      let source: AsyncIterable<Uint8Array>;
+      try {
+        source = render(interaction.interaction_id, segment, controller.signal);
+      } catch (error) {
+        streamingFailureStage ??= "tts";
+        throw error;
+      }
+      const measuredSource = (async function* (): AsyncIterable<Uint8Array> {
+        let iterator: AsyncIterator<Uint8Array> | null = null;
+        try {
+          iterator = source[Symbol.asyncIterator]();
+          while (true) {
+            const pullStartedAt = performance.now();
+            let next: IteratorResult<Uint8Array>;
+            try {
+              next = await iterator.next();
+            } catch (error) {
+              streamingFailureStage ??= "tts";
+              throw error;
+            }
+            ttsWallMs += performance.now() - pullStartedAt;
+            if (next.done) break;
+            const pcm = next.value;
+            if (!(pcm instanceof Uint8Array) || pcm.byteLength < 2
+                || pcm.byteLength % 2 !== 0) {
+              if (pcm instanceof Uint8Array) pcm.fill(0);
+              streamingFailureStage ??= "tts";
+              throw new TypeError("streaming TTS emitted invalid PCM");
+            }
+            segmentBytes += pcm.byteLength;
+            if (segmentBytes > TTS_MAX_PCM_BYTES
+                || streamedPcmBytes + segmentBytes > TTS_MAX_PCM_BYTES) {
+              pcm.fill(0);
+              streamingFailureStage ??= "tts";
+              throw new RangeError("streaming TTS exceeded the interaction PCM bound");
+            }
+            yield pcm;
+          }
+        } finally {
+          const close = iterator?.return;
+          if (typeof close === "function") {
+            void Promise.resolve(close.call(iterator)).catch(() => undefined);
+          }
+        }
+      })();
+      const playbackStartedAt = performance.now();
+      try {
+        let playback: VoicePlaybackSummary;
+        try {
+          playback = await play(context.device_id, measuredSource, controller.signal);
+        } catch (error) {
+          streamingFailureStage ??= "playback";
+          throw error;
+        }
+        if (segmentBytes < 2) {
+          streamingFailureStage ??= "tts";
+          throw new TypeError("streaming TTS emitted no PCM");
+        }
+        try {
+          assertPlaybackSummary(
+            playback, context.device_id, segmentBytes, playbackIdentities,
+          );
+        } catch (error) {
+          streamingFailureStage ??= "playback";
+          throw error;
+        }
+        const durationMs = segmentBytes / 2 / TTS_SAMPLE_RATE_HZ * 1_000;
+        streamedPcmBytes += segmentBytes;
+        streamedAudioDurationMs += durationMs;
+        playbackSegments.push({
+          assignment_id: segment.assignment_id,
+          segment_index: segment.segment_index,
+          role_id: "human",
+          voice: TTS_ROLE_VOICES.human,
+          source_status: "completed",
+          source_outcome: "response",
+          pcm_bytes: segmentBytes,
+          duration_ms: durationMs,
+          playback: structuredClone(playback),
+        });
+        if (playback.status !== "completed") {
+          streamingFailureStage ??= "playback";
+          throw abortError("streaming_playback_incomplete");
+        }
+      } finally {
+        streamedPlaybackWallMs += performance.now() - playbackStartedAt;
+        streamedTtsWallMs += ttsWallMs;
+      }
+    };
     const streamSpeech = this.#audioOutput === "required"
       && this.#options.render_tts_stream !== undefined
       && this.#options.playback_stream !== undefined
       ? async (segment: HumanSpeechSegment): Promise<void> => {
           streamedSpeech = true;
-          stage = "tts";
-          currentStageStartedAt = performance.now();
-          const render = this.#options.render_tts_stream!;
-          const play = this.#options.playback_stream!;
-          let segmentBytes = 0;
-          let ttsWallMs = 0;
-          const source = render(interaction.interaction_id, segment, controller.signal);
-          const measuredSource = (async function* (): AsyncIterable<Uint8Array> {
-            const iterator = source[Symbol.asyncIterator]();
-            try {
-              while (true) {
-                const pullStartedAt = performance.now();
-                const next = await iterator.next();
-                ttsWallMs += performance.now() - pullStartedAt;
-                if (next.done) break;
-                const pcm = next.value;
-                if (!(pcm instanceof Uint8Array) || pcm.byteLength < 2
-                    || pcm.byteLength % 2 !== 0) {
-                  if (pcm instanceof Uint8Array) pcm.fill(0);
-                  throw new TypeError("streaming TTS emitted invalid PCM");
-                }
-                segmentBytes += pcm.byteLength;
-                if (segmentBytes > TTS_MAX_PCM_BYTES
-                    || streamedPcmBytes + segmentBytes > TTS_MAX_PCM_BYTES) {
-                  pcm.fill(0);
-                  throw new RangeError("streaming TTS exceeded the interaction PCM bound");
-                }
-                yield pcm;
-              }
-            } finally {
-              const close = iterator.return;
-              if (typeof close === "function") {
-                void Promise.resolve(close.call(iterator)).catch(() => undefined);
-              }
-            }
-          })();
-          try {
-            stage = "playback";
-            currentStageStartedAt = performance.now();
-            const playbackStartedAt = performance.now();
-            try {
-              const playback = await play(context.device_id, measuredSource, controller.signal);
-              if (segmentBytes < 2) throw new TypeError("streaming TTS emitted no PCM");
-              assertPlaybackSummary(
-                playback, context.device_id, segmentBytes, playbackIdentities,
-              );
-              const durationMs = segmentBytes / 2 / TTS_SAMPLE_RATE_HZ * 1_000;
-              streamedPcmBytes += segmentBytes;
-              streamedAudioDurationMs += durationMs;
-              playbackSegments.push({
-                assignment_id: segment.assignment_id,
-                segment_index: segment.segment_index,
-                role_id: "human",
-                voice: TTS_ROLE_VOICES.human,
-                source_status: "completed",
-                source_outcome: "response",
-                pcm_bytes: segmentBytes,
-                duration_ms: durationMs,
-                playback: structuredClone(playback),
-              });
-              if (playback.status !== "completed") {
-                throw abortError("streaming_playback_incomplete");
-              }
-            } finally {
-              streamedPlaybackWallMs += performance.now() - playbackStartedAt;
-              streamedTtsWallMs += ttsWallMs;
-            }
-            stage = "role";
-          } catch (error) {
-            streamingError = error;
-            throw error;
+          if (controller.signal.aborted) throw controller.signal.reason;
+          if (streamingError !== null) throw streamingError;
+          if (queuedSpeechJobs.length >= maxQueuedSpeechSegments) {
+            await queuedSpeechJobs[0];
+          }
+          if (controller.signal.aborted) throw controller.signal.reason;
+          if (streamingError !== null) throw streamingError;
+          const job = speechQueueTail.then(async () => await playSpeechSegment(segment));
+          speechQueueTail = job;
+          queuedSpeechJobs.push(job);
+          void job.then(
+            () => {
+              const index = queuedSpeechJobs.indexOf(job);
+              if (index >= 0) queuedSpeechJobs.splice(index, 1);
+            },
+            (error: unknown) => {
+              const index = queuedSpeechJobs.indexOf(job);
+              if (index >= 0) queuedSpeechJobs.splice(index, 1);
+              streamingError ??= error;
+            },
+          );
+          /* Delivery is accepted once it enters the bounded ordered queue. This
+           * lets the model continue producing text while earlier audio plays. */
+          if (queuedSpeechJobs.length > maxQueuedSpeechSegments) {
+            throw new RangeError("streaming speech queue exceeded its bound");
           }
         }
       : undefined;
@@ -773,7 +838,6 @@ export class VoiceInteractionCoordinator {
       const settledRole = await pendingRole;
       if (settledRole.status === "rejected") throw settledRole.error;
       roleResult = settledRole.result;
-      if (streamingError !== null) throw streamingError;
       applyRoleStageMetrics(stageMetrics, roleResult);
       if (controller.signal.aborted) {
         applyStreamingMetrics("cancelled");
@@ -826,6 +890,9 @@ export class VoiceInteractionCoordinator {
         ));
       }
       if (streamedSpeech) {
+        stage = "playback";
+        await speechQueueTail;
+        if (streamingError !== null) throw streamingError;
         const completed = roleResult.response.status === "completed"
           && playbackSegments.length > 0
           && playbackSegments.every((segment) => segment.playback.status === "completed");
@@ -916,16 +983,18 @@ export class VoiceInteractionCoordinator {
       ));
     } catch {
       const cancelled = controller.signal.aborted;
+      const failedStage = streamingFailureStage
+        ?? (streamedSpeech && streamingError !== null ? "playback" : stage);
       if (streamedSpeech) {
         applyStreamingMetrics(cancelled ? "cancelled" : "failed");
-      } else if (stage === "role") {
+      } else if (failedStage === "role") {
         stageMetrics.router = statusMetric(cancelled ? "cancelled" : "failed");
-      } else if (stage === "ui") {
+      } else if (failedStage === "ui") {
         stageMetrics.ui = metric(
           "agent", cancelled ? "cancelled" : "failed", uiDurationMs,
           Math.max(1, uiAttempts), 0, cancelled ? 1 : 0,
         );
-      } else if (stage === "tts") {
+      } else if (failedStage === "tts") {
         stageMetrics.tts = agentMetric(
           cancelled ? "cancelled" : "failed", currentStageStartedAt,
         );
@@ -943,9 +1012,9 @@ export class VoiceInteractionCoordinator {
         context,
         cancelled
           ? "cancelled"
-          : stage === "role" ? "role_failed"
-            : stage === "ui" ? "ui_failed"
-              : stage === "tts" ? "tts_failed" : "playback_failed",
+          : failedStage === "role" ? "role_failed"
+            : failedStage === "ui" ? "ui_failed"
+              : failedStage === "tts" ? "tts_failed" : "playback_failed",
         roleResult?.response ?? null,
         roleResult?.composition_audit_status ?? null,
         playbackSegments,
@@ -953,12 +1022,13 @@ export class VoiceInteractionCoordinator {
         streamedSpeech ? streamedAudioDurationMs : rendered?.duration_ms ?? 0,
         startedAtMs,
         stageMetrics,
-        stage === "ui" ? cancelled ? "cancelled" : "failed" : uiDelivery,
+        failedStage === "ui" ? cancelled ? "cancelled" : "failed" : uiDelivery,
         this.#audioOutput === "disabled" ? "deferred"
-          : stage === "role" || stage === "ui" ? "not_attempted"
+          : failedStage === "role" || failedStage === "ui" ? "not_attempted"
             : cancelled ? "cancelled" : "failed",
       ));
     } finally {
+      if (streamedSpeech) await speechQueueTail.catch(() => undefined);
       upstreamSignal.removeEventListener("abort", onUpstreamAbort);
       if (this.#active.get(context.device_id) === active) this.#active.delete(context.device_id);
       wipeRenderedPcm(rendered);
@@ -1025,6 +1095,20 @@ export class VoiceInteractionCoordinator {
     if (this.#maxResults > 0) {
       this.#results.push(structuredClone(result));
       if (this.#results.length > this.#maxResults) this.#results.shift();
+    }
+    try {
+      this.#options.on_result?.({
+        schema_version: 1,
+        outcome: result.outcome,
+        total_wall_ms: Math.max(0, result.completed_at_ms - result.started_at_ms),
+        stage_metrics: structuredClone(result.metrics),
+        ui_status: result.ui_delivery,
+        audio_status: result.audio_delivery,
+        segment_count: result.playback_segments.length,
+        pcm_bytes: result.tts_pcm_bytes,
+      });
+    } catch {
+      /* Observability is synchronous but cannot rewrite the interaction outcome. */
     }
     return result;
   }

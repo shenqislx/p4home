@@ -12,6 +12,7 @@ import {
   VoiceWebSocketServer,
   type VoiceWebSocketServerAddress,
   type VoiceWebSocketServerOptions,
+  type VoiceCaptureSummary,
 } from "./voice-websocket-server.ts";
 
 export interface UnifiedVoiceRuntimeOptions {
@@ -26,6 +27,7 @@ export interface UnifiedVoiceRuntimeOptions {
     "device_ids" | "playback" | "playback_stream" | "present_ui" | "cancel_low_priority_cat"
   >;
   readonly cat_run_registry?: LowPriorityCatRunRegistry;
+  readonly on_capture_open?: (summary: VoiceCaptureSummary) => void;
 }
 
 /**
@@ -62,11 +64,15 @@ export class UnifiedVoiceRuntime {
         return await server.presentConversationUi(deviceId, update, undefined, signal);
       },
       cancel_low_priority_cat: () => { this.cat_run_registry.cancelAll("barge_in"); },
+      stt_duration_ms: (context) => this.pipeline.takeProviderDurationMs(context),
     });
     const bindings = bindVoiceInteractionCoordinator(this.coordinator);
     this.pipeline = new VoiceSttPipeline({
       ...options.stt,
-      on_capture_open: bindings.on_capture_open,
+      on_capture_open: (summary) => {
+        bindings.on_capture_open(summary);
+        options.on_capture_open?.(summary);
+      },
       dispatch_final: bindings.dispatch_final,
     });
     server = new VoiceWebSocketServer({

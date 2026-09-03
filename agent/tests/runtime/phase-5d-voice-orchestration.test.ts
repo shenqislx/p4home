@@ -292,10 +292,64 @@ test("unified voice result renders and plays Human then Robot without retaining 
   assert.equal(coordinator.active_count, 0);
 });
 
-test("single Human response synthesizes and plays safe segments before model terminal", async () => {
+test("terminal telemetry is synchronous, bounded to safe fields and independent of history", async () => {
+  const telemetry: unknown[] = [];
+  const wallTimes = [1_000, 1_125];
+  const coordinator = new VoiceInteractionCoordinator({
+    device_ids: [DEVICE_ID],
+    dispatch_role: async () => roleResult(humanResponse()),
+    audio_output: "disabled",
+    cancel_low_priority_cat: () => undefined,
+    clock: () => wallTimes.shift() ?? 1_125,
+    max_results: 0,
+    on_result: (result) => {
+      telemetry.push(structuredClone(result));
+      throw new Error("telemetry sink failure must remain observational");
+    },
+  });
+  coordinator.onCaptureOpen(summary(100));
+
+  const result = await coordinator.run(
+    interaction(100), new AbortController().signal, context(100),
+  );
+
+  assert.equal(result.outcome, "completed");
+  assert.equal(coordinator.results.length, 0);
+  assert.equal(telemetry.length, 1);
+  assert.deepEqual(Object.keys(telemetry[0] as object).sort(), [
+    "audio_status",
+    "outcome",
+    "pcm_bytes",
+    "schema_version",
+    "segment_count",
+    "stage_metrics",
+    "total_wall_ms",
+    "ui_status",
+  ]);
+  assert.deepEqual(telemetry[0], {
+    schema_version: 1,
+    outcome: "completed",
+    total_wall_ms: 125,
+    stage_metrics: result.metrics,
+    ui_status: "disabled",
+    audio_status: "deferred",
+    segment_count: 0,
+    pcm_bytes: 0,
+  });
+  const serialized = JSON.stringify(telemetry[0]);
+  assert.equal(serialized.includes(interaction(100).text), false);
+  assert.equal(serialized.includes(humanResponse().text), false);
+  assert.equal(serialized.includes(DEVICE_ID), false);
+  assert.equal(serialized.includes(context(100).session_id), false);
+});
+
+test("single Human response keeps model and final UI ahead of the bounded speech queue", async () => {
   const events: string[] = [];
   const response = humanResponse();
   const segments = ["当然可以。", "你今天过得怎么样？"];
+  let releaseFirstPlayback: (() => void) | null = null;
+  const firstPlaybackGate = new Promise<void>((resolve) => { releaseFirstPlayback = resolve; });
+  let playbackCalls = 0;
   const coordinator = new VoiceInteractionCoordinator({
     device_ids: [DEVICE_ID],
     dispatch_role: async (_value, signal, onSpeech) => {
@@ -314,6 +368,19 @@ test("single Human response synthesizes and plays safe segments before model ter
       events.push("model:terminal");
       return roleResult(response);
     },
+    ui_output: "required",
+    present_ui: async (deviceId, update) => {
+      events.push(`ui:${update.stage}`);
+      return {
+        schema_version: 1,
+        device_id: deviceId,
+        session_id: update.session_id,
+        stream_id: update.stream_id,
+        epoch: update.epoch,
+        revision: update.revision,
+        status: "completed",
+      };
+    },
     render_tts: async () => { throw new Error("batch TTS must not run"); },
     playback: async () => { throw new Error("batch playback must not run"); },
     render_tts_stream: (_id, segment) => (async function* (): AsyncIterable<Uint8Array> {
@@ -323,11 +390,14 @@ test("single Human response synthesizes and plays safe segments before model ter
       yield new Uint8Array(320).fill(segment.segment_index + 1);
     })(),
     playback_stream: async (deviceId, source) => {
+      playbackCalls++;
       let bytes = 0;
       for await (const pcm of source) {
         bytes += pcm.byteLength;
         pcm.fill(0);
       }
+      events.push(`playback-started:${playbackCalls}`);
+      if (playbackCalls === 1) await firstPlaybackGate;
       const summary = playbackSummary(deviceId);
       events.push(`playback:${summary.session_id}:${bytes}`);
       return summary;
@@ -335,9 +405,19 @@ test("single Human response synthesizes and plays safe segments before model ter
     cancel_low_priority_cat: () => undefined,
   });
   coordinator.onCaptureOpen(summary(101));
-  const result = await coordinator.run(
+  const pending = coordinator.run(
     interaction(101), new AbortController().signal, context(101),
   );
+  while (!events.includes("playback-started:1")) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  assert.ok(events.includes("model:terminal"));
+  assert.ok(events.includes("ui:completed"));
+  assert.equal(events.some((item) => item.startsWith("playback:")), false);
+  assert.notEqual(releaseFirstPlayback, null);
+  (releaseFirstPlayback as unknown as () => void)();
+  const result = await pending;
 
   assert.equal(result.outcome, "completed");
   assert.equal(result.tts_pcm_bytes, 1_280);
@@ -346,7 +426,114 @@ test("single Human response synthesizes and plays safe segments before model ter
   assert.equal(result.metrics.stages.tts.status, "completed");
   assert.equal(result.metrics.stages.playback_transport.status, "completed");
   assert.ok(events.indexOf("tts:0:first") < events.indexOf("model:1"));
-  assert.ok(events.indexOf("model:terminal") > events.findIndex((item) => item.startsWith("playback:")));
+  assert.ok(events.indexOf("model:terminal") < events.findIndex((item) => item.startsWith("playback:")));
+  assert.ok(events.indexOf("ui:completed") < events.findIndex((item) => item.startsWith("playback:")));
+});
+
+test("streaming speech queue applies backpressure after two ordered segments", async () => {
+  const events: string[] = [];
+  const releases: Array<() => void> = [];
+  let playbackIndex = 0;
+  const coordinator = new VoiceInteractionCoordinator({
+    device_ids: [DEVICE_ID],
+    dispatch_role: async (_value, signal, onSpeech) => {
+      assert.ok(onSpeech !== undefined);
+      for (let segmentIndex = 0; segmentIndex < 3; segmentIndex++) {
+        events.push(`model:${segmentIndex}`);
+        await onSpeech({
+          schema_version: 1,
+          interaction_id: "voice:coordinator:102",
+          assignment_id: "assignment:human:bounded",
+          segment_index: segmentIndex,
+          role_id: "human",
+          text: `第${segmentIndex + 1}句。`,
+        }, signal);
+        events.push(`accepted:${segmentIndex}`);
+      }
+      events.push("model:terminal");
+      return roleResult(humanResponse());
+    },
+    render_tts: async () => { throw new Error("batch TTS must not run"); },
+    playback: async () => { throw new Error("batch playback must not run"); },
+    render_tts_stream: () => (async function* (): AsyncIterable<Uint8Array> {
+      yield new Uint8Array(640).fill(1);
+    })(),
+    playback_stream: async (deviceId, source) => {
+      const current = playbackIndex++;
+      for await (const pcm of source) pcm.fill(0);
+      events.push(`playback-started:${current}`);
+      if (current < 2) {
+        await new Promise<void>((resolve) => { releases[current] = resolve; });
+      }
+      events.push(`playback:${current}`);
+      return playbackSummary(deviceId);
+    },
+    cancel_low_priority_cat: () => undefined,
+  });
+  coordinator.onCaptureOpen(summary(102));
+  const pending = coordinator.run(
+    interaction(102), new AbortController().signal, context(102),
+  );
+  while (!events.includes("playback-started:0")) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  assert.ok(events.includes("accepted:1"));
+  assert.equal(events.includes("accepted:2"), false);
+  releases[0]!();
+  while (!events.includes("playback-started:1")) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.ok(events.includes("accepted:2"));
+  assert.ok(events.includes("model:terminal"));
+  releases[1]!();
+
+  const result = await pending;
+  assert.equal(result.outcome, "completed");
+  assert.deepEqual(
+    events.filter((event) => event.startsWith("playback:")),
+    ["playback:0", "playback:1", "playback:2"],
+  );
+});
+
+test("streaming TTS source failures remain classified as TTS failures", async () => {
+  const invalidPcm = new Uint8Array([1, 2, 3]);
+  const coordinator = new VoiceInteractionCoordinator({
+    device_ids: [DEVICE_ID],
+    dispatch_role: async (_value, signal, onSpeech) => {
+      assert.ok(onSpeech !== undefined);
+      await onSpeech({
+        schema_version: 1,
+        interaction_id: "voice:coordinator:103",
+        assignment_id: "assignment:human:invalid-tts",
+        segment_index: 0,
+        role_id: "human",
+        text: "这段音频无效。",
+      }, signal);
+      return roleResult(humanResponse());
+    },
+    render_tts: async () => { throw new Error("batch TTS must not run"); },
+    playback: async () => { throw new Error("batch playback must not run"); },
+    render_tts_stream: () => (async function* (): AsyncIterable<Uint8Array> {
+      yield invalidPcm;
+    })(),
+    playback_stream: async (deviceId, source) => {
+      for await (const _pcm of source) {
+        throw new Error("invalid PCM must fail before playback receives it");
+      }
+      return playbackSummary(deviceId);
+    },
+    cancel_low_priority_cat: () => undefined,
+  });
+  coordinator.onCaptureOpen(summary(103));
+
+  const result = await coordinator.run(
+    interaction(103), new AbortController().signal, context(103),
+  );
+
+  assert.equal(result.outcome, "tts_failed");
+  assert.equal(result.metrics.stages.tts.status, "failed");
+  assert.deepEqual(invalidPcm, new Uint8Array(3), "rejected PCM must be wiped");
 });
 
 test("speakerless product mode completes only after role execution and Conversation UI delivery", async () => {
@@ -858,6 +1045,7 @@ test("paired-device maps are bounded and close clears their high-water state", (
 test("real unified runtime assembly shares the Cat lease cancellation fence", async () => {
   const registry = new LowPriorityCatRunRegistry();
   const lease = registry.begin("cat:assembly:1");
+  let captureWarmups = 0;
   const runtime = new UnifiedVoiceRuntime({
     server: {
       host: "127.0.0.1",
@@ -873,13 +1061,74 @@ test("real unified runtime assembly shares the Cat lease cancellation fence", as
       render_tts: async () => { throw new Error("unused"); },
     },
     cat_run_registry: registry,
+    on_capture_open: (capture) => {
+      captureWarmups++;
+      assert.equal(capture.epoch, 15);
+      assert.equal(lease.signal.aborted, true);
+    },
   });
   runtime.pipeline.onSessionOpen(summary(15));
+  assert.equal(captureWarmups, 1);
   assert.equal(lease.signal.aborted, true);
   assert.equal(registry.active_count, 1);
   assert.throws(() => registry.begin("cat:assembly:1"), /already active/);
   lease.release();
   assert.equal(registry.active_count, 0);
+  await runtime.close();
+});
+
+test("unified runtime wires the matching provider wall time into coordinator STT metrics", async () => {
+  const monotonicTimes = [200, 237];
+  const runtime = new UnifiedVoiceRuntime({
+    server: {
+      host: "127.0.0.1",
+      port: 0,
+      allow_insecure_loopback_test: true,
+    },
+    device_tokens: { [DEVICE_ID]: "phase-5d-stt-metric-token-0123456789abcdef" },
+    stt: {
+      monotonic_clock: () => monotonicTimes.shift() ?? 237,
+      provider: {
+        async transcribe(request): Promise<SttFinalTranscript> {
+          return {
+            schema_version: 1,
+            kind: "final",
+            session_id: request.session_id,
+            stream_id: request.stream_id,
+            epoch: request.epoch,
+            text: "你好",
+            language: "zh",
+            duration_ms: 1,
+          };
+        },
+      },
+    },
+    interaction: {
+      dispatch_role: async () => roleResult(humanResponse()),
+      audio_output: "disabled",
+    },
+  });
+  const active = summary(16);
+  runtime.pipeline.onSessionOpen(active);
+  let sequence = 0;
+  for (; sequence < 15; sequence++) {
+    runtime.pipeline.onFrame(active, voiceFrame(16, sequence, 1_200));
+  }
+  for (let silence = 0; silence < 40; silence++, sequence++) {
+    runtime.pipeline.onFrame(active, voiceFrame(16, sequence, 0));
+  }
+  runtime.pipeline.onSessionClosed({ ...active, status: "completed", eos: true });
+  await runtime.pipeline.drain();
+
+  assert.deepEqual(runtime.coordinator.results[0]?.metrics.stages.stt, {
+    measurement: "agent",
+    status: "completed",
+    duration_ms: 37,
+    attempts: 1,
+    dropped: 0,
+    cancelled: 0,
+  });
+  assert.equal(runtime.pipeline.takeProviderDurationMs(context(16)), null);
   await runtime.close();
 });
 

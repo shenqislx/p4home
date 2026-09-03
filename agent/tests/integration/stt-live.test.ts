@@ -140,5 +140,6 @@ liveTest("pinned MLX Whisper prerecorded final enters the audited unified Human 
   assert.equal(calls, 2);
   assert.equal(sessions.get("robot").history().length, 0);
   assert.equal(sessions.get("cat").history().length, 0);
+  provider.close();
   scheduler.close();
 });
