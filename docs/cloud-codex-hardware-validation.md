@@ -83,7 +83,7 @@ accepted/observed/restored 结果和 P4 目标状态 marker。
 Phase 5A 本地语音基线使用 `phase5a_voice`，`monitor_seconds` 至少为 180 秒。该 profile 只在
 runner 临时 sdkconfig 中打开 audio startup selftest、ESP-SR 和 Phase 5A marker，并显式关闭 Agent
 transport；它不创建 Voice socket、不向 Agent 发送 PCM，也不接入 STT/TTS。自动证据覆盖 codec、
-非零 PCM、AFE feed/fetch、lease、资源/看门狗和 UI；真实 `Hi ESP`、`turn on the light` 口播与
+非零 PCM、AFE feed/fetch、lease、资源/看门狗和 UI；真实 `Hi，小星`、`turn on the light` 口播与
 speaker 可听播放属于人工观察，必须和自动 marker 分开报告。
 
 Phase 5E 无扬声器闭环使用独立的 `phase5e_ui`，`monitor_seconds` 至少为 900 秒。runner 通过
@@ -105,7 +105,7 @@ Device 端口从私有 product config 的 `device-port` 读取，旧配置缺少
 服务呈现匹配的 SPKI。屏幕 Cat 仍仅由固件本地 timer 和自有状态推进；Agent Cat autonomy 在
 `product_human` 中硬关闭，且不接收 Human transcript。上传候选必须扫描稳定 token、TLS
 私钥、raw-audio 字段和二进制/长 Base64 材料，审计失败时不得上传 artifact。manifest 中的
-`product_human_*` 字段只证明配置、刷写、启动和隐私传输边界；真人 `Hi ESP`、中文 STT、Human
+`product_human_*` 字段只证明配置、刷写、启动和隐私传输边界；真人 `Hi，小星`、中文 STT、Human
 回复、UI 可见性、P4 扬声器听感，以及屏幕 Human 的移动、坐下或互动仍需独立人工观察。常驻服务
 启用固定 Kokoro TTS，并要求 P4 playback 完成；workflow 绿色及 product profile 的刷写 manifest
 都不自动证明语音或角色动作已完成。常驻安装与日常使用见

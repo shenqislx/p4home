@@ -57,6 +57,8 @@ test("role profiles keep user text and tool namespaces isolated", () => {
     "home.activate_scene",
   ]);
   assert.deepEqual(cat.allowed_tools, CAT_WORLD_TOOLS);
+  assert.equal(human.revision, "role-profile/v3");
+  assert.match(human.system_prompt, /我是文曲星，你可以叫我小星/);
   assert.equal(robot.allowed_tools.every((tool) => tool.startsWith("home.")), true);
   assert.equal(human.allowed_tools.length, 0);
   assert.equal(cat.allowed_tools.some((tool) => tool.startsWith("home.")), false);

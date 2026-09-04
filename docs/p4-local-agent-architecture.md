@@ -237,7 +237,7 @@ Role 不是三个常驻模型进程，也不是互相信任的“多 Agent 社�
 |---|---|---|---|
 | Role Router | 当前用户输入与最小交互元数据 | 仅输出结构化 RoutePlan；无 Tool、无 Memory 写入 | temperature 0 |
 | Robot | Router 分配的命令片段、必要 HA snapshot | 只执行受限 HA 命令并简短报告结果；不得闲聊或调用 P4 角色动作 | temperature 0 |
-| Human | Router 分配的对话片段、Human 上下文 | 理解、共情和表达；没有执行型 Tool，不能代替 Robot 声称已执行 | 初始 temperature 0.7，可评测调节 |
+| Human | Router 分配的对话片段、Human 上下文 | 自我认知为“我是文曲星，你可以叫我小星”；理解、共情和表达；没有执行型 Tool，不能代替 Robot 声称已执行 | 初始 temperature 0.7，可评测调节 |
 | Cat | Timer、HA、World、task-complete 等事件 | 仅最小低风险 P4 World 能力；不得直接接收原始用户输入或写 HA | 初始 temperature 0.6，可评测调节 |
 
 Router 只决定“谁处理哪段语义”，不能授予权限。即使 Router 错把对话片段交给 Robot，Robot 的
@@ -578,7 +578,8 @@ ESP-SR wake/AFE
 设计要求：
 
 - 音频流与 Device JSON 控制消息分离；
-- 支持 barge-in，用户再次说话时可取消 TTS 和当前低优先级 Run；
+- 协议层支持 barge-in/cancel 与 epoch fencing；当前无回放参考通道的单麦产品 profile 在 TTS 播放
+  期间暂停 WakeNet，采用半双工以避免扬声器回声自唤醒；
 - 明确 VAD end-of-speech、STT timeout、TTS timeout；
 - P4 断线或 AI 节点不可用时，固定离线命令仍可工作；
 - 第一版先跑通文本 Tool Loop，再接入音频，避免同时调试模型、协议和声学链路。

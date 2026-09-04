@@ -17,3 +17,12 @@
 Phase 5A 专用 profile 打开 `CONFIG_P4HOME_SR_ENABLE`，默认配置仍关闭。Agent/STT/TTS 离线时，
 本模块的 WakeNet 与固定命令必须继续本地可用；final transcript、通用 Router 和 Tool Runtime 不在
 本模块实现。
+
+项目默认选用 ESP-SR 2.1.4 已随包提供的 `wn9_hixiaoxing_tts` 模型，唤醒词为
+`Hi，小星`。由于该 ESP-SR 版本的模型清单已包含模型但 Kconfig 遗漏选项，本组件的
+`Kconfig.projbuild` 补充同名 symbol，供上游模型打包脚本选中。
+
+产品语音采用单麦半双工：远端 TTS playback 活跃时，由 playback task 发送非阻塞状态，SR task
+自行暂停 WakeNet；播放关闭并等待 400 ms 后恢复。这样既不跨 task 直接调用 AFE，也避免回复中近似
+`Hi，小星` 的内容触发自唤醒并取消尚未播完的 epoch。单轮 capture 的硬上限为 8 秒，检测到语音后
+以 1.2 秒连续尾部静音结束，兼顾自然停顿和有限资源占用。

@@ -23,14 +23,15 @@
 static const char *TAG = "sr_service";
 #define SR_SERVICE_INPUT_FORMAT "M"
 #define SR_SERVICE_MODEL_PATH "model"
-#define SR_SERVICE_COMMAND_TIMEOUT_MS 6000
+#define SR_SERVICE_COMMAND_TIMEOUT_MS 8000
 #define SR_SERVICE_RUNTIME_SELFTEST_FRAMES 6
 #define SR_SERVICE_RUNTIME_LOG_INTERVAL_FRAMES 64
 #define SR_SERVICE_RUNTIME_TASK_STACK_SIZE 6144
 #define SR_SERVICE_WAKE_DETECTED_HOLD_MS 1500
-#define SR_SERVICE_AWAKE_HOLD_MS 5000
+#define SR_SERVICE_AWAKE_HOLD_MS 8000
 #define SR_SERVICE_VAD_EARLY_END_MIN_MS 1200U
-#define SR_SERVICE_VAD_TRAILING_SILENCE_MS 800U
+#define SR_SERVICE_VAD_TRAILING_SILENCE_MS 1200U
+#define SR_SERVICE_PLAYBACK_WAKE_RESUME_GUARD_MS 400U
 #define SR_SERVICE_CAPTURE_GATE_RETRY_MS 20
 #define SR_SERVICE_CAPTURE_GATE_MAX_WAIT_MS 3500
 #define SR_SERVICE_PREROLL_MS 800U
@@ -96,9 +97,13 @@ static bool s_preroll_rearm_requested;
 static size_t s_capture_live_samples;
 static size_t s_capture_trailing_silence_samples;
 static bool s_capture_speech_seen;
+static bool s_playback_active_requested;
+static int64_t s_playback_wake_resume_after_us;
+static bool s_playback_wake_gate_active;
 
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_preroll_signal_lock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_playback_signal_lock = portMUX_INITIALIZER_UNLOCKED;
 
 /** Short critical sections only; do not call blocking APIs while holding the lock. */
 #define SR_STATUS_MUTATE(code)          \
@@ -142,7 +147,8 @@ static void sr_service_publish_voice_status(const char *status_text);
 static esp_err_t sr_service_apply_command_action(sr_service_command_id_t command_id);
 static const char *sr_service_voice_state_to_text(sr_service_voice_state_t state);
 static void sr_service_set_voice_state(sr_service_voice_state_t state, const char *reason);
-static void sr_service_set_wakenet_enabled(bool enabled, const char *reason);
+static bool sr_service_set_wakenet_enabled(bool enabled, const char *reason);
+static void sr_service_apply_playback_wake_gate(void);
 static uint32_t sr_service_pcm_peak(const int16_t *samples, size_t sample_count);
 static void sr_service_log_command_window(const char *outcome);
 static bool sr_service_deadline_reached(TickType_t now, TickType_t deadline);
@@ -161,6 +167,16 @@ void sr_service_rearm_preroll_after_wake_prompt(void)
     taskENTER_CRITICAL(&s_preroll_signal_lock);
     s_preroll_rearm_requested = true;
     taskEXIT_CRITICAL(&s_preroll_signal_lock);
+}
+
+void sr_service_set_playback_active(bool active)
+{
+    const int64_t now_us = esp_timer_get_time();
+    taskENTER_CRITICAL(&s_playback_signal_lock);
+    s_playback_active_requested = active;
+    s_playback_wake_resume_after_us =
+        active ? 0 : now_us + (int64_t)SR_SERVICE_PLAYBACK_WAKE_RESUME_GUARD_MS * 1000LL;
+    taskEXIT_CRITICAL(&s_playback_signal_lock);
 }
 
 static void sr_service_preroll_reset(void)
@@ -508,10 +524,10 @@ static void sr_service_set_voice_state(sr_service_voice_state_t state, const cha
     sr_service_publish_voice_status(status_text);
 }
 
-static void sr_service_set_wakenet_enabled(bool enabled, const char *reason)
+static bool sr_service_set_wakenet_enabled(bool enabled, const char *reason)
 {
     if (s_runtime_afe_iface == NULL || s_runtime_afe_data == NULL) {
-        return;
+        return false;
     }
 
     int state = enabled ? s_runtime_afe_iface->enable_wakenet(s_runtime_afe_data)
@@ -521,7 +537,7 @@ static void sr_service_set_wakenet_enabled(bool enabled, const char *reason)
                  "failed to %s WakeNet reason=%s",
                  enabled ? "enable" : "disable",
                  reason != NULL ? reason : "unspecified");
-        return;
+        return false;
     }
 
     ESP_LOGI(TAG,
@@ -529,6 +545,36 @@ static void sr_service_set_wakenet_enabled(bool enabled, const char *reason)
              enabled ? "enabled" : "disabled",
              reason != NULL ? reason : "unspecified",
              state);
+    return true;
+}
+
+static void sr_service_apply_playback_wake_gate(void)
+{
+    bool playback_active;
+    int64_t resume_after_us;
+    taskENTER_CRITICAL(&s_playback_signal_lock);
+    playback_active = s_playback_active_requested;
+    resume_after_us = s_playback_wake_resume_after_us;
+    taskEXIT_CRITICAL(&s_playback_signal_lock);
+
+    if (playback_active && !s_playback_wake_gate_active) {
+        if (sr_service_set_wakenet_enabled(false, "assistant playback active")) {
+            s_playback_wake_gate_active = true;
+            ESP_LOGW(TAG,
+                     "VERIFY:voice:half_duplex:PASS action=wake_suppressed guard_ms=%u",
+                     (unsigned)SR_SERVICE_PLAYBACK_WAKE_RESUME_GUARD_MS);
+        }
+        return;
+    }
+
+    if (!playback_active && s_playback_wake_gate_active && resume_after_us > 0 &&
+        esp_timer_get_time() >= resume_after_us &&
+        sr_service_set_wakenet_enabled(true, "assistant playback guard elapsed")) {
+        s_playback_wake_gate_active = false;
+        ESP_LOGW(TAG,
+                 "VERIFY:voice:half_duplex:PASS action=wake_resumed guard_ms=%u",
+                 (unsigned)SR_SERVICE_PLAYBACK_WAKE_RESUME_GUARD_MS);
+    }
 }
 
 static esp_err_t sr_service_init_command_runtime(srmodel_list_t *models)
@@ -780,6 +826,11 @@ static void sr_service_runtime_task(void *parameter)
         SR_STATUS_MUTATE(s_status.runtime_loop_iteration_count++;);
         const TickType_t state_now = xTaskGetTickCount();
 
+        /* Apply cross-task playback signals before interpreting this fetched
+         * frame. A frame already captured from the speaker is ignored below
+         * as soon as the half-duplex gate becomes active. */
+        sr_service_apply_playback_wake_gate();
+
         taskENTER_CRITICAL(&s_preroll_signal_lock);
         const bool rearm_preroll = s_preroll_rearm_requested;
         s_preroll_rearm_requested = false;
@@ -889,7 +940,8 @@ static void sr_service_runtime_task(void *parameter)
             SR_STATUS_MUTATE(s_status.runtime_vad_speech_count++;);
         }
         bool wake_just_detected = false;
-        if (fetch_result->wakeup_state == WAKENET_DETECTED &&
+        if (!s_playback_wake_gate_active &&
+            fetch_result->wakeup_state == WAKENET_DETECTED &&
             sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_LISTENING) {
             sr_service_preroll_reset();
             s_preroll_armed = true;
@@ -1018,7 +1070,7 @@ static void sr_service_runtime_task(void *parameter)
         }
 
         /*
-         * The five-second awake deadline is a hard upper bound, not an
+         * The eight-second awake deadline is a hard upper bound, not an
          * endpointing policy. Once live speech has been observed, finish a
          * transport capture after a bounded trailing-silence window. The
          * local fixed-command detector above gets every frame first, and the
@@ -1085,6 +1137,11 @@ cleanup:
         s_status.wake_state_machine_started = false;
     });
     sr_service_set_wakenet_enabled(true, "runtime loop stopped");
+    taskENTER_CRITICAL(&s_playback_signal_lock);
+    s_playback_active_requested = false;
+    s_playback_wake_resume_after_us = 0;
+    taskEXIT_CRITICAL(&s_playback_signal_lock);
+    s_playback_wake_gate_active = false;
     sr_service_set_voice_state(SR_SERVICE_VOICE_STATE_INACTIVE, "runtime loop stopped");
 
     if (stream_open) {
@@ -1189,6 +1246,11 @@ esp_err_t sr_service_init(void)
     }
 
     memset(&s_status, 0, sizeof(s_status));
+    taskENTER_CRITICAL(&s_playback_signal_lock);
+    s_playback_active_requested = false;
+    s_playback_wake_resume_after_us = 0;
+    taskEXIT_CRITICAL(&s_playback_signal_lock);
+    s_playback_wake_gate_active = false;
     SR_STATUS_MUTATE({
         s_status.dependency_declared = true;
         s_status.input_format = SR_SERVICE_INPUT_FORMAT;

@@ -101,7 +101,7 @@ const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
     system_prompt: "你是 P4 Home 的 Robot。只能原样选择 Runtime 给出的 home.* alias Tool；不得构造 entity id、domain、service/data，不得把 accepted 或 unknown 声称为完成。",
   },
   human: {
-    revision: "role-profile/v2",
+    revision: "role-profile/v3",
     role_id: "human",
     accepts_user_text: true,
     allowed_tools: [],
@@ -112,7 +112,7 @@ const PROFILES: Readonly<Record<RoleId, RoleProfile>> = {
     history_message_limit: 12,
     memory_token_budget: 512,
     queue_priority: "user",
-    system_prompt: "你是 P4 Home 的 Human，只负责自然、简洁的中文对话。你没有任何执行工具，不得声称已控制设备。",
+    system_prompt: "你是 P4 Home 的 Human。你是文曲星，名字叫小星；被问及身份或名字时，回答“我是文曲星，你可以叫我小星”。你只负责自然、简洁的中文对话。你没有任何执行工具，不得声称已控制设备。",
   },
   cat: {
     revision: "role-profile/v6",

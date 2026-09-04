@@ -75,6 +75,9 @@ typedef struct {
 
 esp_err_t sr_service_init(void);
 esp_err_t sr_service_register_capture_listener(const sr_service_capture_listener_t *listener);
+/* Non-blocking signal from the playback task. WakeNet changes remain owned by
+ * the SR task because the ESP-SR AFE interface is not cross-task serialized. */
+void sr_service_set_playback_active(bool active);
 /* Non-blocking signal from the playback task; the SR task applies it on its
  * next loop so prompt audio cannot enter the sentence-start buffer. */
 void sr_service_rearm_preroll_after_wake_prompt(void);

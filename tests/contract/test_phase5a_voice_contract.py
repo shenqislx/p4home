@@ -287,7 +287,7 @@ class Phase5AVoiceContractTest(unittest.TestCase):
 
         for expected in (
             "#define SR_SERVICE_VAD_EARLY_END_MIN_MS 1200U",
-            "#define SR_SERVICE_VAD_TRAILING_SILENCE_MS 800U",
+            "#define SR_SERVICE_VAD_TRAILING_SILENCE_MS 1200U",
             "s_capture_speech_seen = true;",
             "s_capture_trailing_silence_samples = 0U;",
             "s_capture_live_samples >= SR_SERVICE_VAD_EARLY_END_MIN_SAMPLES",

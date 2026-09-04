@@ -20,6 +20,7 @@ BOARD_KCONFIG = ROOT / "firmware/components/board_support/Kconfig.projbuild"
 BOARD_SOURCE = ROOT / "firmware/components/board_support/board_support.c"
 HA_SOURCE = ROOT / "firmware/components/ha_client/ha_client.c"
 SR_SOURCE = ROOT / "firmware/components/sr_service/sr_service.c"
+SR_HEADER = ROOT / "firmware/components/sr_service/include/sr_service.h"
 RUNTIME_SOURCE = ROOT / "agent/apps/runtime/src/voice-websocket-server.ts"
 WEATHER_SOURCE = ROOT / "firmware/components/weather_service/weather_service.c"
 ENERGY_SOURCE = ROOT / "firmware/components/ui_pages/ui_page_energy.c"
@@ -365,6 +366,23 @@ class Phase5BVoiceTransportContractTest(unittest.TestCase):
         self.assertIn("#define PLAYBACK_VOLUME_PERCENT 83U", playback)
         self.assertIn('"playback opened epoch=%" PRIu32 " volume=%u"', playback)
         self.assertIn("PLAYBACK_VOLUME_PERCENT,", playback)
+
+    def test_product_voice_is_half_duplex_and_tolerates_natural_pauses(self) -> None:
+        playback = PLAYBACK_SOURCE.read_text(encoding="utf-8")
+        sr = SR_SOURCE.read_text(encoding="utf-8")
+        sr_header = SR_HEADER.read_text(encoding="utf-8")
+
+        self.assertIn("#define SR_SERVICE_COMMAND_TIMEOUT_MS 8000", sr)
+        self.assertIn("#define SR_SERVICE_AWAKE_HOLD_MS 8000", sr)
+        self.assertIn("#define SR_SERVICE_VAD_TRAILING_SILENCE_MS 1200U", sr)
+        self.assertIn("#define SR_SERVICE_PLAYBACK_WAKE_RESUME_GUARD_MS 400U", sr)
+        self.assertIn("void sr_service_set_playback_active(bool active);", sr_header)
+        self.assertIn("sr_service_set_playback_active(true);", playback)
+        self.assertIn("sr_service_set_playback_active(false);", playback)
+        self.assertIn("sr_service_apply_playback_wake_gate();", sr)
+        self.assertIn("!s_playback_wake_gate_active &&", sr)
+        self.assertIn("VERIFY:voice:half_duplex:PASS action=wake_suppressed", sr)
+        self.assertIn("VERIFY:voice:half_duplex:PASS action=wake_resumed", sr)
 
     def test_sr_capture_registration_precedes_runtime_start(self) -> None:
         board = BOARD_SOURCE.read_text(encoding="utf-8")

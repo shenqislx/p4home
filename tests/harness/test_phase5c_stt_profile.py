@@ -52,7 +52,7 @@ class Phase5CSttProfileTest(unittest.TestCase):
             "HARNESS_ENTRYPOINT=apps/device-harness/src/voice-stt-cli.ts",
             'test "$("$AGENT_NODE_BIN" --version)" = "v24.19.0"',
             '"$AGENT_NODE_BIN" --import tsx "$HARNESS_ENTRYPOINT"',
-            'say -v Samantha "Hi ESP"',
+            'say -v Tingting "Hi，小星"',
             'say -v Tingting "你好，请介绍一下你自己"',
             "voice_transport: capture opened epoch=",
             '"phase5c_stt_model_revision": phase5c_model_revision',
@@ -76,7 +76,7 @@ class Phase5CSttProfileTest(unittest.TestCase):
         )[1].split("      - name: Write job summary", 1)[0]
         self.assertNotIn('grep -qx "0" "$AGENT_HARNESS_STATUS_FILE"', transport_assertion)
         self.assertNotIn("VERIFY:phase5c:voice_stt_unified:PASS", transport_assertion)
-        self.assertNotIn('say -v Samantha "Hi ESP"\n                sleep 2', workflow)
+        self.assertNotIn('say -v Tingting "Hi，小星"\n                sleep 2', workflow)
         voice_transport = (ROOT / "firmware/components/voice_transport/voice_transport.c").read_text(
             encoding="utf-8"
         )

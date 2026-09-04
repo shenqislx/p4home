@@ -269,6 +269,7 @@ static void finish_session(const char *status, bool send_terminal, const char *l
         s_playback.speaker_open = false;
         (void)sync_output_quarantine();
     }
+    sr_service_set_playback_active(false);
     xQueueReset(s_playback.queue);
     taskENTER_CRITICAL(&s_playback.lock);
     const uint32_t dropped = s_playback.tracker.dropped_frames;
@@ -658,6 +659,7 @@ esp_err_t voice_playback_receiver_open(const cJSON *root)
     }
     taskEXIT_CRITICAL(&s_playback.lock);
     if (prepared) {
+        sr_service_set_playback_active(true);
         ESP_LOGW(TAG, "playback opened epoch=%" PRIu32 " volume=%u",
                  epoch, (unsigned)PLAYBACK_VOLUME_PERCENT);
     } else {

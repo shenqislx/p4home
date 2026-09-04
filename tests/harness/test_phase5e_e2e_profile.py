@@ -189,6 +189,18 @@ class Phase5eProfileTests(unittest.TestCase):
             r"(?s)  espressif/esp_hosted:.*?\n    version: 2\.12\.11\n",
         )
 
+    def test_hi_xiaoxing_wakenet_model_is_selected(self):
+        defaults = SDKCONFIG_DEFAULTS.read_text(encoding="utf-8")
+        kconfig = (
+            ROOT / "firmware/components/sr_service/Kconfig.projbuild"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("CONFIG_SR_WN_WN9_HIXIAOXING_TTS=y", defaults)
+        self.assertNotIn("CONFIG_SR_WN_WN9_HIESP=y", defaults)
+        self.assertIn("# CONFIG_SR_WN_WN9_HIESP is not set", defaults)
+        self.assertIn("config SR_WN_WN9_HIXIAOXING_TTS", kconfig)
+        self.assertIn('bool "Hi,小星 (wn9_hixiaoxing_tts)"', kconfig)
+
     def test_workflow_wires_e2e_harness_models_driver_and_audit(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         for marker in (
@@ -273,7 +285,7 @@ class Phase5eProfileTests(unittest.TestCase):
         ):
             self.assertIn(marker, workflow)
         driver = UI_DRIVER.read_text(encoding="utf-8")
-        self.assertIn('say("Hi ESP", "Samantha")', driver)
+        self.assertIn('say("Hi，小星", "Tingting")', driver)
         self.assertIn("HA_INITIAL_SYNC_READY_MARKER", driver)
         self.assertIn("wait_for_ha_readiness(args.monitor_log)", driver)
         self.assertNotIn("time.sleep(25)", driver)
@@ -592,7 +604,7 @@ class Phase5eProfileTests(unittest.TestCase):
                     driver.open_capture(pathlib.Path("monitor.log"))
                 self.assertEqual(
                     say_mock.call_args_list,
-                    [mock.call("Hi ESP", "Samantha")] * 3,
+                    [mock.call("Hi，小星", "Tingting")] * 3,
                 )
 
                 with (

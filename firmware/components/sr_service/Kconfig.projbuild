@@ -1,0 +1,11 @@
+menu "P4 Home speech recognition models"
+
+    # ESP-SR 2.1.4 ships this WakeNet9 model but omits its Kconfig entry.
+    # Keep the upstream symbol name so the ESP-SR model packer resolves the
+    # bundled model/wakenet_model/wn9_hixiaoxing_tts directory.
+    config SR_WN_WN9_HIXIAOXING_TTS
+        bool "Hi,小星 (wn9_hixiaoxing_tts)"
+        depends on IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4 || IDF_TARGET_ESP32
+        default n
+
+endmenu

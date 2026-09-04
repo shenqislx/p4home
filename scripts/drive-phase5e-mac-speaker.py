@@ -103,7 +103,7 @@ def open_capture(monitor: pathlib.Path) -> None:
     for attempt in range(WAKE_ATTEMPTS):
         if count_marker(monitor, CAPTURE_MARKER) > before:
             return
-        say("Hi ESP", "Samantha")
+        say("Hi，小星", "Tingting")
         try:
             wait_until(
                 lambda: count_marker(monitor, CAPTURE_MARKER) > before,

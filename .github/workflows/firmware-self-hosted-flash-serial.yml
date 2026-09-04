@@ -214,6 +214,8 @@ jobs:
           EXPECTED_MAIN_TASK_STACK_SIZE="$(sed -n 's/^CONFIG_ESP_MAIN_TASK_STACK_SIZE=//p' firmware/sdkconfig.defaults)"
           test -n "$EXPECTED_MAIN_TASK_STACK_SIZE"
           grep -qx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" "$HARDWARE_SDKCONFIG"
+          grep -qx "CONFIG_SR_WN_WN9_HIXIAOXING_TTS=y" "$HARDWARE_SDKCONFIG"
+          grep -qx "# CONFIG_SR_WN_WN9_HIESP is not set" "$HARDWARE_SDKCONFIG"
           echo "HARDWARE_SDKCONFIG=$HARDWARE_SDKCONFIG" >> "$GITHUB_ENV"
           echo "EXPECTED_MAIN_TASK_STACK_SIZE=$EXPECTED_MAIN_TASK_STACK_SIZE" >> "$GITHUB_ENV"
           if [[ "${{ inputs.validation_profile }}" != "generic" ]]; then
@@ -916,7 +918,7 @@ jobs:
                 fi
                 capture_count_before="$(grep -c 'voice_transport: capture opened epoch=' \
                   firmware/monitor.log || true)"
-                say -v Samantha "Hi ESP"
+                say -v Tingting "Hi，小星"
                 capture_opened=no
                 for poll in {1..250}; do
                   capture_count_after="$(grep -c 'voice_transport: capture opened epoch=' \
