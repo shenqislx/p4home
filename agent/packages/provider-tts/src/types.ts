@@ -8,8 +8,8 @@ export const TTS_PROVIDER_VERSION = "0.4.8";
 export const TTS_MODEL_ID = "mlx-community/Kokoro-82M-bf16";
 export const TTS_MODEL_REVISION = "a71e4d38b236d968966a2002c4c895dbd12b1c3c";
 export const TTS_ROLE_VOICES = {
-  human: "zf_xiaobei",
-  robot: "zm_yunxi",
+  human: "zf_xiaoxiao",
+  robot: "zf_xiaobei",
 } as const;
 
 export type TtsRole = keyof typeof TTS_ROLE_VOICES;

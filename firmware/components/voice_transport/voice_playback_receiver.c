@@ -265,6 +265,10 @@ static void finish_session(const char *status, bool send_terminal, const char *l
     wait_for_rx_idle();
     bool close_failed = false;
     if (s_playback.speaker_open) {
+        if (strcmp(status, "completed") == 0 &&
+            audio_service_drain_speaker_stream(&s_playback.speaker_lease) != ESP_OK) {
+            status = "failed";
+        }
         close_failed = audio_service_end_speaker_stream(&s_playback.speaker_lease) != ESP_OK;
         s_playback.speaker_open = false;
         (void)sync_output_quarantine();
@@ -354,6 +358,7 @@ static void play_wake_prompt(bool connecting)
             }
             offset += count;
         }
+        if (played && audio_service_drain_speaker_stream(&lease) != ESP_OK) played = false;
         if (audio_service_end_speaker_stream(&lease) != ESP_OK) played = false;
     }
 
@@ -432,6 +437,9 @@ static void playback_task(void *argument)
         taskEXIT_CRITICAL(&s_playback.lock);
         if (local_stage_pending) {
             (void)conversation_service_set_local_stage(pending_local_stage);
+        }
+        if (conversation_service_check_recognition_timeout(esp_timer_get_time())) {
+            ESP_LOGW(TAG, "VERIFY:voice:recognition_timeout:PASS action=show_retry");
         }
 
         if (open_requested && state == PLAYBACK_OPENING) {

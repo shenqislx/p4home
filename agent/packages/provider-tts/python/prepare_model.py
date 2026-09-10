@@ -23,6 +23,7 @@ REQUIRED_FILES = (
     "config.json",
     "kokoro-v1_0.safetensors",
     "voices/zf_xiaobei.safetensors",
+    "voices/zf_xiaoxiao.safetensors",
     "voices/zm_yunxi.safetensors",
 )
 MANIFEST_NAME = "p4home-model-manifest.json"
@@ -31,6 +32,7 @@ EXPECTED_SHA256 = {
     "config.json": "5abb01e2403b072bf03d04fde160443e209d7a0dad49a423be15196b9b43c17f",
     "kokoro-v1_0.safetensors": "4e9ecdf03b8b6cf906070390237feda473dc13327cb8d56a43deaa374c02acd8",
     "voices/zf_xiaobei.safetensors": "cbda378bbe266c735aa13c94c20b6224f2f8d0e16cf3abe612a4e6d93ebeab51",
+    "voices/zf_xiaoxiao.safetensors": "cf507ad2319c50121aca4755cd3b9793bde10eea9aa9caca6cb3b5914d5f258f",
     "voices/zm_yunxi.safetensors": "78d8bb5ba4a2ea75a7f22c6148214a7434b436db85dc791a2ddf2aa7f6cc6fab",
 }
 
@@ -123,7 +125,11 @@ def exact_tree(model: pathlib.Path) -> bool:
             and voices.is_dir()
             and not voices.is_symlink()
             and {entry.name for entry in voices.iterdir()}
-            == {"zf_xiaobei.safetensors", "zm_yunxi.safetensors"}
+            == {
+                "zf_xiaobei.safetensors",
+                "zf_xiaoxiao.safetensors",
+                "zm_yunxi.safetensors",
+            }
         )
     except OSError:
         return False
@@ -170,7 +176,9 @@ def main() -> None:
     operation.add_argument("--verify", type=pathlib.Path)
     args = parser.parse_args()
     if args.verify is not None:
-        model = args.verify.resolve()
+        # Preserve the final path component so verified_manifest can reject a
+        # symlink instead of silently validating its target.
+        model = args.verify.absolute()
         manifest = verified_manifest(model)
         if manifest is None:
             raise SystemExit("model snapshot verification failed")
@@ -183,7 +191,7 @@ def main() -> None:
         return
 
     assert args.output is not None
-    output = args.output.resolve()
+    output = args.output.absolute()
     if output.exists() or output.is_symlink() or not output.parent.is_dir():
         raise SystemExit("output must be a new path below an existing directory")
 

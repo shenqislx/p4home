@@ -124,6 +124,19 @@ test("router emits one full-span Robot assignment without exposing tools", async
   assert.equal(captured?.options?.temperature, 0);
 });
 
+test("Router vetoes a model decision that executes an explicitly negated device request", async () => {
+  for (const text of ["别关客厅灯", "不要打开书房灯", "不要把客厅灯关闭"]) {
+    const result = await routeInteraction({
+      interaction: { ...INTERACTION, text },
+      route_plan_id: "negated:device",
+      provider: providerReturning(JSON.stringify({ assignments: [{ role: "robot", text }] })),
+    });
+    assert.equal(result.fallback_error_code, "NEGATED_DEVICE_COMMAND");
+    assert.equal(result.plan.assignments[0]?.role_id, "human");
+    assert.equal(result.plan.assignments[0]?.mode, "clarify");
+  }
+});
+
 test("human and clarify decisions can never create Cat or Robot fallback work", async () => {
   const human = await routeInteraction({
     interaction: { ...INTERACTION, text: "今天好累" },

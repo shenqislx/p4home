@@ -26,6 +26,7 @@ import {
 } from "@p4home/transport-ha";
 
 import { QWEN_THINKING_ENABLED } from "./model-config.ts";
+import { hasNegatedDeviceCommand } from "./device-command-policy.ts";
 import {
   ROBOT_HA_OFFLINE_TEXT,
   ROBOT_HA_READ_NOT_SELECTED_TEXT,
@@ -171,6 +172,13 @@ function modelCapabilities(capabilities: readonly RobotHaCapability[]): readonly
   }));
 }
 
+function isUnqualifiedMultiLightCommand(text: string, capabilities: readonly RobotHaCapability[]): boolean {
+  if (capabilities.filter((capability) => capability.domain === "light").length < 2) return false;
+  // This veto covers unqualified direct light commands only. It does not infer
+  // room names, resolve pronouns, or authorize other natural-language requests.
+  return /^(?:(?:请|麻烦|帮我|替我)\s*)*(?:(?:打开|开启|关闭|关掉|开|关)\s*(?:一下)?\s*(?:灯|灯光)|把\s*(?:灯|灯光)\s*(?:打开|开启|关闭|关掉))\s*(?:一下)?[。！!？?\s]*$/u.test(text.trim());
+}
+
 function withCapabilities(
   messages: readonly OllamaChatMessage[],
   capabilities: readonly RobotHaCapability[],
@@ -181,7 +189,9 @@ function withCapabilities(
   }
   return [{
     ...system,
-    content: `${system.content}当前能力：${JSON.stringify(modelCapabilities(capabilities))}。只能原样选择 alias 和对应 tool；结果由 Runtime 确定。`,
+    content: `${system.content}当前能力：${JSON.stringify(modelCapabilities(capabilities))}。只能原样选择 alias 和对应 tool；结果由 Runtime 确定。`
+      + "需要调用工具时，必须使用原生 tool_calls；不要在 content 中输出 JSON、Markdown 或 action 对象。"
+      + "多个设备都可能符合用户描述时，必须询问具体房间或设备，不得自行挑选 alias。",
   }, ...rest];
 }
 
@@ -585,6 +595,24 @@ export async function runRobotHaWrite(options: RunRobotHaWriteOptions): Promise<
     return failure("model", "ROLE_POLICY_VIOLATION", "Robot returned thinking content", 1, [], "failed", true);
   }
   const nativeCalls = response.message.tool_calls ?? [];
+  const currentText = [...options.messages].reverse().find((message) => message.role === "user")?.content ?? "";
+  const ambiguousLight = isUnqualifiedMultiLightCommand(currentText, capabilities);
+  if (nativeCalls.some((call) => call.function.name !== "home.get_entity")
+    && (hasNegatedDeviceCommand(currentText) || ambiguousLight)) {
+    await options.audit?.modelToolRejected(response.message,
+      ambiguousLight ? "ambiguous_light_target" : "negated_device_command");
+    return {
+      status: "completed",
+      final_text: ambiguousLight
+        ? "有多盏灯可供选择，我没有操作设备。请说明要操作哪个房间的灯。"
+        : "这条指令包含不要执行的要求，我没有操作设备。请明确现在需要执行的动作。",
+      model_turns: 1,
+      capability_available: true,
+      outcome: "response",
+      tool_results: [],
+      error: null,
+    };
+  }
   if (nativeCalls.length === 0) {
     return {
       status: "completed",

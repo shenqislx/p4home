@@ -17,6 +17,25 @@ SPEC.loader.exec_module(prepare_model)
 
 
 class TtsModelSnapshotTests(unittest.TestCase):
+    def test_cli_does_not_resolve_away_a_symlink_before_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            target = root / "model"
+            target.mkdir()
+            link = root / "link"
+            link.symlink_to(target, target_is_directory=True)
+            with mock.patch.object(prepare_model.sys, "argv", ["prepare_model", "--verify", str(link)]):
+                with mock.patch.object(prepare_model, "verified_manifest", return_value=None) as verify:
+                    with self.assertRaisesRegex(SystemExit, "verification failed"):
+                        prepare_model.main()
+                    verify.assert_called_once_with(link)
+
+            dangling = root / "dangling"
+            dangling.symlink_to(root / "missing", target_is_directory=True)
+            with mock.patch.object(prepare_model.sys, "argv", ["prepare_model", "--output", str(dangling)]):
+                with self.assertRaisesRegex(SystemExit, "new path"):
+                    prepare_model.main()
+
     def test_download_retries_with_one_persistent_cache(self) -> None:
         calls: list[dict[str, object]] = []
         sleeps: list[float] = []

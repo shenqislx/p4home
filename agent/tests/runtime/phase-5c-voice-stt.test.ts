@@ -264,6 +264,33 @@ test("Phase 5C fixed transcript gate tolerates punctuation only and rejects hall
   assert.equal(phase5cAttemptDecision(["silence", "dispatched"]), "pass");
 });
 
+test("capture terminals remain observable without history and cannot be changed by a diagnostic sink", async () => {
+  const provider = new FakeSttProvider();
+  const records: unknown[] = [];
+  const pipeline = new VoiceSttPipeline({
+    provider,
+    max_results: 0,
+    dispatch_final: async () => { assert.fail("silence must not dispatch"); },
+    on_result: (result) => {
+      records.push(result);
+      assert.ok(Object.isFrozen(result));
+      throw new Error("diagnostic sink unavailable");
+    },
+  });
+  pipeline.onSessionOpen(summary(1));
+  pipeline.onFrame(summary(1), frame(1, 0, 0));
+  pipeline.onSessionClosed(summary(1, "completed", true));
+  await pipeline.drain();
+  assert.equal(provider.requests.length, 0);
+  assert.deepEqual(pipeline.results, []);
+  assert.deepEqual(records, [{
+    device_id: "p4-test", session_id: SESSION_ID, stream_id: 7, epoch: 1,
+    outcome: "silence", interaction_id: null, pcm_bytes: 640,
+    speech_frames: 0, partials_seen: 0,
+  }]);
+  pipeline.close();
+});
+
 test("silence, short speech, cancellation and empty final transcript execute nothing", async () => {
   const provider = new FakeSttProvider();
   const dispatched: UserTextInteraction[] = [];

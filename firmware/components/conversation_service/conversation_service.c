@@ -15,7 +15,13 @@ typedef struct {
     void *rendered_context;
     uint32_t rendered_epoch;
     uint32_t rendered_revision;
+    uint32_t capture_epoch;
+    int64_t recognition_started_us;
+    bool recognition_timed_out;
 } conversation_service_state_t;
+
+/* Product STT permits at most 120 s; allow 5 s for terminal delivery. */
+#define RECOGNITION_UI_TIMEOUT_US 125000000LL
 
 static conversation_service_state_t s_conversation;
 
@@ -137,12 +143,17 @@ esp_err_t conversation_service_apply(const conversation_update_t *update)
         return ESP_ERR_TIMEOUT;
     }
     const conversation_update_t *current = &s_conversation.snapshot.update;
-    const bool stale = s_conversation.snapshot.available &&
+    const bool new_epoch = update->epoch > s_conversation.capture_epoch &&
+        (!s_conversation.snapshot.available || update->epoch > current->epoch);
+    const bool stale = update->epoch < s_conversation.capture_epoch ||
+                      (s_conversation.recognition_timed_out && !new_epoch &&
+                       update->stage <= CONVERSATION_STAGE_TRANSCRIBING) ||
+                      (s_conversation.snapshot.available &&
                        (update->epoch < current->epoch ||
                         (update->epoch == current->epoch &&
                          (update->stream_id != current->stream_id ||
                           strcmp(update->session_id, current->session_id) != 0 ||
-                          update->revision <= current->revision)));
+                          update->revision <= current->revision))));
     if (stale) {
         s_conversation.snapshot.stale_updates_rejected++;
         xSemaphoreGive(s_conversation.mutex);
@@ -152,6 +163,12 @@ esp_err_t conversation_service_apply(const conversation_update_t *update)
     memcpy(&s_conversation.snapshot.update, update, sizeof(*update));
     s_conversation.snapshot.available = true;
     s_conversation.snapshot.local_stage = CONVERSATION_LOCAL_STAGE_IDLE;
+    /* Local and remote transcribing describe one attempt. A fresh revision
+     * must not renew its deadline; genuine Agent progress ends the timer. */
+    if (new_epoch || update->stage != CONVERSATION_STAGE_TRANSCRIBING) {
+        s_conversation.recognition_started_us = 0;
+    }
+    if (new_epoch) s_conversation.recognition_timed_out = false;
     s_conversation.snapshot.local_revision++;
     s_conversation.snapshot.updates_applied++;
     conversation_observer_fn observer = s_conversation.observer;
@@ -165,23 +182,80 @@ esp_err_t conversation_service_set_local_stage(conversation_local_stage_t stage)
 {
     if (s_conversation.mutex == NULL) return ESP_ERR_INVALID_STATE;
     if (stage < CONVERSATION_LOCAL_STAGE_IDLE ||
-        stage > CONVERSATION_LOCAL_STAGE_TRANSCRIBING) {
+        stage > CONVERSATION_LOCAL_STAGE_TIMED_OUT) {
         return ESP_ERR_INVALID_ARG;
     }
     if (xSemaphoreTake(s_conversation.mutex, pdMS_TO_TICKS(250)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
-    if (s_conversation.snapshot.local_stage == stage) {
+    /* A fast Agent failure can arrive before the queued local capture-ended
+     * notification. Never replace current remote progress with that late UI. */
+    const bool remote_progress = stage == CONVERSATION_LOCAL_STAGE_TRANSCRIBING &&
+        s_conversation.capture_epoch > 0U && s_conversation.snapshot.available &&
+        s_conversation.snapshot.update.epoch >= s_conversation.capture_epoch;
+    if (remote_progress ||
+        (stage == CONVERSATION_LOCAL_STAGE_TRANSCRIBING &&
+         s_conversation.recognition_timed_out) ||
+        s_conversation.snapshot.local_stage == stage) {
         xSemaphoreGive(s_conversation.mutex);
         return ESP_OK;
     }
     s_conversation.snapshot.local_stage = stage;
+    s_conversation.recognition_started_us = 0;
     s_conversation.snapshot.local_revision++;
     conversation_observer_fn observer = s_conversation.observer;
     void *observer_context = s_conversation.observer_context;
     xSemaphoreGive(s_conversation.mutex);
     if (observer != NULL) observer(observer_context);
     return ESP_OK;
+}
+
+esp_err_t conversation_service_begin_capture(uint32_t epoch)
+{
+    if (s_conversation.mutex == NULL || epoch == 0U) return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(s_conversation.mutex, pdMS_TO_TICKS(250)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    uint32_t latest_epoch = s_conversation.capture_epoch;
+    if (s_conversation.snapshot.available &&
+        s_conversation.snapshot.update.epoch > latest_epoch) {
+        latest_epoch = s_conversation.snapshot.update.epoch;
+    }
+    if (epoch < latest_epoch) {
+        xSemaphoreGive(s_conversation.mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_conversation.capture_epoch = epoch;
+    /* A queued begin notification may follow the first remote update. */
+    if (epoch > latest_epoch) {
+        s_conversation.recognition_started_us = 0;
+        s_conversation.recognition_timed_out = false;
+    }
+    xSemaphoreGive(s_conversation.mutex);
+    return ESP_OK;
+}
+
+bool conversation_service_check_recognition_timeout(int64_t now_us)
+{
+    if (s_conversation.mutex == NULL || now_us <= 0 ||
+        xSemaphoreTake(s_conversation.mutex, 0) != pdTRUE) return false;
+    const bool recognizing = s_conversation.snapshot.local_stage == CONVERSATION_LOCAL_STAGE_TRANSCRIBING ||
+        (s_conversation.snapshot.local_stage == CONVERSATION_LOCAL_STAGE_IDLE &&
+         s_conversation.snapshot.available &&
+         s_conversation.snapshot.update.stage == CONVERSATION_STAGE_TRANSCRIBING);
+    bool expired = false;
+    if (!recognizing) s_conversation.recognition_started_us = 0;
+    else if (s_conversation.recognition_started_us == 0) s_conversation.recognition_started_us = now_us;
+    else if (now_us - s_conversation.recognition_started_us >= RECOGNITION_UI_TIMEOUT_US) {
+        s_conversation.snapshot.local_stage = CONVERSATION_LOCAL_STAGE_TIMED_OUT;
+        s_conversation.snapshot.local_revision++;
+        s_conversation.recognition_started_us = 0;
+        s_conversation.recognition_timed_out = true;
+        expired = true;
+    }
+    conversation_observer_fn observer = s_conversation.observer;
+    void *context = s_conversation.observer_context;
+    xSemaphoreGive(s_conversation.mutex);
+    if (expired && observer != NULL) observer(context);
+    return expired;
 }
 
 esp_err_t conversation_service_set_rendered_observer(conversation_rendered_fn observer,
@@ -278,10 +352,10 @@ const char *conversation_service_stage_text(conversation_stage_t stage)
 const char *conversation_service_local_stage_text(conversation_local_stage_t stage)
 {
     static const char *const values[] = {
-        "idle", "connecting", "prompting", "listening", "transcribing",
+        "idle", "connecting", "prompting", "listening", "transcribing", "timed_out",
     };
     return stage >= CONVERSATION_LOCAL_STAGE_IDLE &&
-                   stage <= CONVERSATION_LOCAL_STAGE_TRANSCRIBING
+                   stage <= CONVERSATION_LOCAL_STAGE_TIMED_OUT
                ? values[stage]
                : "invalid";
 }

@@ -406,6 +406,11 @@ error
 
 Event Bus 只作为进程内部解耦机制。跨 P4、Agent、HA 的边界应称为 Device Protocol/Event Stream，不能假设 in-process Event Bus 提供持久性或 exactly-once。
 
+当前 v2 Cat 与 v3 Human Avatar 的产品接线互斥。兼容并蓄的目标方案是
+[Device Protocol v4 多角色设计](./plans/2026-09-04-device-protocol-v4-multi-actor-design.md)：
+用一个连接承载固定的 `human_avatar` 与 `cat`，以 actor-scoped 状态和动作隔离角色，并由设备对
+共享队列、对象、UI 和音频资源做确定性仲裁。该方案当前仅为 `proposed`，不能当作已实现能力。
+
 ## 10. P4 Action Queue 与状态机
 
 第一版建议队列容量固定为小值，例如 8，并明确背压：

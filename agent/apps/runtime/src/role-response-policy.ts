@@ -14,6 +14,7 @@ const DEVICE_ACTION =
   "(?:打开|开启|关闭|关掉|启动|停止|调高|调低|调亮|调暗|设置|切换|控制|执行)";
 const PAST_MARKER = "(?:已经|曾经|之前|刚刚|刚才|已|曾|刚)";
 const STRONG_COMPLETION = "(?:成功|完成|好了|完毕)";
+const PROSPECTIVE_ACTION_COMPLETION = /^(?:还(?:是)?)?(?:需要|需由|要由|应由|得由|必须由|将由|将会|会由|须由)/u;
 const NEGATION_BEFORE_ACTION = /(?:没有|并未|不曾|没|未)/u;
 const INTENT_BEFORE_ACTION = /(?:想要?|打算|准备|计划|询问|能否|可以|怎么|如何)/u;
 const QUESTION_SIGNAL = /[?？]|(?:什么|哪个|哪一个|哪种|哪台|哪盏|是否)/u;
@@ -77,7 +78,8 @@ function hasStructuredDeviceExecutionClaim(text: string): boolean {
       const intentContext = actionContext.replace(/(?:按|按照)计划/gu, "");
       if (INTENT_BEFORE_ACTION.test(intentContext)) continue;
       const explicitCompletion = /^(?:了|过|成功|完成)/u.test(after)
-        || deviceThenCompletion.test(after);
+        || (!PROSPECTIVE_ACTION_COMPLETION.test(clause.slice(semanticPairEnd))
+          && deviceThenCompletion.test(after));
       if (
         explicitCompletion
         || strongCompletionPattern.test(before)

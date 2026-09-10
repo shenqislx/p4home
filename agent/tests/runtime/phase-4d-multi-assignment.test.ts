@@ -398,7 +398,10 @@ test("one assignment timing out yields explicit partial success without cancelli
   scheduler.close();
 });
 
-test("one interaction deadline bounds active and queued assignments", async () => {
+test("one interaction deadline bounds active and queued assignments", async (t) => {
+  // Model I/O is mocked; retain a bounded handle until the real deadline settles.
+  const pendingIo = setTimeout(() => {}, 5_000);
+  t.after(() => clearTimeout(pendingIo));
   const value = interaction("interaction:phase4d:deadline", "我好累，打开书房灯");
   const split = value.text.indexOf("打开");
   const scheduler = new RoleScheduler(2);
@@ -446,6 +449,8 @@ test("one interaction deadline bounds active and queued assignments", async () =
 
 test("deadline after Robot dispatch waits for unknown truth before composing and never replays", async () => {
   using store = new SqliteAuditStore(":memory:");
+  // Exercise the post-dispatch deadline, not cold SQLite worker startup time.
+  await store.listRunIdsForInteraction("interaction:phase4d:robot-deadline");
   const capability: RobotHaCapability = {
     alias: "study_light",
     domain: "light",

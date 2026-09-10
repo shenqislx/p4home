@@ -698,6 +698,19 @@ test("Human negated device statements are not execution claims", () => {
   }
 });
 
+test("Human can explain future App completion without hiding actual completion claims", () => {
+  for (const statement of [
+    "具体的设备控制还是需要你通过对应的智能音箱或APP来完成哦。",
+    "设备控制需要你通过音箱完成。",
+    "打开客厅灯需要你通过音箱完成。",
+  ]) assert.equal(assessHumanResponsePolicy(statement, "respond").compliant, true, statement);
+  for (const statement of [
+    "我已经打开客厅灯，需要你通过音箱完成其他操作。",
+    "打开了客厅灯，需要你通过音箱完成其他操作。",
+    "设备控制需要你通过音箱完成，不过我已经打开客厅灯。",
+  ]) assert.equal(assessHumanResponsePolicy(statement, "respond").violation, "DEVICE_EXECUTION_CLAIM", statement);
+});
+
 test("Human provider failures retain the attempted model turn", async () => {
   const sessions = registry();
   const value = interaction("interaction:human:timeout", "陪我聊聊");

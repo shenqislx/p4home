@@ -260,3 +260,24 @@ test("provider identity and PCM geometry are revalidated and malformed PCM is wi
   );
   assert.ok(generated.every((sample) => sample === 0));
 });
+
+test("Human avatar completion can speak with Human voice and cannot become Robot evidence", async () => {
+  const provider = new FakeTtsProvider();
+  const response: ComposedRoleResponse = {
+    schema_version: 1, status: "completed", text: "已到书房。",
+    parts: [{
+      assignment_id: "avatar:1", role_id: "human", source_span: { start: 0, end: 5 },
+      status: "completed", outcome: "response", text: "已到书房。", error_code: null,
+      tool_results: [{ schema_version: 3, tool_call_id: "avatar:move:1", name: "character.go_to_room",
+        status: "success", result: { room_id: "study" }, error: null }],
+    }],
+  };
+  const result = await new RoleAwareTtsPipeline(provider).render("voice:avatar:1", response);
+  assert.equal(provider.requests[0]?.role_id, "human");
+  assert.equal(provider.requests[0]?.text, "已到书房。");
+  assert.deepEqual(result.segments[0]?.robot_tool_terminals, []);
+  const invalid = structuredClone(response);
+  Object.assign(invalid.parts[0]!.tool_results[0]!, { result: { room_id: "unknown" } });
+  await assert.rejects(new RoleAwareTtsPipeline(new FakeTtsProvider()).render("voice:avatar:2", invalid),
+    (error: unknown) => error instanceof RoleAwareTtsError && error.code === "INVALID_COMPOSITION");
+});

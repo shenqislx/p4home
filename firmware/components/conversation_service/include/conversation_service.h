@@ -31,6 +31,7 @@ typedef enum {
     CONVERSATION_LOCAL_STAGE_PROMPTING,
     CONVERSATION_LOCAL_STAGE_LISTENING,
     CONVERSATION_LOCAL_STAGE_TRANSCRIBING,
+    CONVERSATION_LOCAL_STAGE_TIMED_OUT,
 } conversation_local_stage_t;
 
 typedef enum {
@@ -77,6 +78,9 @@ typedef void (*conversation_rendered_fn)(const conversation_update_t *update, vo
 esp_err_t conversation_service_init(void);
 esp_err_t conversation_service_apply(const conversation_update_t *update);
 esp_err_t conversation_service_set_local_stage(conversation_local_stage_t stage);
+esp_err_t conversation_service_begin_capture(uint32_t epoch);
+/* Called with monotonic time; expires only recognition UI, never playback. */
+bool conversation_service_check_recognition_timeout(int64_t now_us);
 esp_err_t conversation_service_add_observer(conversation_observer_fn observer, void *context);
 esp_err_t conversation_service_set_rendered_observer(conversation_rendered_fn observer,
                                                      void *context);

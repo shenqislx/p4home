@@ -426,3 +426,5 @@ export function parseStructuredOutput<T = unknown>(
   }
   return value as T;
 }
+
+export * from "./multi-actor-contracts.ts";

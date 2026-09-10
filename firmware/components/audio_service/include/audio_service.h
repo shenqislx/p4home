@@ -42,6 +42,8 @@ esp_err_t audio_service_write_speaker_samples(const audio_service_lease_t *lease
                                               const int16_t *samples,
                                               size_t sample_count,
                                               audio_service_speaker_snapshot_t *snapshot);
+/** Drain queued PCM before a successful close; cancellation should skip this. */
+esp_err_t audio_service_drain_speaker_stream(const audio_service_lease_t *lease);
 esp_err_t audio_service_end_speaker_stream(audio_service_lease_t *lease);
 void audio_service_get_speaker_snapshot(audio_service_speaker_snapshot_t *snapshot);
 void audio_service_get_microphone_snapshot(audio_service_microphone_snapshot_t *snapshot);

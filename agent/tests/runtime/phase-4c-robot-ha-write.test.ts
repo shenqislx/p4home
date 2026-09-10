@@ -406,6 +406,51 @@ async function runDirect(
   });
 }
 
+test("Robot independently vetoes negated writes even if a caller bypasses the Router", async () => {
+  for (const text of ["不要打开客厅灯", "别关客厅灯", "不要把客厅灯打开"]) {
+    const client = new FakeWriteClient();
+    let rejected = 0;
+    const result = await runRobotHaWrite({
+      run_id: "negated:write",
+      messages: [{ role: "system", content: "Robot test" }, { role: "user", content: text }],
+      profile: getRoleProfile("robot"),
+      provider: { async chat() { return toolResponse("home.turn_on", "living_room_main_light"); } },
+      client,
+      audit: directAudit({ async modelToolRejected() { rejected++; } }),
+    });
+    assert.equal(result.status, "completed");
+    assert.equal(rejected, 1);
+    assert.equal(client.writes.length, 0);
+    assert.equal(client.reconciliations, 0);
+    assert.deepEqual(result.tool_results, []);
+  }
+});
+
+test("Robot requires a target for generic light writes when multiple lights are available", async () => {
+  class MultiLightClient extends FakeWriteClient {
+    public override readonly capabilities: readonly RobotHaCapability[] = [...CAPABILITIES, {
+      alias: "study_light", domain: "light" as const, readable: true,
+      write_actions: ["turn_on" as const, "turn_off" as const],
+    }];
+  }
+  for (const text of ["打开灯", "请关闭灯光", "帮我把灯打开", "打开客厅灯", "打开所有灯"]) {
+    const client = new MultiLightClient();
+    let rejected = 0;
+    const result = await runRobotHaWrite({
+      run_id: "ambiguous:write",
+      messages: [{ role: "system", content: "Robot test" }, { role: "user", content: text }],
+      profile: getRoleProfile("robot"),
+      provider: { async chat() { return toolResponse("home.turn_on", "living_room_main_light"); } },
+      client,
+      audit: directAudit({ async modelToolRejected() { rejected++; } }),
+    });
+    const ambiguous = !["打开客厅灯", "打开所有灯"].includes(text);
+    assert.equal(result.status, "completed");
+    assert.equal(rejected, ambiguous ? 1 : 0, text);
+    assert.equal(client.writes.length, ambiguous ? 0 : 1, text);
+  }
+});
+
 test("Robot exposes only capability-derived low-risk tools and completes only after state observation", async () => {
   using store = new SqliteAuditStore(":memory:");
   const client = new FakeWriteClient();

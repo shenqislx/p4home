@@ -50,6 +50,9 @@ typedef enum {
 static lv_obj_t *s_actor;
 static lv_obj_t *s_actor_shadow;
 static lv_obj_t *s_pet;
+static lv_obj_t *s_pet_caption;
+static uint32_t s_pet_speech_revision;
+static uint16_t s_pet_caption_ticks;
 static lv_obj_t *s_dialog_panel;
 static lv_obj_t *s_dialog_label;
 static lv_obj_t *s_dialog_cursor;
@@ -107,6 +110,8 @@ static uint16_t s_pet_idle_ticks_remaining;
 static uint32_t s_pet_target_revision;
 static bool s_pet_has_waypoint;
 static bool s_pet_moving;
+static bool s_pet_authoritative;
+static world_activity_t s_pet_activity;
 static uint8_t s_pet_frame;
 
 static char s_dialog_full[UI_ACTOR_DIALOG_TEXT_MAX];
@@ -455,6 +460,10 @@ static void ui_home_actor_place_pet(void)
         return;
     }
     ui_pixel_fx_sprite_move(s_pet, s_pet_pos.x, s_pet_pos.y);
+    if (s_pet_caption != NULL) {
+        int16_t x = s_pet_pos.x > 100 ? 100 : s_pet_pos.x;
+        lv_obj_set_pos(s_pet_caption, UI_PX(x), UI_PX(s_pet_pos.y - 12));
+    }
 }
 
 static void ui_home_actor_pet_choose_target(void)
@@ -487,11 +496,41 @@ static void ui_home_actor_pet_choose_target(void)
     s_pet_moving = true;
 }
 
+static void ui_home_actor_apply_cat_snapshot(const world_service_snapshot_t *snapshot)
+{
+    if (!snapshot->multi_actor) return;
+    s_pet_authoritative = true;
+    s_pet_activity = snapshot->activity;
+    if (s_pet_caption != NULL && snapshot->speech_revision != s_pet_speech_revision) {
+        s_pet_speech_revision = snapshot->speech_revision;
+        lv_label_set_text(s_pet_caption, snapshot->speech_text);
+        s_pet_caption_ticks = snapshot->speech_text[0] == '\0' ? 0U : 80U;
+        if (s_pet_caption_ticks > 0U) lv_obj_remove_flag(s_pet_caption, LV_OBJ_FLAG_HIDDEN);
+    }
+    ui_actor_point_t target = ui_home_actor_pet_room_target(snapshot->room, 0U);
+    if (snapshot->target_object_id[0] != '\0') {
+        target.x = snapshot->character_art_x;
+        target.y = (int16_t)(snapshot->character_floor_y - UI_ACTOR_PET_ART_H);
+    }
+    if (target.x == s_pet_target.x && target.y == s_pet_target.y && s_pet_target_room == snapshot->room) return;
+    s_pet_target = target;
+    s_pet_target_room = snapshot->room;
+    s_pet_target_revision++;
+    s_pet_idle_ticks_remaining = 0U;
+    s_pet_has_waypoint = s_pet_target.y != s_pet_pos.y;
+    s_pet_waypoint.x = UI_ACTOR_STAIR_X;
+    s_pet_waypoint.y = s_pet_target.y;
+    s_pet_moving = s_pet_pos.x != target.x || s_pet_pos.y != target.y;
+}
+
 static void ui_home_actor_advance_pet(uint32_t tick)
 {
+    if (s_pet_caption_ticks > 0U && --s_pet_caption_ticks == 0U && s_pet_caption != NULL)
+        lv_obj_add_flag(s_pet_caption, LV_OBJ_FLAG_HIDDEN);
     if (s_pet == NULL) {
         return;
     }
+    if (!s_pet_moving && s_pet_authoritative) return;
     if (!s_pet_moving) {
         if (s_pet_idle_ticks_remaining > 0U) {
             s_pet_idle_ticks_remaining--;
@@ -657,7 +696,8 @@ static bool ui_home_actor_tick(uint32_t tick, void *user_data)
 
 actor_tick_complete:
     ui_home_actor_advance_pet(tick);
-    if ((tick % 4U) == 0U && s_pet != NULL) {
+    if ((tick % 4U) == 0U && s_pet != NULL &&
+        (!s_pet_authoritative || s_pet_activity != WORLD_ACTIVITY_SLEEP)) {
         s_pet_frame = (uint8_t)((s_pet_frame + 1U) % PET_IDLE_FRAME_COUNT);
         ui_pixel_fx_sprite_set_src(s_pet, s_pet_frames[s_pet_frame]);
     }
@@ -727,6 +767,8 @@ esp_err_t ui_home_actor_create(lv_obj_t *house)
     s_target = s_pos;
     /* Cat owns an independent firmware-local state. Never seed it from the
      * Human snapshot, even when the Human reconnects in another room. */
+    s_pet_authoritative = snapshot.multi_actor;
+    s_pet_activity = WORLD_ACTIVITY_IDLE;
     s_pet_room = WORLD_ROOM_LIVING_ROOM;
     s_pet_target_room = WORLD_ROOM_LIVING_ROOM;
     s_pet_target_revision = 0U;
@@ -752,6 +794,18 @@ esp_err_t ui_home_actor_create(lv_obj_t *house)
 
     s_pet = ui_pixel_fx_sprite(house, &pet_idle_0, s_pet_pos.x, s_pet_pos.y);
     ESP_RETURN_ON_FALSE(s_pet != NULL, ESP_ERR_NO_MEM, TAG, "pet alloc failed");
+    s_pet_speech_revision = 0U;
+    s_pet_caption_ticks = 0U;
+    s_pet_caption = lv_label_create(house);
+    ESP_RETURN_ON_FALSE(s_pet_caption != NULL, ESP_ERR_NO_MEM, TAG, "pet caption alloc failed");
+    lv_obj_set_width(s_pet_caption, UI_PX(70));
+    lv_label_set_long_mode(s_pet_caption, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_style_text_font(s_pet_caption, ui_pages_text_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_pet_caption, lv_color_hex(UI_PAL_INK), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_pet_caption, lv_color_hex(UI_PAL_PANEL), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_pet_caption, LV_OPA_COVER, LV_PART_MAIN);
+    lv_label_set_text(s_pet_caption, "");
+    lv_obj_add_flag(s_pet_caption, LV_OBJ_FLAG_HIDDEN);
 
     ui_home_actor_place();
     ui_home_actor_set_render_state(
@@ -843,6 +897,11 @@ static void ui_home_actor_set_render_state(ui_actor_render_state_t state)
 
 void ui_home_actor_apply_snapshot(const world_service_snapshot_t *snapshot)
 {
+    if (snapshot != NULL && snapshot->multi_actor) {
+        world_service_snapshot_t cat = {0};
+        world_service_get_actor_snapshot(WORLD_ACTOR_CAT, &cat);
+        ui_home_actor_apply_cat_snapshot(&cat);
+    }
     size_t room_index = 0U;
     if (snapshot == NULL || s_actor == NULL ||
         !ui_home_actor_room_index(snapshot->room, &room_index)) {
@@ -948,6 +1007,8 @@ void ui_home_actor_apply_conversation(const conversation_snapshot_t *snapshot)
             text = "在呢，请说话…";
         } else if (snapshot->local_stage == CONVERSATION_LOCAL_STAGE_TRANSCRIBING) {
             text = "正在识别…";
+        } else if (snapshot->local_stage == CONVERSATION_LOCAL_STAGE_TIMED_OUT) {
+            text = "识别超时，请重新唤醒后再说一次。";
         }
         ui_home_actor_say(text, UI_PAL_ACCENT_VIOLET, false);
         s_dialog_is_conversation = true;

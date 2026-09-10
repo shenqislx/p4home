@@ -22,12 +22,13 @@ import {
 import { SqliteAuditStore } from "@p4home/storage-sqlite";
 import { RobotHaClient, loadRobotHaRuntimeConfig } from "@p4home/transport-ha";
 
-import { DEFAULT_OLLAMA_MODEL, PRODUCT_OLLAMA_KEEP_ALIVE } from "./model-config.ts";
+import { DEFAULT_OLLAMA_MODEL, resolveProductOllamaKeepAlive } from "./model-config.ts";
 import { CatAutonomyControlServer } from "./cat-autonomy-control-server.ts";
 import {
   parseProductCatAutonomyConfig,
   ProductCatAutonomyRuntime,
 } from "./product-cat-autonomy.ts";
+import { MultiActorDeviceRuntimeHub } from "./multi-actor-device-runtime.ts";
 import { DeviceRuntimeHub } from "./device-websocket-server.ts";
 import type { DeviceActionSpec } from "./device-action-adapter.ts";
 import type { HumanAvatarDeviceRuntime } from "./human-avatar-action-runner.ts";
@@ -151,7 +152,7 @@ async function main(): Promise<void> {
   let store: SqliteAuditStore | null = null;
   let haClient: RobotHaClient | null = null;
   let scheduler: RoleScheduler | null = null;
-  let deviceHub: DeviceRuntimeHub | null = null;
+  let deviceHub: DeviceRuntimeHub | MultiActorDeviceRuntimeHub | null = null;
   let autonomy: ProductCatAutonomyRuntime | null = null;
   let autonomyControl: CatAutonomyControlServer | null = null;
   let autonomyControlTokenBytes: Buffer | null = null;
@@ -169,7 +170,7 @@ async function main(): Promise<void> {
       model,
       baseUrl: process.env.OLLAMA_BASE_URL?.trim() || "http://127.0.0.1:11434",
       requestTimeoutMs: modelTimeoutMs,
-      defaultKeepAlive: PRODUCT_OLLAMA_KEEP_ALIVE,
+      defaultKeepAlive: resolveProductOllamaKeepAlive(process.env.P4HOME_OLLAMA_KEEP_ALIVE_MINUTES),
     });
     const capabilities = await provider.probe();
     if (!capabilities.modelAvailable || !capabilities.toolCalling) {
@@ -220,100 +221,91 @@ async function main(): Promise<void> {
     });
     const catRunRegistry = new LowPriorityCatRunRegistry();
     const autonomyEnabled = optionalFlag("P4HOME_CAT_AUTONOMY_ENABLED");
-    if (!robotEnabled && autonomyEnabled) {
-      throw new Error("cat_autonomy_disabled_in_human_avatar_mode");
-    }
+    const deviceProtocolVersion = optionalInteger("P4HOME_DEVICE_PROTOCOL_VERSION", 3, 3, 4);
     let autonomyDevicePort: number | null = null;
     let humanAvatarDevicePort: number | null = null;
     let autonomyControlPort: number | null = null;
     let humanAvatar: HumanAvatarDeviceRuntime | null = null;
-    if (!autonomyEnabled) {
-      deviceHub = new DeviceRuntimeHub({
-        server: {
-          host: process.env.P4HOME_DEVICE_HOST?.trim()
-            || process.env.P4HOME_AGENT_HOST?.trim()
-            || "0.0.0.0",
-          port: optionalInteger("P4HOME_DEVICE_PORT", 18_444, 1, 65_535),
-          tls: { key, cert },
-          device_tokens: { [deviceId]: deviceToken },
-          max_connections: 1,
-        },
-        adapter: { protocol_version: 3, actor_id: "human_avatar" },
-      });
-      const hub = deviceHub;
-      const adapter = () => hub.getAdapter(deviceId);
-      humanAvatar = {
-        get is_ready() { return adapter()?.is_ready === true; },
-        get protocol_version() { return adapter()?.protocol_version ?? 3; },
-        get room_capabilities() { return adapter()?.room_capabilities ?? []; },
-        get action_capabilities() { return adapter()?.action_capabilities ?? []; },
-        get object_capabilities() { return adapter()?.object_capabilities ?? []; },
-        get last_snapshot() { return adapter()?.last_snapshot ?? null; },
-        async executeAction(spec: DeviceActionSpec) {
-          const active = adapter();
-          if (active === undefined || !active.is_ready) {
-            throw new Error("human_avatar_device_not_ready");
-          }
-          return await active.executeAction(spec);
-        },
-      };
-      const deviceAddress = await deviceHub.start();
-      humanAvatarDevicePort = deviceAddress.port;
-    } else {
-      if (haClient === null) throw new Error("cat_autonomy_requires_robot_ha_mode");
-      const configBytes = await readBoundedFile(
-        "P4HOME_CAT_AUTONOMY_CONFIG_FILE", 65_536, false,
-      );
-      let rawConfig: unknown;
+    const deviceServer = {
+      host: process.env.P4HOME_DEVICE_HOST?.trim() || process.env.P4HOME_AGENT_HOST?.trim() || "0.0.0.0",
+      port: optionalInteger("P4HOME_DEVICE_PORT", 18_444, 1, 65_535),
+      tls: { key, cert }, device_tokens: { [deviceId]: deviceToken }, max_connections: 1,
+    };
+    deviceHub = deviceProtocolVersion === 4 ? new MultiActorDeviceRuntimeHub(deviceServer)
+      : new DeviceRuntimeHub({ server: deviceServer, adapter: { protocol_version: 3, actor_id: "human_avatar" } });
+    const hub = deviceHub;
+    const adapter = () => hub instanceof MultiActorDeviceRuntimeHub
+      ? hub.getActorAdapter(deviceId, "human_avatar") : hub.getAdapter(deviceId);
+    humanAvatar = {
+      get is_ready() { return adapter()?.is_ready === true; },
+      get protocol_version() { return adapter()?.protocol_version ?? 3; },
+      get room_capabilities() { return adapter()?.room_capabilities ?? []; },
+      get action_capabilities() { return adapter()?.action_capabilities ?? []; },
+      get object_capabilities() { return adapter()?.object_capabilities ?? []; },
+      get last_snapshot() { return adapter()?.last_snapshot ?? null; },
+      async executeAction(spec: DeviceActionSpec) {
+        const active = adapter();
+        if (active === undefined || !active.is_ready) {
+          throw new Error("human_avatar_device_not_ready");
+        }
+        return await active.executeAction(spec);
+      },
+    };
+    const deviceAddress = await deviceHub.start();
+    humanAvatarDevicePort = deviceAddress.port;
+    if (autonomyEnabled) {
       try {
-        rawConfig = JSON.parse(configBytes.toString("utf8"));
-      } catch {
-        throw new Error("p4home_cat_autonomy_config_file_is_not_valid_json");
+        if (deviceProtocolVersion !== 4) throw new Error("cat_requires_multi_actor_protocol_v4");
+        if (haClient === null) throw new Error("cat_autonomy_requires_robot_ha_mode");
+        const configBytes = await readBoundedFile(
+          "P4HOME_CAT_AUTONOMY_CONFIG_FILE", 65_536, false,
+        );
+        let rawConfig: unknown;
+        try {
+          rawConfig = JSON.parse(configBytes.toString("utf8"));
+        } catch {
+          throw new Error("p4home_cat_autonomy_config_file_is_not_valid_json");
+        }
+        const autonomyConfig = parseProductCatAutonomyConfig(rawConfig, haClient.listStates());
+        autonomy = new ProductCatAutonomyRuntime({
+          device_id: deviceId,
+          device_hub: (deviceHub as MultiActorDeviceRuntimeHub).forActor("cat"),
+          ha_client: haClient,
+          config: autonomyConfig,
+          provider,
+          scheduler,
+          audit_store: store,
+          memory,
+          cat_run_registry: catRunRegistry,
+          on_log: (record) => process.stdout.write(`${JSON.stringify(record)}\n`),
+        });
+        autonomyControlTokenBytes = await readBoundedFile(
+          "P4HOME_CAT_AUTONOMY_CONTROL_TOKEN_FILE", 4_096, true,
+        );
+        const trimmedControlToken = Buffer.from(
+          autonomyControlTokenBytes.toString("utf8").trim(),
+          "utf8",
+        );
+        autonomyControl = new CatAutonomyControlServer({
+          host: "127.0.0.1",
+          port: optionalInteger("P4HOME_CAT_AUTONOMY_CONTROL_PORT", 9_477, 1, 65_535),
+          token: trimmedControlToken,
+          target: autonomy,
+        });
+        trimmedControlToken.fill(0);
+        autonomyDevicePort = humanAvatarDevicePort;
+        autonomy.start();
+        const controlAddress = await autonomyControl.start();
+        autonomyControlPort = controlAddress.port;
+      } catch (error) {
+        await autonomyControl?.close().catch(() => undefined);
+        autonomyControl = null;
+        await autonomy?.close().catch(() => undefined);
+        autonomy = null;
+        autonomyControlPort = null;
+        autonomyDevicePort = null;
+        process.stderr.write(`${JSON.stringify({ event: "cat_autonomy_disabled", reason: error instanceof Error ? error.message : "configuration_error", human_preserved: true })}\n`);
       }
-      const autonomyConfig = parseProductCatAutonomyConfig(rawConfig, haClient.listStates());
-      deviceHub = new DeviceRuntimeHub({
-        server: {
-          host: process.env.P4HOME_DEVICE_HOST?.trim()
-            || process.env.P4HOME_AGENT_HOST?.trim()
-            || "0.0.0.0",
-          port: optionalInteger("P4HOME_DEVICE_PORT", 8_444, 1, 65_535),
-          tls: { key, cert },
-          device_tokens: { [deviceId]: deviceToken },
-          max_connections: 1,
-        },
-        adapter: { protocol_version: 2 },
-      });
-      autonomy = new ProductCatAutonomyRuntime({
-        device_id: deviceId,
-        device_hub: deviceHub,
-        ha_client: haClient,
-        config: autonomyConfig,
-        provider,
-        scheduler,
-        audit_store: store,
-        memory,
-        cat_run_registry: catRunRegistry,
-        on_log: (record) => process.stdout.write(`${JSON.stringify(record)}\n`),
-      });
-      autonomyControlTokenBytes = await readBoundedFile(
-        "P4HOME_CAT_AUTONOMY_CONTROL_TOKEN_FILE", 4_096, true,
-      );
-      const trimmedControlToken = Buffer.from(
-        autonomyControlTokenBytes.toString("utf8").trim(),
-        "utf8",
-      );
-      autonomyControl = new CatAutonomyControlServer({
-        host: "127.0.0.1",
-        port: optionalInteger("P4HOME_CAT_AUTONOMY_CONTROL_PORT", 9_477, 1, 65_535),
-        token: trimmedControlToken,
-        target: autonomy,
-      });
-      trimmedControlToken.fill(0);
-      const deviceAddress = await deviceHub.start();
-      autonomyDevicePort = deviceAddress.port;
-      autonomy.start();
-      const controlAddress = await autonomyControl.start();
-      autonomyControlPort = controlAddress.port;
     }
     const processId = randomUUID().replaceAll("-", "").slice(0, 16);
     const dispatcher = new UnifiedVoiceRoleDispatcher({
@@ -379,6 +371,9 @@ async function main(): Promise<void> {
       device_tokens: { [deviceId]: deviceToken },
       stt: {
         provider: sttProvider,
+        on_result: (result) => {
+          process.stdout.write(`${JSON.stringify({ event: "voice_capture_terminal", ...result })}\n`);
+        },
         stt_timeout_ms: optionalInteger(
           "P4HOME_STT_TIMEOUT_MS", 120_000, 1_000, 120_000,
         ),
@@ -425,7 +420,8 @@ async function main(): Promise<void> {
       ui_output: "required",
       audio_output: "required",
       raw_audio_retained: false,
-      cat_autonomy_enabled: autonomyEnabled,
+      cat_autonomy_enabled: autonomy !== null,
+      device_protocol_version: deviceProtocolVersion,
       cat_autonomy_ready: autonomy?.getStatus().product_ready ?? false,
       cat_autonomy_device_port: autonomyDevicePort,
       human_avatar_enabled: humanAvatar !== null,

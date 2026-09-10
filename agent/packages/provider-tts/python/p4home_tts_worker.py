@@ -6,15 +6,12 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
-import hashlib
 import json
 import os
 import pathlib
 import re
 import runpy
 import sys
-
-import numpy as np
 
 # Model libraries may print while their lazy generators are being advanced.
 # Keep protocol output pinned to the original stdout so redirecting provider
@@ -28,74 +25,34 @@ BOUNDS = runpy.run_path(str(BOUNDS_PATH))
 MAX_PCM_BYTES = BOUNDS["MAX_PCM_BYTES"]
 checked_source_total = BOUNDS["checked_source_total"]
 
+# The provider launches Python with -I, so sibling imports are deliberately
+# unavailable. Load only the fixed repository file, just like the bounds module.
+MODEL_PATH = pathlib.Path(__file__).resolve().with_name("prepare_model.py")
+if not MODEL_PATH.is_file() or MODEL_PATH.is_symlink():
+    raise SystemExit("TTS model verifier is unavailable")
+MODEL = runpy.run_path(str(MODEL_PATH))
+MODEL_ID = MODEL["MODEL_ID"]
+MODEL_REVISION = MODEL["MODEL_REVISION"]
+PROVIDER_VERSION = MODEL["PROVIDER_VERSION"]
+verified_manifest = MODEL["verified_manifest"]
+
 WORKER_SCHEMA_VERSION = 2
 MAX_REQUEST_BYTES = 8_192
 MAX_TEXT_CHARS = 1_024
 PCM_CHUNK_BYTES = 640
 MAX_CLAUSE_CHARS = 80
 SOFT_CLAUSE_CHARS = 24
-MODEL_ID = "mlx-community/Kokoro-82M-bf16"
-MODEL_REVISION = "a71e4d38b236d968966a2002c4c895dbd12b1c3c"
-PROVIDER_VERSION = "0.4.8"
-REQUIRED_FILES = (
-    "config.json",
-    "kokoro-v1_0.safetensors",
-    "voices/zf_xiaobei.safetensors",
-    "voices/zm_yunxi.safetensors",
-)
-ROLE_VOICES = {"human": "zf_xiaobei", "robot": "zm_yunxi"}
+ROLE_VOICES = {"human": "zf_xiaoxiao", "robot": "zf_xiaobei"}
 CONTRACT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 STRONG_BOUNDARIES = frozenset("。！？!?；;：:\n")
 SOFT_BOUNDARIES = frozenset("，,、")
 
 
-def sha256(path: pathlib.Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def model_verified(model: pathlib.Path) -> bool:
-    try:
-        voices = model / "voices"
-        if (
-            not model.is_dir()
-            or model.is_symlink()
-            or {entry.name for entry in model.iterdir()}
-            != {"config.json", "kokoro-v1_0.safetensors", "voices", "p4home-model-manifest.json"}
-            or not voices.is_dir()
-            or voices.is_symlink()
-            or {entry.name for entry in voices.iterdir()}
-            != {"zf_xiaobei.safetensors", "zm_yunxi.safetensors"}
-        ):
-            return False
-        manifest_path = model / "p4home-model-manifest.json"
-        if not manifest_path.is_file() or manifest_path.is_symlink():
-            return False
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if (
-            manifest.get("schema_version") != 1
-            or manifest.get("provider") != "mlx-audio"
-            or manifest.get("provider_version") != PROVIDER_VERSION
-            or manifest.get("model_id") != MODEL_ID
-            or manifest.get("revision") != MODEL_REVISION
-            or not isinstance(manifest.get("files"), dict)
-        ):
-            return False
-        for name in REQUIRED_FILES:
-            path = model / name
-            if (
-                not path.is_file()
-                or path.is_symlink()
-                or manifest["files"].get(name) != sha256(path)
-            ):
-                return False
-        return True
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
-        return False
+    # Startup and installation must trust the same pinned hashes, not merely a
+    # self-consistent manifest supplied alongside potentially corrupt weights.
+    return verified_manifest(model) is not None
 
 
 def emit(value: dict[str, object]) -> None:
@@ -182,6 +139,8 @@ def split_text_for_streaming(text: str) -> list[str]:
 
 def downsample_24k_to_16k(audio: np.ndarray) -> np.ndarray:
     """Apply deterministic polyphase anti-alias filtering at the exact 2/3 ratio."""
+    import numpy as np
+
     if audio.ndim != 1 or audio.size < 2 or not np.isfinite(audio).all():
         raise ValueError("invalid provider audio")
     from scipy.signal import resample_poly
@@ -193,6 +152,8 @@ def downsample_24k_to_16k(audio: np.ndarray) -> np.ndarray:
 
 
 def synthesize(model: object, model_path: pathlib.Path, request: dict[str, object]) -> None:
+    import numpy as np
+
     source_samples = 0
     output_bytes = 0
     output_samples = 0

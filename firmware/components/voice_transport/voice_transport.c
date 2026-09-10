@@ -808,7 +808,9 @@ static void voice_handle_ws_data(const esp_websocket_event_data_t *data)
     }
     memcpy(s_voice.rx_control + offset, data->data_ptr, length);
     s_voice.rx_received += length;
-    if (data->fin || s_voice.rx_received == s_voice.rx_expected) {
+    /* FIN belongs to the WebSocket frame, not the client's receive-buffer
+     * chunk: a >1024-byte final frame has FIN on every callback. */
+    if (s_voice.rx_received == s_voice.rx_expected) {
         if (s_voice.rx_binary) {
             voice_playback_snapshot_t playback;
             voice_playback_receiver_get_snapshot(&playback);
@@ -998,6 +1000,7 @@ static bool voice_begin_capture(void *context, uint64_t started_at_us)
     }
     taskEXIT_CRITICAL(&s_voice.lock);
     if (accepted) {
+        (void)conversation_service_begin_capture(accepted_epoch);
         ESP_LOGW(TAG, "capture opened epoch=%" PRIu32, accepted_epoch);
     } else {
         voice_playback_receiver_capture_finished();

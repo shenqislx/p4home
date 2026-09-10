@@ -1,3 +1,4 @@
+import { validateHumanAvatarToolResult } from "@p4home/contracts";
 import {
   TTS_CHANNELS,
   TTS_MAX_PCM_BYTES,
@@ -62,8 +63,12 @@ export class RoleAwareTtsError extends Error {
 
 function terminalMetadata(part: ComposedResponsePart): RoleAwareTtsSegment["robot_tool_terminals"] {
   if (part.role_id === "human") {
-    if (part.tool_results.length !== 0) {
-      throw new RoleAwareTtsError("INVALID_COMPOSITION", "Human TTS part cannot contain tool terminals");
+    try {
+      // Avatar actions belong to Human's body. They may support a spoken
+      // completion, but must never be relabelled as Robot / HA terminals.
+      for (const terminal of part.tool_results) validateHumanAvatarToolResult(terminal);
+    } catch {
+      throw new RoleAwareTtsError("INVALID_COMPOSITION", "Human TTS accepts only validated avatar terminals");
     }
     return [];
   }

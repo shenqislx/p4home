@@ -711,7 +711,8 @@ static void ui_page_home_apply_conversation_presence(
 {
     if (snapshot->local_stage != CONVERSATION_LOCAL_STAGE_IDLE) {
         if (snapshot->local_revision != s_world_local_conversation_revision) {
-            (void)world_service_set_user_interaction_active(true);
+            (void)world_service_set_user_interaction_active(
+                snapshot->local_stage != CONVERSATION_LOCAL_STAGE_TIMED_OUT);
             s_world_local_conversation_revision = snapshot->local_revision;
         }
         return;

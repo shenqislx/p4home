@@ -27,6 +27,17 @@
 - 想看当前构建实际使用了哪些配置时，查看 `sdkconfig`
 - 不要把 `sdkconfig` 当作当前阶段的主维护入口
 
+WebSocket 兼容性修复：
+
+- 固定 ESP-IDF v5.5.4 的 `transport_ws.c` 会保存 HTTP Upgrade 响应之后的 WebSocket 字节，
+  但 poll/read-header 两个入口仍只等待底层 socket，可能让 HA 的首个 `auth_required` 停在
+  缓存中，直到握手超时。
+- `cmake/ws-buffer-readiness.cmake` 在构建目录生成修复副本，并替换该 target 的对应源文件；
+  不修改全局 SDK 或 managed components。缓存非空时直接继续读取，缓存为空时沿用原语义。
+- `scripts/patch-idf-ws-buffer.py` 校验受测上游文件 SHA-256；升级 SDK 或文件变化时构建拒绝
+  自动套用旧补丁，需重新 review。确定性回归：
+  `python3 -m unittest tests.harness.test_ws_buffer_readiness`（仓库根目录，需本机 ESP-IDF 源码）。
+
 后续优先开发顺序：
 
 1. `board_support`

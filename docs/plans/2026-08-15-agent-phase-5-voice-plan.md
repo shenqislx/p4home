@@ -20,6 +20,21 @@
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用
 
+### 2026-09-09 当前补充门禁
+
+- 最新收尾结果：HA 首次就绪、STT 超时 failed UI/applied、下一轮无重启恢复和 60 秒观察
+  的机器证据已通过，见[实机记录](../../evidence/agent-phase-5/2026-09-09-closure-hardware.md)。
+  设备本地 125 秒兜底未在该轮触发，真人提示/屏幕/尾音仍待确认。用户明确认为 LLM 加载过慢，
+  当前转为更小 Qwen3 模型的响应速度与既有功能门禁对比，Phase 5 不关闭。
+- 2026-09-05 的 Human-only 长回复已获得机器声学链路证据，但识别失败终态后的再次唤醒仍为
+  `inconclusive`，见[失败恢复记录](../../evidence/agent-phase-5/2026-09-05-recognition-recovery.md)。
+- 本轮补修识别 UI 的同轮期限续期与迟到状态回退，覆盖本地/远端通知交错、重复 begin、
+  超时后的真实 Agent 进展和新 epoch 恢复。证据见
+  [2026-09-09 本地验证](../../evidence/agent-phase-5/2026-09-09-recognition-deadline.md)。
+- 实机退出条件：同一受测版本上出现失败或超时提示，随后无需重启重新唤醒并完成正常对话，
+  观察窗口内没有旧 epoch 回退、panic/watchdog 或遗留暂停的 STT 进程。机器证据与真人观察
+  分别记录；响应体验、长停顿句与既有延期项继续保留。
+
 ## 1. 目标
 
 建立 ESP-SR wake/AFE → P4 音频上行 → STT → 统一 Role Router → Human/Robot Run →
@@ -241,7 +256,7 @@ capture/STT/LLM”的产品语义；同时把 5A 源码格式契约改为对空�
 状态暂不关闭。`e004870` 的首次复验 `33460199737` 已让 artifact 审计和 VAD 提前收口成立，
 但暴露 terminal credit 导致重连/STT 取消的固件竞态。首次修复 run `33461779715` 证明只覆盖
 关闭后 IDLE 不足，实际窗口是 `WAITING_CLOSE`；补充修复 run `33463393866` 已通过自动化实机
-闭环。Phase 5 当前只剩响应体感与长停顿句人工确认。详见
+闭环。当时剩余响应体感与长停顿句人工确认；后续识别失败恢复缺口见本计划顶部补充门禁。详见
 [2026-09-01 manual hardware validation](../../evidence/agent-phase-5/phase-5-manual-hardware-validation-2026-09-01.md)。
 
 退出门禁：所有 5A–5E 技术门禁与真实环境证据通过，再交由用户最终 review。workflow 绿色只证明

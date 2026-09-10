@@ -638,6 +638,27 @@ esp_err_t audio_service_write_speaker_samples(const audio_service_lease_t *lease
     return ret == ESP_CODEC_DEV_OK ? ESP_OK : ESP_FAIL;
 }
 
+esp_err_t audio_service_drain_speaker_stream(const audio_service_lease_t *lease)
+{
+    /* The pinned BSP uses six DMA descriptors, each adjusted to 256 mono
+     * samples on P4. A codec write only queues PCM. Push more than the entire
+     * 1536-sample ring as silence so the last speech sample reaches the DAC
+     * before muting. Keep this out of the speech byte/frame counters. */
+    int16_t silence[320] = {0};
+    ESP_RETURN_ON_FALSE(audio_service_lock_output(), ESP_ERR_NO_MEM, TAG,
+                        "speaker I/O mutex unavailable");
+    if (!s_speaker_stream_open || !audio_service_lease_is_current(lease)) {
+        audio_service_unlock_output();
+        return ESP_ERR_INVALID_STATE;
+    }
+    int ret = ESP_CODEC_DEV_OK;
+    for (size_t frame = 0; frame < 6U && ret == ESP_CODEC_DEV_OK; ++frame) {
+        ret = esp_codec_dev_write(s_speaker_codec, silence, sizeof(silence));
+    }
+    audio_service_unlock_output();
+    return ret == ESP_CODEC_DEV_OK ? ESP_OK : ESP_FAIL;
+}
+
 esp_err_t audio_service_end_speaker_stream(audio_service_lease_t *lease)
 {
     ESP_RETURN_ON_FALSE(audio_service_lock_output(), ESP_ERR_NO_MEM, TAG,

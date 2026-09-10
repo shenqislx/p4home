@@ -49,7 +49,8 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
         self.assertIn('PRODUCT_DEVICE_PORT="18444"', workflow)
         self.assertIn('if [[ -f "$PRODUCT_CONFIG_DIR/device-port" ]]', workflow)
         self.assertIn("P4HOME_TTS_MODEL", wrapper)
-        self.assertNotIn("P4HOME_HA_TOKEN_FILE", wrapper)
+        self.assertIn('require_private_file "$CONFIG_DIR/role-mode"', wrapper)
+        self.assertIn('if [[ "$P4HOME_PRODUCT_ROLE_MODE" == "human-robot" ]]', wrapper)
         self.assertIn("resolveProductVoiceRoleMode", product)
         self.assertIn("human_only: true", product)
         self.assertIn("new PythonTtsProvider", product)
@@ -196,7 +197,8 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
             node.write_text(
                 "#!/bin/sh\n"
                 "if [ \"$1\" = \"--version\" ]; then echo v24.19.0; exit 0; fi\n"
-                "printf '%s' \"$P4HOME_DEVICE_PORT\" > \"$P4HOME_TEST_CAPTURE\"\n",
+                "printf '%s' \"$P4HOME_DEVICE_PORT\" > \"$P4HOME_TEST_CAPTURE\"\n"
+                "printf '%s\\n' \"$P4HOME_PRODUCT_ROLE_MODE\" \"$P4HOME_HA_TOKEN_FILE\" \"$P4HOME_CAT_AUTONOMY_ENABLED\" > \"$P4HOME_TEST_CAPTURE.roles\"\n",
                 encoding="utf-8",
             )
             node.chmod(0o700)
@@ -206,6 +208,8 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
                 "P4HOME_PRODUCT_VOICE_STATE_DIR": str(state),
                 "P4HOME_NODE_BIN": str(node),
                 "P4HOME_TEST_CAPTURE": str(capture),
+                "P4HOME_PRODUCT_ROLE_MODE": "human-robot",
+                "P4HOME_HA_TOKEN_FILE": "/must-not-inherit",
             })
             subprocess.run(
                 [str(ROOT / "scripts/run-product-human-voice.sh")],
@@ -217,6 +221,49 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
             self.assertEqual(capture.read_text(), "18444")
             self.assertFalse((config / "device-port").exists())
             self.assertEqual((config / "device-token").read_text(), "stable-token\n")
+            roles = pathlib.Path(str(capture) + ".roles")
+            self.assertEqual(roles.read_text().splitlines(), ["human-only", "", "0"])
+
+            ha = root / "ha"
+            ha.mkdir(mode=0o700)
+            for name, body in {"robot-ha.url": "https://ha.invalid", "robot-ha.token": "test-token",
+                               "robot-ha-policy.json": "{}"}.items():
+                (ha / name).write_text(body)
+                (ha / name).chmod(0o600)
+            environment["P4HOME_PRODUCT_HA_CONFIG_DIR"] = str(ha)
+            (config / "role-mode").write_text("human-robot\n")
+            (config / "role-mode").chmod(0o600)
+            command = [str(ROOT / "scripts/run-product-human-voice.sh")]
+            subprocess.run(command, check=True, env=environment, capture_output=True)
+            self.assertEqual(roles.read_text().splitlines(), ["human-robot", str(ha / "robot-ha.token"), "0"])
+            # v4 and Cat are persisted separately; unsafe Cat opt-in files are ignored.
+            (config / "device-protocol-version").write_text("4\n")
+            (config / "device-protocol-version").chmod(0o600)
+            cat_enabled = config / "cat-enabled"
+            cat_enabled.write_text("1\n")
+            cat_enabled.chmod(0o600)
+            subprocess.run(command, check=True, env=environment, capture_output=True)
+            self.assertEqual(roles.read_text().splitlines()[-1], "1")
+            cat_enabled.chmod(0o644)
+            subprocess.run(command, check=True, env=environment, capture_output=True)
+            self.assertEqual(roles.read_text().splitlines()[-1], "0")
+            cat_enabled.unlink()
+            target = root / "cat-opt-in-target"
+            target.write_text("1\n")
+            target.chmod(0o600)
+            cat_enabled.symlink_to(target)
+            subprocess.run(command, check=True, env=environment, capture_output=True)
+            self.assertEqual(roles.read_text().splitlines()[-1], "0")
+            cat_enabled.unlink()
+            for invalid_mode in ["all", "human-robot\nextra", ""]:
+                (config / "role-mode").write_text(invalid_mode)
+                self.assertNotEqual(subprocess.run(command, env=environment, capture_output=True).returncode, 0)
+            (config / "role-mode").write_text("human-robot")
+            (config / "role-mode").chmod(0o644)
+            self.assertNotEqual(subprocess.run(command, env=environment, capture_output=True).returncode, 0)
+            (config / "role-mode").chmod(0o600)
+            (ha / "robot-ha.token").unlink()
+            self.assertNotEqual(subprocess.run(command, env=environment, capture_output=True).returncode, 0)
 
     def test_rejects_invalid_endpoint_without_writing_identity(self):
         with tempfile.TemporaryDirectory() as directory:

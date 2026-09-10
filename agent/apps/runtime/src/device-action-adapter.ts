@@ -121,6 +121,10 @@ export class DeviceActionAdapterError extends Error {
 }
 
 export interface DeviceActionAdapterOptions {
+  /** Only for in-process projections already validated by the shared v4 boundary. */
+  readonly decode_projection?: (frame: string) => DeviceMessage;
+  /** Restricts an internal v4 actor projection without changing frozen wire schemas. */
+  readonly allowed_tools?: readonly DeviceToolName[];
   readonly device_id: string;
   readonly protocol_version?: DeviceProtocolVersion;
   readonly actor_id?: HumanAvatarActorId;
@@ -187,6 +191,8 @@ function sameValue(left: unknown, right: unknown): boolean {
 export class DeviceWebSocketActionAdapter {
   readonly #connection: DeviceWebSocketConnection;
   readonly #deviceId: string;
+  readonly #decodeFrame: (frame: string) => DeviceMessage;
+  readonly #allowedTools: readonly DeviceToolName[] | undefined;
   readonly #protocolVersion: DeviceProtocolVersion;
   readonly #actorId: HumanAvatarActorId | null;
   readonly #now: () => number;
@@ -216,6 +222,8 @@ export class DeviceWebSocketActionAdapter {
     if (!Number.isInteger(options.waiter_capacity ?? 16) || (options.waiter_capacity ?? 16) < 1) {
       throw new RangeError("waiter_capacity must be a positive integer");
     }
+    this.#decodeFrame = options.decode_projection ?? decodeDeviceMessage;
+    this.#allowedTools = options.allowed_tools;
     this.#connection = connection;
     this.#deviceId = options.device_id;
     this.#protocolVersion = options.protocol_version ?? 1;
@@ -275,7 +283,7 @@ export class DeviceWebSocketActionAdapter {
   }
 
   public get action_capabilities(): readonly DeviceToolName[] {
-    return [...(this.#capabilities?.actions ?? [])];
+    return (this.#capabilities?.actions ?? []).filter((tool) => this.#allowedTools === undefined || this.#allowedTools.includes(tool));
   }
 
   public get last_snapshot(): WorldSnapshotPayload | null {
@@ -339,6 +347,9 @@ export class DeviceWebSocketActionAdapter {
     }
     if (!this.is_ready || this.#sessionId === null || this.#lastSnapshot === null) {
       throw new DeviceActionAdapterError("NOT_READY", "device handshake is not complete");
+    }
+    if (!this.action_capabilities.includes(spec.tool)) {
+      throw new TypeError("tool is not enabled for this actor");
     }
     this.#pruneRecords();
     const request: ActionRequestPayload = {
@@ -617,7 +628,7 @@ export class DeviceWebSocketActionAdapter {
 
   #receiveFrame(frame: string): void {
     try {
-      const message = decodeDeviceMessage(frame);
+      const message = this.#decodeFrame(frame);
       this.#applyMessage(message);
     } catch (error) {
       this.#lastProtocolError = error instanceof Error ? error : new Error(String(error));

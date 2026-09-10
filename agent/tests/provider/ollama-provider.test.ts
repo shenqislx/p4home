@@ -849,7 +849,10 @@ test("an external AbortSignal cancels an active generation", async () => {
   await assert.rejects(pending, (error) => assertProviderError(error, "CANCELLED"));
 });
 
-test("relative timeout terminates a transport that honors AbortSignal", async () => {
+test("relative timeout terminates a transport that honors AbortSignal", async (t) => {
+  // The mock has no socket to keep Node alive while AbortSignal.timeout is unref'ed.
+  const pendingIo = setTimeout(() => {}, 5_000);
+  t.after(() => clearTimeout(pendingIo));
   const fetch: OllamaFetch = async (_input, init) =>
     await new Promise<Response>((_resolve, reject) => {
       const signal = init?.signal;

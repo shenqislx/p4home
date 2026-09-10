@@ -73,7 +73,7 @@ class Phase3DSimulatorHardwareGateContractTests(unittest.TestCase):
             transport.index("static void agent_handle_cancel")
         ]
         worker = transport[
-            transport.index("static void agent_worker") :
+            transport.index("static __attribute__((noinline)) void agent_process_connected") :
             transport.index("esp_err_t agent_transport_init")
         ]
         self.assertNotIn("world_service_start_next", request_handler)

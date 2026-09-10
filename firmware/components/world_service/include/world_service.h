@@ -18,6 +18,19 @@
 #define WORLD_SERVICE_OBJECT_CAPACITY 3U
 
 typedef enum {
+    WORLD_ACTOR_HUMAN = 0,
+    WORLD_ACTOR_CAT,
+    WORLD_ACTOR_COUNT,
+    WORLD_ACTOR_NONE = WORLD_ACTOR_COUNT,
+} world_actor_id_t;
+typedef enum {
+    WORLD_ORIGIN_USER = 0,
+    WORLD_ORIGIN_AGENT,
+    WORLD_ORIGIN_AUTONOMY,
+    WORLD_ORIGIN_TEST,
+} world_action_origin_t;
+
+typedef enum {
     WORLD_ROOM_PRIMARY_BEDROOM = 0,
     WORLD_ROOM_STUDY,
     WORLD_ROOM_GUEST_ROOM,
@@ -85,9 +98,13 @@ typedef struct {
     world_room_id_t room;
     bool available;
     bool occupied;
+    world_actor_id_t occupied_by_actor;
 } world_object_state_t;
 
 typedef struct {
+    world_actor_id_t actor_id;
+    bool multi_actor;
+    uint32_t world_version;
     world_room_id_t room;
     world_activity_t activity;
     bool speaking;
@@ -110,6 +127,8 @@ typedef struct {
 
 typedef struct {
     const char *action_id;
+    world_actor_id_t actor_id;
+    world_action_origin_t origin;
     world_action_tool_t tool;
     union {
         world_room_id_t room;
@@ -121,6 +140,8 @@ typedef struct {
 } world_action_request_t;
 
 typedef struct {
+    world_actor_id_t actor_id;
+    uint32_t world_version;
     world_action_status_t status;
     char action_id[WORLD_SERVICE_ACTION_ID_MAX_BYTES + 1U];
     world_action_tool_t tool;
@@ -168,6 +189,14 @@ esp_err_t world_service_init(const world_service_config_t *config);
 bool world_service_is_ready(void);
 esp_err_t world_service_add_observer(world_service_observer_cb_t observer, void *user_data);
 void world_service_get_snapshot(world_service_snapshot_t *snapshot);
+void world_service_get_actor_snapshot(world_actor_id_t actor, world_service_snapshot_t *snapshot);
+/* Both snapshots are copied under the same world lock. */
+void world_service_get_actors(world_service_snapshot_t snapshots[WORLD_ACTOR_COUNT]);
+bool world_service_has_active_action(void);
+void world_service_enable_multi_actor(void);
+/* Called at the transport animation boundary, returns each Cat terminal before Human starts. */
+esp_err_t world_service_preempt_cat_next(world_action_event_t *event);
+
 
 esp_err_t world_service_set_agent_connected(bool connected);
 /* A Human interaction wakes the avatar and restarts the night-idle deadline. */

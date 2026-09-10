@@ -61,6 +61,8 @@ export interface VoiceSttPipelineOptions {
   ) => Promise<void>;
   readonly on_capture_open?: (summary: VoiceCaptureSummary) => void;
   readonly on_partial_ui?: (partial: SttPartialTranscript) => void;
+  /** Bounded terminal metadata only, including failures before Role dispatch. */
+  readonly on_result?: (result: VoiceSttResult) => void;
   readonly clock?: () => number;
   readonly monotonic_clock?: () => number;
   readonly vad_peak_threshold?: number;
@@ -468,8 +470,7 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
     partialsSeen: number,
   ): void {
     for (const frame of state.frames) frame.fill(0);
-    if (this.#maxResults === 0) return;
-    this.#results.push({
+    const result: VoiceSttResult = Object.freeze({
       device_id: state.summary.device_id,
       session_id: state.summary.session_id,
       stream_id: state.summary.stream_id,
@@ -480,6 +481,13 @@ export class VoiceSttPipeline implements VoiceCaptureSink {
       speech_frames: state.speechFrames,
       partials_seen: partialsSeen,
     });
+    try {
+      this.#options.on_result?.(result);
+    } catch {
+      // Diagnostic sinks must not change the capture/dispatch outcome.
+    }
+    if (this.#maxResults === 0) return;
+    this.#results.push(result);
     if (this.#results.length > this.#maxResults) this.#results.shift();
   }
 }

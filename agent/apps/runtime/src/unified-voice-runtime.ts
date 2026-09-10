@@ -7,7 +7,7 @@ import {
   VoiceInteractionCoordinator,
   type VoiceInteractionCoordinatorOptions,
 } from "./voice-interaction-coordinator.ts";
-import { VoiceSttPipeline, type VoiceSttPipelineOptions } from "./voice-stt-pipeline.ts";
+import { VoiceSttPipeline, type VoiceSttPipelineOptions, type VoiceSttResult } from "./voice-stt-pipeline.ts";
 import {
   VoiceWebSocketServer,
   type VoiceWebSocketServerAddress,
@@ -43,8 +43,13 @@ export class UnifiedVoiceRuntime {
   #closePromise: Promise<void> | null = null;
   #closed = false;
   #shutdownStarted = false;
+  #captures = new Map<string, VoiceCaptureSummary>();
+  #terminalUi = new Map<string, AbortController>();
+  #terminalWork = new Set<Promise<void>>();
+  #uiEnabled: boolean;
 
   public constructor(options: UnifiedVoiceRuntimeOptions) {
+    this.#uiEnabled = options.interaction.ui_output === "required";
     const deviceIds = Object.keys(options.device_tokens);
     this.cat_run_registry = options.cat_run_registry ?? defaultLowPriorityCatRunRegistry;
     let server: VoiceWebSocketServer;
@@ -71,17 +76,64 @@ export class UnifiedVoiceRuntime {
       ...options.stt,
       on_capture_open: (summary) => {
         bindings.on_capture_open(summary);
+        this.#terminalUi.get(summary.device_id)?.abort();
+        this.#captures.set(summary.device_id, summary);
         options.on_capture_open?.(summary);
       },
       dispatch_final: bindings.dispatch_final,
+      on_result: (result) => {
+        this.#captureFinished(result);
+        // Diagnostic callback failures cannot prevent the functional terminal.
+        options.stt.on_result?.(result);
+      },
     });
     server = new VoiceWebSocketServer({
       ...options.server,
       device_tokens: options.device_tokens,
       sink: this.pipeline,
-      on_device_disconnect: bindings.on_device_disconnect,
+      on_device_disconnect: (deviceId) => {
+        this.#captures.delete(deviceId);
+        this.#terminalUi.get(deviceId)?.abort();
+        bindings.on_device_disconnect(deviceId);
+      },
     });
     this.server = server;
+  }
+
+  #captureFinished(result: VoiceSttResult): void {
+    const capture = this.#captures.get(result.device_id);
+    if (capture === undefined || capture.epoch !== result.epoch
+        || capture.session_id !== result.session_id || capture.stream_id !== result.stream_id) return;
+    this.#captures.delete(result.device_id);
+    if (this.#shutdownStarted || !this.#uiEnabled || result.outcome === "dispatched"
+        || result.outcome === "stale" || result.outcome === "dispatch_failed") return;
+    const cancelled = result.outcome === "cancelled";
+    const response = result.outcome === "timed_out"
+      ? "识别超时，请重新唤醒后再说一次。"
+      : cancelled ? "本次识别已取消，请重新唤醒。"
+        : result.outcome === "provider_error" ? "识别暂时不可用，请重新唤醒后重试。"
+          : "没有听清，请重新唤醒后再说一次。";
+    const controller = new AbortController();
+    this.#terminalUi.set(result.device_id, controller);
+    const work = (async () => {
+      try {
+        await this.server.presentConversationUi(result.device_id, {
+          ui_protocol_version: 1, type: "ui.update", session_id: result.session_id,
+          stream_id: result.stream_id, epoch: result.epoch, revision: 1,
+          stage: cancelled ? "cancelled" : "failed", user_text: "", response_text: response,
+          response_role: "system", execution_status: cancelled ? "not_applicable" : "failed",
+        }, undefined, controller.signal);
+      } catch {
+        // Socket delivery has a bounded ACK deadline; device-local timeout is
+        // the final fallback. Never start TTS or replay stale capture work.
+      } finally {
+        if (this.#terminalUi.get(result.device_id) === controller) {
+          this.#terminalUi.delete(result.device_id);
+        }
+      }
+    })();
+    this.#terminalWork.add(work);
+    void work.finally(() => this.#terminalWork.delete(work));
   }
 
   public async start(): Promise<VoiceWebSocketServerAddress> {
@@ -104,12 +156,15 @@ export class UnifiedVoiceRuntime {
   }
 
   async #cleanup(): Promise<void> {
+    this.#captures.clear();
+    for (const controller of this.#terminalUi.values()) controller.abort();
     this.coordinator.close();
     this.cat_run_registry.cancelAll("shutdown");
     this.pipeline.close();
     const settled = await Promise.allSettled([
       Promise.resolve().then(async () => await this.server.close()),
       Promise.resolve().then(async () => await this.pipeline.drain()),
+      Promise.all([...this.#terminalWork]),
     ]);
     const failures = settled.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
     if (failures.length > 0) throw new AggregateError(failures, "unified voice runtime cleanup failed");

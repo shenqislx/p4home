@@ -6,6 +6,7 @@ import {
 } from "@p4home/provider-ollama";
 
 import { QWEN_THINKING_ENABLED } from "./model-config.ts";
+import { hasNegatedDeviceCommand } from "./device-command-policy.ts";
 import {
   assertContractId,
   type HumanAvatarAssignment,
@@ -273,6 +274,12 @@ export async function routeInteraction(
     }
   } catch {
     return fallback(options, "invalid_model_output", "INVALID_ROUTE_PLAN");
+  }
+  if (
+    plan.assignments.some((assignment) => assignment.role_id === "robot")
+    && hasNegatedDeviceCommand(options.interaction.text)
+  ) {
+    return fallback(options, "invalid_model_output", "NEGATED_DEVICE_COMMAND");
   }
   if (
     options.human_only === true

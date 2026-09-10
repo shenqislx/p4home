@@ -43,7 +43,7 @@ class HumanAvatarDeviceV3ContractTest(unittest.TestCase):
         kconfig = TRANSPORT_KCONFIG.read_text(encoding="utf-8")
         self.assertIn("AGENT_TRANSPORT_PROTOCOL_V3 3U", header)
         self.assertIn('AGENT_TRANSPORT_HUMAN_AVATAR_ID "human_avatar"', header)
-        self.assertIn("range 1 3", kconfig)
+        self.assertIn("range 1 4", kconfig)  # v4 is separate; v3 actor binding remains frozen.
         self.assertIn("agent_uses_human_avatar_runtime()", source)
         self.assertIn('cJSON_GetObjectItemCaseSensitive(payload, "actor_id")', source)
         self.assertGreaterEqual(

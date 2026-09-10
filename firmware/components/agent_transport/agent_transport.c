@@ -10,11 +10,13 @@
 #include "cJSON.h"
 #include "esp_app_desc.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mbedtls/pk.h"
@@ -33,10 +35,17 @@ static const char *TAG = "agent_transport";
 #define AGENT_ACTION_TIMEOUT_MAX_MS 120000U
 #define AGENT_OBJECT_ACTION_RENDER_MS 250U
 #define AGENT_LOCAL_FALLBACK_GRACE_MS 10000U
+#define AGENT_INBOUND_CAPACITY 8U
 
 #ifndef CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK
 #define CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK 12288
 #endif
+
+typedef struct {
+    char *frame;
+    size_t length;
+    uint32_t session_counter;
+} agent_inbound_frame_t;
 
 typedef struct {
     bool initialized;
@@ -47,6 +56,10 @@ typedef struct {
     bool connected;
     bool handshake_sent;
     bool first_connection;
+    bool handshake_pending;
+    agent_inbound_frame_t inbound[AGENT_INBOUND_CAPACITY];
+    size_t inbound_head;
+    size_t inbound_count;
     esp_websocket_client_handle_t ws;
     SemaphoreHandle_t tx_mutex;
     SemaphoreHandle_t action_mutex;
@@ -334,6 +347,31 @@ static bool agent_uses_human_avatar_runtime(void)
     return s_agent.protocol_version == AGENT_TRANSPORT_PROTOCOL_V3;
 }
 
+static bool agent_uses_multi_actor_runtime(void)
+{
+    return s_agent.protocol_version == AGENT_TRANSPORT_PROTOCOL_V4;
+}
+
+static const char *agent_actor_id(world_actor_id_t actor)
+{
+    return actor == WORLD_ACTOR_CAT ? "cat" : AGENT_TRANSPORT_HUMAN_AVATAR_ID;
+}
+
+static bool agent_parse_actor_id(const cJSON *value, world_actor_id_t *actor)
+{
+    if (!cJSON_IsString(value)) return false;
+    if (strcmp(value->valuestring, "cat") == 0) *actor = WORLD_ACTOR_CAT;
+    else if (strcmp(value->valuestring, AGENT_TRANSPORT_HUMAN_AVATAR_ID) == 0) *actor = WORLD_ACTOR_HUMAN;
+    else return false;
+    return true;
+}
+
+static void agent_add_event_actor(cJSON *payload, world_actor_id_t actor)
+{
+    if (agent_uses_multi_actor_runtime() || agent_uses_human_avatar_runtime())
+        cJSON_AddStringToObject(payload, "actor_id", agent_actor_id(actor));
+}
+
 static void agent_add_actor_id(cJSON *payload)
 {
     if (agent_uses_human_avatar_runtime()) {
@@ -403,9 +441,13 @@ static cJSON *agent_objects_json(const world_service_snapshot_t *snapshot,
                 }
             }
         }
-        cJSON_AddBoolToObject(object, "available", state->available);
+        cJSON_AddBoolToObject(object, "available", state->available &&
+            !(agent_uses_multi_actor_runtime() && state->occupied && state->occupied_by_actor == WORLD_ACTOR_NONE));
         if (!capabilities) {
-            cJSON_AddBoolToObject(object, "occupied", state->occupied);
+            if (agent_uses_multi_actor_runtime()) {
+                if (state->occupied_by_actor == WORLD_ACTOR_NONE) cJSON_AddNullToObject(object, "occupied_by_actor_id");
+                else cJSON_AddStringToObject(object, "occupied_by_actor_id", agent_actor_id(state->occupied_by_actor));
+            } else cJSON_AddBoolToObject(object, "occupied", state->occupied);
         }
         cJSON_AddItemToArray(objects, object);
     }
@@ -423,8 +465,37 @@ static cJSON *agent_capability_objects_json(void)
     return agent_objects_json(&snapshot, true);
 }
 
+static cJSON *agent_multi_world_payload(const char *reason)
+{
+    /* Do not put two 1.5 KiB snapshots on the WebSocket callback stack. */
+    world_service_snapshot_t *snapshots = calloc(WORLD_ACTOR_COUNT, sizeof(*snapshots));
+    if (snapshots == NULL) return NULL;
+    world_service_get_actors(snapshots);
+    cJSON *payload = cJSON_CreateObject();
+    if (payload == NULL) { free(snapshots); return NULL; }
+    if (reason != NULL) {
+        char id[64];
+        snprintf(id, sizeof(id), "snapshot-%s-%" PRIu32, s_agent.boot_id, snapshots[0].world_version);
+        cJSON_AddStringToObject(payload, "snapshot_id", id);
+        cJSON_AddStringToObject(payload, "reason", reason);
+    } else cJSON_AddStringToObject(payload, "change_reason", "action");
+    cJSON_AddNumberToObject(payload, "world_version", snapshots[0].world_version);
+    cJSON_AddNumberToObject(payload, "observed_at_ms", (double)snapshots[0].observed_at_ms);
+    cJSON *actors = cJSON_AddArrayToObject(payload, "actors");
+    for (size_t i = 0; i < WORLD_ACTOR_COUNT; i++) {
+        cJSON *actor = agent_character_json(&snapshots[i]);
+        cJSON_AddStringToObject(actor, "actor_id", agent_actor_id((world_actor_id_t)i));
+        cJSON_AddNumberToObject(actor, "state_version", snapshots[i].state_version);
+        cJSON_AddItemToArray(actors, actor);
+    }
+    cJSON_AddItemToObject(payload, "objects", agent_objects_json(&snapshots[0], false));
+    free(snapshots);
+    return payload;
+}
+
 static cJSON *agent_snapshot_payload(const char *reason)
 {
+    if (agent_uses_multi_actor_runtime()) return agent_multi_world_payload(reason);
     world_service_snapshot_t snapshot = {0};
     world_service_get_snapshot(&snapshot);
     cJSON *payload = cJSON_CreateObject();
@@ -448,6 +519,7 @@ static cJSON *agent_snapshot_payload(const char *reason)
 
 static cJSON *agent_changed_payload(void)
 {
+    if (agent_uses_multi_actor_runtime()) return agent_multi_world_payload(NULL);
     world_service_snapshot_t snapshot = {0};
     world_service_get_snapshot(&snapshot);
     cJSON *payload = cJSON_CreateObject();
@@ -537,6 +609,11 @@ static esp_err_t agent_send_world_changed(void)
 static esp_err_t agent_send_protocol_error(const char *code, const char *message,
                                            const char *correlation_id)
 {
+    if (agent_uses_multi_actor_runtime() && xTaskGetCurrentTaskHandle() != s_agent.worker_task) {
+        agent_request_reconnect();
+        return ESP_FAIL;
+    }
+
     cJSON *payload = cJSON_CreateObject();
     if (payload == NULL) {
         return ESP_ERR_NO_MEM;
@@ -584,9 +661,11 @@ static cJSON *agent_action_result(const world_action_event_t *event)
         break;
     case WORLD_ACTION_CHARACTER_GET_STATE:
         cJSON_Delete(result);
-        return agent_character_json(&event->result.snapshot);
+        result = agent_character_json(&event->result.snapshot);
+        if (agent_uses_multi_actor_runtime()) agent_add_event_actor(result, event->actor_id);
+        return result;
     case WORLD_ACTION_GET_SNAPSHOT:
-        agent_add_actor_id(result);
+        agent_add_event_actor(result, event->actor_id);
         cJSON_AddNumberToObject(result, "state_version", event->result.snapshot.state_version);
         cJSON_AddNumberToObject(result, "observed_at_ms",
                                 (double)event->result.snapshot.observed_at_ms);
@@ -621,7 +700,7 @@ static esp_err_t agent_send_action_event(const world_action_event_t *event,
         return ESP_ERR_NO_MEM;
     }
     cJSON_AddStringToObject(payload, "action_id", event->action_id);
-    agent_add_actor_id(payload);
+    agent_add_event_actor(payload, event->actor_id);
     const char *type = NULL;
     switch (event->status) {
     case WORLD_ACTION_STATUS_ACCEPTED:
@@ -637,7 +716,8 @@ static esp_err_t agent_send_action_event(const world_action_event_t *event,
         type = "action.completed";
         cJSON_AddStringToObject(payload, "tool", world_service_tool_text(event->tool));
         cJSON_AddNumberToObject(payload, "completed_at_ms", (double)event->occurred_at_ms);
-        cJSON_AddNumberToObject(payload, "state_version", event->state_version);
+        cJSON_AddNumberToObject(payload, agent_uses_multi_actor_runtime() ? "actor_state_version" : "state_version", event->state_version);
+        if (agent_uses_multi_actor_runtime()) cJSON_AddNumberToObject(payload, "world_version", event->world_version);
         cJSON_AddItemToObject(payload, "result", agent_action_result(event));
         break;
     case WORLD_ACTION_STATUS_FAILED: {
@@ -743,9 +823,15 @@ static void agent_publish_world_disconnect_if_due(void)
 static void agent_progress_action_queue(void)
 {
     uint64_t now_ms = agent_now_ms();
-    world_service_snapshot_t snapshot = {0};
-    world_service_get_snapshot(&snapshot);
-    if (snapshot.active_action_id[0] != '\0') {
+    if (agent_uses_multi_actor_runtime()) {
+        world_action_event_t cancelled = {0};
+        while (world_service_preempt_cat_next(&cancelled) == ESP_OK) {
+            (void)agent_send_action_event(&cancelled, NULL);
+            (void)agent_send_world_changed();
+            if (!world_service_has_active_action()) s_agent.active_action_complete_at_ms = 0U;
+        }
+    }
+    if (world_service_has_active_action()) {
         if (s_agent.active_action_complete_at_ms == 0U ||
             now_ms < s_agent.active_action_complete_at_ms) {
             return;
@@ -788,9 +874,9 @@ static bool agent_parse_action_request(const cJSON *payload, world_action_reques
     static const char *const avatar_fields[] = {
         "action_id", "actor_id", "tool", "arguments", "timeout_ms", "origin",
     };
-    if ((agent_uses_human_avatar_runtime() &&
+    if (((agent_uses_human_avatar_runtime() || agent_uses_multi_actor_runtime()) &&
          !agent_object_has_exact_fields(payload, avatar_fields, 6U)) ||
-        (!agent_uses_human_avatar_runtime() &&
+        (!(agent_uses_human_avatar_runtime() || agent_uses_multi_actor_runtime()) &&
          !agent_object_has_exact_fields(payload, fields, 5U))) {
         return false;
     }
@@ -819,6 +905,19 @@ static bool agent_parse_action_request(const cJSON *payload, world_action_reques
     memset(request, 0, sizeof(*request));
     request->action_id = action_id->valuestring;
     request->timeout_ms = timeout_ms;
+    if (agent_uses_multi_actor_runtime()) {
+        if (!agent_parse_actor_id(actor_id, &request->actor_id)) return false;
+        request->origin = strcmp(origin->valuestring, "user") == 0 ? WORLD_ORIGIN_USER :
+            strcmp(origin->valuestring, "agent") == 0 ? WORLD_ORIGIN_AGENT :
+            strcmp(origin->valuestring, "autonomy") == 0 ? WORLD_ORIGIN_AUTONOMY : WORLD_ORIGIN_TEST;
+        if ((request->actor_id == WORLD_ACTOR_CAT && request->origin == WORLD_ORIGIN_USER) ||
+            (request->actor_id == WORLD_ACTOR_HUMAN && (request->origin == WORLD_ORIGIN_AUTONOMY ||
+             (strcmp(tool->valuestring, "character.go_to_room") != 0 &&
+              strcmp(tool->valuestring, "character.go_to") != 0 &&
+              strcmp(tool->valuestring, "character.sit") != 0 &&
+              strcmp(tool->valuestring, "character.look_at") != 0 &&
+              strcmp(tool->valuestring, "character.interact") != 0)))) return false;
+    }
     size_t argument_count = 0U;
     for (const cJSON *child = arguments->child; child != NULL; child = child->next) {
         argument_count++;
@@ -915,9 +1014,9 @@ static void agent_handle_cancel(const cJSON *payload, const char *message_id)
 {
     static const char *const fields[] = {"action_id", "reason"};
     static const char *const avatar_fields[] = {"action_id", "actor_id", "reason"};
-    if ((agent_uses_human_avatar_runtime() &&
+    if (((agent_uses_human_avatar_runtime() || agent_uses_multi_actor_runtime()) &&
          !agent_object_has_exact_fields(payload, avatar_fields, 3U)) ||
-        (!agent_uses_human_avatar_runtime() &&
+        (!(agent_uses_human_avatar_runtime() || agent_uses_multi_actor_runtime()) &&
          !agent_object_has_exact_fields(payload, fields, 2U))) {
         (void)agent_send_protocol_error("INVALID_MESSAGE", "invalid action.cancel payload",
                                         message_id);
@@ -947,6 +1046,15 @@ static void agent_handle_cancel(const cJSON *payload, const char *message_id)
     world_service_snapshot_t before = {0};
     world_service_get_snapshot(&before);
     world_action_event_t event = {0};
+    if (agent_uses_multi_actor_runtime()) {
+        world_actor_id_t requested_actor;
+        if (!agent_parse_actor_id(actor_id, &requested_actor) ||
+            world_service_get_action_event(action_id->valuestring, &event) != ESP_OK ||
+            event.actor_id != requested_actor) {
+            (void)agent_send_protocol_error("INVALID_MESSAGE", "cancel actor does not own action", message_id);
+            xSemaphoreGive(s_agent.action_mutex); return;
+        }
+    }
     esp_err_t result = world_service_cancel(action_id->valuestring, &event);
     if (result == ESP_ERR_NOT_FOUND) {
         (void)agent_send_protocol_error("ACTION_NOT_FOUND", "action id was not found", message_id);
@@ -965,7 +1073,7 @@ static void agent_handle_cancel(const cJSON *payload, const char *message_id)
     }
     world_service_snapshot_t after = {0};
     world_service_get_snapshot(&after);
-    if (after.state_version != before.state_version) {
+    if (after.world_version != before.world_version) {
         (void)agent_send_world_changed();
     }
     xSemaphoreGive(s_agent.action_mutex);
@@ -1002,7 +1110,7 @@ static void agent_handle_resync(const cJSON *payload, const char *message_id)
     (void)agent_send_payload("world.snapshot", agent_snapshot_payload("resync"), message_id);
 }
 
-static void agent_handle_frame(const char *frame, size_t frame_length)
+static void agent_apply_frame(const char *frame, size_t frame_length)
 {
     cJSON *root = cJSON_ParseWithLength(frame, frame_length);
     static const char *const envelope_fields[] = {
@@ -1073,6 +1181,49 @@ static void agent_handle_frame(const char *frame, size_t frame_length)
     cJSON_Delete(root);
 }
 
+/* The WebSocket event callback owns the client's internal lock. Never wait for
+ * action_mutex / tx_mutex there while the worker is sending a lifecycle frame.
+ * v4 therefore copies complete bounded frames and lets the sole worker apply
+ * requests, cancels and resyncs in received order. */
+static void agent_handle_frame(const char *frame, size_t length)
+{
+    if (!agent_uses_multi_actor_runtime()) { agent_apply_frame(frame, length); return; }
+    if (length > AGENT_TRANSPORT_MAX_JSON_FRAME_BYTES) { agent_request_reconnect(); return; }
+    char *copy = malloc(length + 1U);
+    if (copy == NULL) { agent_request_reconnect(); return; }
+    memcpy(copy, frame, length); copy[length] = '\0';
+    bool queued = false;
+    taskENTER_CRITICAL(&s_agent.lock);
+    if (s_agent.inbound_count < AGENT_INBOUND_CAPACITY) {
+        size_t tail = (s_agent.inbound_head + s_agent.inbound_count) % AGENT_INBOUND_CAPACITY;
+        s_agent.inbound[tail] = (agent_inbound_frame_t){copy, length, s_agent.session_counter};
+        s_agent.inbound_count++; queued = true;
+    }
+    taskEXIT_CRITICAL(&s_agent.lock);
+    if (!queued) { free(copy); agent_request_reconnect(); }
+}
+
+static void agent_drain_inbound(bool apply)
+{
+    /* Bounded per worker turn so an input flood cannot starve action deadlines. */
+    for (size_t i = 0; i < AGENT_INBOUND_CAPACITY; i++) {
+        agent_inbound_frame_t frame = {0};
+        taskENTER_CRITICAL(&s_agent.lock);
+        if (s_agent.inbound_count > 0) {
+            frame = s_agent.inbound[s_agent.inbound_head];
+            memset(&s_agent.inbound[s_agent.inbound_head], 0, sizeof(frame));
+            s_agent.inbound_head = (s_agent.inbound_head + 1U) % AGENT_INBOUND_CAPACITY;
+            s_agent.inbound_count--;
+        }
+        uint32_t generation = s_agent.session_counter;
+        taskEXIT_CRITICAL(&s_agent.lock);
+        if (frame.frame == NULL) return;
+        if (apply && agent_connected() && !s_agent.reconnect_requested && frame.session_counter == generation)
+            agent_apply_frame(frame.frame, frame.length);
+        free(frame.frame);
+    }
+}
+
 static void agent_reset_rx(void)
 {
     free(s_agent.rx_frame);
@@ -1091,7 +1242,7 @@ static void agent_handle_ws_data(const esp_websocket_event_data_t *data)
     size_t offset = data->payload_offset > 0 ? (size_t)data->payload_offset : 0U;
     size_t length = (size_t)data->data_len;
     if (s_agent.rx_dropping) {
-        if (data->fin || offset + length >= s_agent.rx_expected) {
+        if (offset + length >= s_agent.rx_expected) {
             agent_reset_rx();
         }
         return;
@@ -1101,7 +1252,7 @@ static void agent_handle_ws_data(const esp_websocket_event_data_t *data)
         s_agent.rx_expected = total;
         (void)agent_send_protocol_error("FRAME_TOO_LARGE", "frame exceeds 16 KiB", NULL);
         agent_request_reconnect();
-        if (data->fin) {
+        if (offset + length >= total) {
             agent_reset_rx();
         }
         return;
@@ -1110,7 +1261,7 @@ static void agent_handle_ws_data(const esp_websocket_event_data_t *data)
         agent_handle_frame(data->data_ptr, length);
         return;
     }
-    if (offset == 0U || s_agent.rx_frame == NULL || s_agent.rx_expected != total) {
+    if (offset == 0U) {
         agent_reset_rx();
         s_agent.rx_frame = malloc(total + 1U);
         if (s_agent.rx_frame == NULL) {
@@ -1120,17 +1271,17 @@ static void agent_handle_ws_data(const esp_websocket_event_data_t *data)
         }
         s_agent.rx_expected = total;
     }
-    if (offset + length > s_agent.rx_expected) {
+    if (s_agent.rx_frame == NULL || total != s_agent.rx_expected ||
+        offset != s_agent.rx_received || offset + length > s_agent.rx_expected) {
         agent_reset_rx();
         agent_metric_protocol_error();
         agent_request_reconnect();
         return;
     }
     memcpy(s_agent.rx_frame + offset, data->data_ptr, length);
-    if (offset + length > s_agent.rx_received) {
-        s_agent.rx_received = offset + length;
-    }
-    if (data->fin || s_agent.rx_received == s_agent.rx_expected) {
+    s_agent.rx_received += length;
+    /* FIN is repeated on each receive-buffer chunk of a final WS frame. */
+    if (s_agent.rx_received == s_agent.rx_expected) {
         s_agent.rx_frame[s_agent.rx_expected] = '\0';
         agent_handle_frame(s_agent.rx_frame, s_agent.rx_expected);
         agent_reset_rx();
@@ -1145,12 +1296,15 @@ static esp_err_t agent_send_handshake(void)
     cJSON_AddStringToObject(hello, "firmware_version",
                             description != NULL ? description->version : "unknown");
     cJSON *versions = cJSON_AddArrayToObject(hello, "protocol_versions");
+    if (agent_uses_multi_actor_runtime()) { cJSON_AddItemToArray(versions, cJSON_CreateNumber(4)); }
+    else {
     cJSON_AddItemToArray(versions, cJSON_CreateNumber(1));
     if (agent_uses_object_runtime()) {
         cJSON_AddItemToArray(versions, cJSON_CreateNumber(2));
     }
     if (agent_uses_human_avatar_runtime()) {
         cJSON_AddItemToArray(versions, cJSON_CreateNumber(3));
+    }
     }
     cJSON_AddStringToObject(hello, "connection_reason",
                             s_agent.first_connection ? "boot" : "reconnect");
@@ -1165,6 +1319,19 @@ static esp_err_t agent_send_handshake(void)
     for (int index = 0; index < WORLD_ROOM_COUNT; ++index) {
         cJSON_AddItemToArray(rooms, cJSON_CreateString(agent_room_id((world_room_id_t)index)));
     }
+    if (agent_uses_multi_actor_runtime()) {
+        cJSON *actors = cJSON_AddArrayToObject(capabilities, "actors");
+        for (size_t actor = 0; actor < WORLD_ACTOR_COUNT; actor++) {
+            cJSON *entry = cJSON_CreateObject();
+            cJSON_AddStringToObject(entry, "actor_id", agent_actor_id((world_actor_id_t)actor));
+            cJSON *actions = cJSON_AddArrayToObject(entry, "actions");
+            for (int tool = WORLD_ACTION_V1_FIRST; tool <= WORLD_ACTION_OBJECT_LAST; tool++) {
+                if (actor == WORLD_ACTOR_HUMAN && tool != WORLD_ACTION_CHARACTER_GO_TO_ROOM && tool < WORLD_ACTION_OBJECT_FIRST) continue;
+                cJSON_AddItemToArray(actions, cJSON_CreateString(world_service_tool_text((world_action_tool_t)tool)));
+            }
+            cJSON_AddItemToArray(actors, entry);
+        }
+    } else {
     cJSON *actions = cJSON_AddArrayToObject(capabilities, "actions");
     int last_action = agent_uses_object_runtime() ? WORLD_ACTION_OBJECT_LAST
                                                   : WORLD_ACTION_V1_LAST;
@@ -1172,11 +1339,16 @@ static esp_err_t agent_send_handshake(void)
         cJSON_AddItemToArray(actions,
                              cJSON_CreateString(world_service_tool_text((world_action_tool_t)index)));
     }
+    }
     if (agent_uses_object_runtime()) {
         cJSON_AddItemToObject(capabilities, "objects",
                               agent_capability_objects_json());
     }
     cJSON *limits = cJSON_AddObjectToObject(capabilities, "limits");
+    if (agent_uses_multi_actor_runtime()) {
+        cJSON_AddNumberToObject(limits, "actor_capacity", 2);
+        cJSON_AddNumberToObject(limits, "cat_queue_capacity", 2);
+    }
     cJSON_AddNumberToObject(limits, "max_json_frame_bytes", AGENT_TRANSPORT_MAX_JSON_FRAME_BYTES);
     cJSON_AddNumberToObject(limits, "action_queue_capacity", WORLD_SERVICE_ACTION_QUEUE_CAPACITY);
     cJSON_AddNumberToObject(limits, "say_text_max_chars", WORLD_SERVICE_SAY_TEXT_MAX_CHARS);
@@ -1200,6 +1372,34 @@ static esp_err_t agent_send_handshake(void)
     return ESP_OK;
 }
 
+static void agent_finish_handshake(void)
+{
+    bool reconnect = !s_agent.first_connection;
+    if (agent_send_handshake() != ESP_OK) {
+        ESP_LOGE(TAG, "device handshake failed");
+        taskENTER_CRITICAL(&s_agent.lock);
+        s_agent.connected = false;
+        s_agent.handshake_sent = false;
+        s_agent.metrics.connected = false;
+        s_agent.metrics.handshake_sent = false;
+        taskEXIT_CRITICAL(&s_agent.lock);
+        (void)world_service_set_agent_connected(false);
+        agent_request_reconnect();
+    } else {
+        agent_cancel_world_disconnect();
+        taskENTER_CRITICAL(&s_agent.lock);
+        s_agent.connected = true;
+        s_agent.metrics.connected = true;
+        s_agent.metrics.ever_connected = true;
+        s_agent.last_disconnect_at_ms = 0U;
+        if (reconnect) {
+            s_agent.metrics.reconnect_count++;
+        }
+        taskEXIT_CRITICAL(&s_agent.lock);
+        (void)world_service_set_agent_connected(true);
+    }
+}
+
 static void agent_ws_event(void *handler_args, esp_event_base_t base,
                            int32_t event_id, void *event_data)
 {
@@ -1208,7 +1408,6 @@ static void agent_ws_event(void *handler_args, esp_event_base_t base,
     const esp_websocket_event_data_t *data = (const esp_websocket_event_data_t *)event_data;
     switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED: {
-        bool reconnect = !s_agent.first_connection;
         s_agent.next_tx_seq = 0U;
         s_agent.next_rx_seq = 0U;
         s_agent.last_rx_seq = 0U;
@@ -1222,29 +1421,11 @@ static void agent_ws_event(void *handler_args, esp_event_base_t base,
         s_agent.metrics.connected = false;
         s_agent.metrics.handshake_sent = false;
         taskEXIT_CRITICAL(&s_agent.lock);
-        if (agent_send_handshake() != ESP_OK) {
-            ESP_LOGE(TAG, "device handshake failed");
+        if (agent_uses_multi_actor_runtime()) {
             taskENTER_CRITICAL(&s_agent.lock);
-            s_agent.connected = false;
-            s_agent.handshake_sent = false;
-            s_agent.metrics.connected = false;
-            s_agent.metrics.handshake_sent = false;
+            s_agent.handshake_pending = true;
             taskEXIT_CRITICAL(&s_agent.lock);
-            (void)world_service_set_agent_connected(false);
-            agent_request_reconnect();
-        } else {
-            agent_cancel_world_disconnect();
-            taskENTER_CRITICAL(&s_agent.lock);
-            s_agent.connected = true;
-            s_agent.metrics.connected = true;
-            s_agent.metrics.ever_connected = true;
-            s_agent.last_disconnect_at_ms = 0U;
-            if (reconnect) {
-                s_agent.metrics.reconnect_count++;
-            }
-            taskEXIT_CRITICAL(&s_agent.lock);
-            (void)world_service_set_agent_connected(true);
-        }
+        } else agent_finish_handshake();
         break;
     }
     case WEBSOCKET_EVENT_DISCONNECTED:
@@ -1257,6 +1438,7 @@ static void agent_ws_event(void *handler_args, esp_event_base_t base,
             s_agent.last_disconnect_at_ms = disconnected_at_ms;
         }
         s_agent.socket_connected = false;
+        s_agent.handshake_pending = false;
         s_agent.connected = false;
         s_agent.handshake_sent = false;
         s_agent.metrics.connected = false;
@@ -1286,7 +1468,8 @@ static void agent_ws_event(void *handler_args, esp_event_base_t base,
             (void)agent_send_protocol_error("INVALID_MESSAGE",
                                             "binary frames are not supported", NULL);
             agent_request_reconnect();
-        } else if (data != NULL && agent_connected() && s_agent.handshake_sent &&
+        } else if (data != NULL && ((agent_uses_multi_actor_runtime() && s_agent.socket_connected) ||
+                   (agent_connected() && s_agent.handshake_sent)) &&
                    (data->op_code == 0x1U || data->op_code == 0x0U)) {
             agent_handle_ws_data(data);
         }
@@ -1298,6 +1481,53 @@ static void agent_ws_event(void *handler_args, esp_event_base_t base,
     default:
         break;
     }
+}
+
+/* Keep snapshot/event scratch storage out of the worker frame while it is
+ * parsing inbound requests or sending the handshake. Those call chains also
+ * need stack for world observers and JSON number formatting. */
+static __attribute__((noinline)) void agent_process_connected(void)
+{
+
+    if (xSemaphoreTake(s_agent.action_mutex, 0) == pdTRUE) {
+        world_action_event_t expired = {0};
+        world_service_snapshot_t before_expire = {0};
+        world_service_get_snapshot(&before_expire);
+        while (world_service_expire_next_due(&expired) == ESP_OK) {
+            (void)agent_send_action_event(&expired, NULL);
+            world_service_snapshot_t after_expire = {0};
+            world_service_get_snapshot(&after_expire);
+            if (after_expire.world_version != before_expire.world_version) {
+                (void)agent_send_world_changed();
+            }
+            before_expire = after_expire;
+        }
+        world_service_snapshot_t after_expirations = {0};
+        world_service_get_snapshot(&after_expirations);
+        if (!world_service_has_active_action()) {
+            s_agent.active_action_complete_at_ms = 0U;
+        }
+        agent_progress_action_queue();
+        xSemaphoreGive(s_agent.action_mutex);
+    }
+    uint64_t now = agent_now_ms();
+    if (now - s_agent.last_heartbeat_ms >= AGENT_HEARTBEAT_INTERVAL_MS) {
+        world_service_snapshot_t snapshot = {0};
+        world_service_get_snapshot(&snapshot);
+        cJSON *heartbeat = cJSON_CreateObject();
+        cJSON_AddNumberToObject(heartbeat, "uptime_ms", (double)now);
+        cJSON_AddNumberToObject(heartbeat, "last_rx_seq", s_agent.last_rx_seq);
+        cJSON_AddNumberToObject(heartbeat, "state_version", snapshot.state_version);
+        if (agent_send_payload("heartbeat", heartbeat, NULL) == ESP_OK) {
+            s_agent.last_heartbeat_ms = now;
+        }
+    }
+    world_service_snapshot_t snapshot = {0};
+    world_service_get_snapshot(&snapshot);
+    taskENTER_CRITICAL(&s_agent.lock);
+    s_agent.metrics.last_state_version = snapshot.state_version;
+    taskEXIT_CRITICAL(&s_agent.lock);
+
 }
 
 static void agent_worker(void *argument)
@@ -1323,54 +1553,36 @@ static void agent_worker(void *argument)
             vTaskDelay(pdMS_TO_TICKS(AGENT_WORKER_INTERVAL_MS));
             continue;
         }
-        if (agent_connected()) {
-            if (xSemaphoreTake(s_agent.action_mutex, 0) == pdTRUE) {
-                world_action_event_t expired = {0};
-                world_service_snapshot_t before_expire = {0};
-                world_service_get_snapshot(&before_expire);
-                while (world_service_expire_next_due(&expired) == ESP_OK) {
-                    (void)agent_send_action_event(&expired, NULL);
-                    world_service_snapshot_t after_expire = {0};
-                    world_service_get_snapshot(&after_expire);
-                    if (after_expire.state_version != before_expire.state_version) {
-                        (void)agent_send_world_changed();
-                    }
-                    before_expire = after_expire;
-                }
-                world_service_snapshot_t after_expirations = {0};
-                world_service_get_snapshot(&after_expirations);
-                if (after_expirations.active_action_id[0] == '\0') {
-                    s_agent.active_action_complete_at_ms = 0U;
-                }
-                agent_progress_action_queue();
-                xSemaphoreGive(s_agent.action_mutex);
-            }
-            uint64_t now = agent_now_ms();
-            if (now - s_agent.last_heartbeat_ms >= AGENT_HEARTBEAT_INTERVAL_MS) {
-                world_service_snapshot_t snapshot = {0};
-                world_service_get_snapshot(&snapshot);
-                cJSON *heartbeat = cJSON_CreateObject();
-                cJSON_AddNumberToObject(heartbeat, "uptime_ms", (double)now);
-                cJSON_AddNumberToObject(heartbeat, "last_rx_seq", s_agent.last_rx_seq);
-                cJSON_AddNumberToObject(heartbeat, "state_version", snapshot.state_version);
-                if (agent_send_payload("heartbeat", heartbeat, NULL) == ESP_OK) {
-                    s_agent.last_heartbeat_ms = now;
-                }
-            }
-            world_service_snapshot_t snapshot = {0};
-            world_service_get_snapshot(&snapshot);
-            taskENTER_CRITICAL(&s_agent.lock);
-            s_agent.metrics.last_state_version = snapshot.state_version;
-            taskEXIT_CRITICAL(&s_agent.lock);
-        }
+        taskENTER_CRITICAL(&s_agent.lock);
+        bool handshake = s_agent.handshake_pending && s_agent.socket_connected;
+        s_agent.handshake_pending = false;
+        taskEXIT_CRITICAL(&s_agent.lock);
+        if (handshake) agent_finish_handshake();
+        if (agent_uses_multi_actor_runtime()) agent_drain_inbound(agent_connected());
+        if (agent_connected()) agent_process_connected();
         taskENTER_CRITICAL(&s_agent.lock);
         s_agent.metrics.worker_stack_high_water_bytes =
             (uint32_t)uxTaskGetStackHighWaterMark(NULL);
         taskEXIT_CRITICAL(&s_agent.lock);
         vTaskDelay(pdMS_TO_TICKS(AGENT_WORKER_INTERVAL_MS));
     }
-    s_agent.worker_task = NULL;
-    vTaskDelete(NULL);
+    agent_drain_inbound(false);
+    for (;;) vTaskSuspend(NULL);
+}
+
+static esp_err_t agent_delete_worker_task(void)
+{
+    TaskHandle_t worker = s_agent.worker_task;
+    if (worker == NULL) return ESP_OK;
+    for (size_t attempt = 0U; attempt < 250U; ++attempt) {
+        if (eTaskGetState(worker) == eSuspended) {
+            vTaskDeleteWithCaps(worker);
+            s_agent.worker_task = NULL;
+            return ESP_OK;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return ESP_ERR_TIMEOUT;
 }
 
 esp_err_t agent_transport_init(const agent_transport_config_t *config)
@@ -1413,7 +1625,7 @@ esp_err_t agent_transport_init(const agent_transport_config_t *config)
                                    ? AGENT_TRANSPORT_PROTOCOL_V1
                                    : config->protocol_version;
     if (protocol_version < AGENT_TRANSPORT_PROTOCOL_V1 ||
-        protocol_version > AGENT_TRANSPORT_PROTOCOL_V3) {
+        protocol_version > AGENT_TRANSPORT_PROTOCOL_V4) {
         return ESP_ERR_INVALID_ARG;
     }
     snprintf(s_agent.uri, sizeof(s_agent.uri), "%s", config->uri);
@@ -1421,6 +1633,7 @@ esp_err_t agent_transport_init(const agent_transport_config_t *config)
     snprintf(s_agent.token, sizeof(s_agent.token), "%s", config->device_token);
     memcpy(s_agent.spki_sha256, config->paired_spki_sha256, sizeof(s_agent.spki_sha256));
     s_agent.protocol_version = protocol_version;
+    if (protocol_version == AGENT_TRANSPORT_PROTOCOL_V4) world_service_enable_multi_actor();
     uint8_t zero_pin[AGENT_TRANSPORT_SPKI_SHA256_BYTES] = {0};
     if (agent_constant_time_equal(s_agent.spki_sha256, zero_pin, sizeof(zero_pin))) {
         return ESP_ERR_INVALID_ARG;
@@ -1458,6 +1671,7 @@ esp_err_t agent_transport_start(void)
     if (!s_agent.enabled || s_agent.running) {
         return ESP_OK;
     }
+    ESP_RETURN_ON_ERROR(agent_delete_worker_task(), TAG, "failed to reap Agent worker task");
     ESP_RETURN_ON_FALSE(world_service_is_ready(), ESP_ERR_INVALID_STATE, TAG,
                         "world service is not ready");
     esp_websocket_client_config_t ws_config = {
@@ -1490,9 +1704,12 @@ esp_err_t agent_transport_start(void)
     s_agent.running = true;
     s_agent.reconnect_requested = false;
     agent_cancel_world_disconnect();
-    BaseType_t task_result = xTaskCreate(agent_worker, "agent_transport",
+    // Keep the large JSON/world worker stack out of internal RAM so that the
+    // TLS and HA WebSocket tasks can start together during a normal boot.
+    BaseType_t task_result = xTaskCreateWithCaps(agent_worker, "agent_transport",
                                          CONFIG_P4HOME_AGENT_TRANSPORT_TASK_STACK,
-                                         NULL, 5, &s_agent.worker_task);
+                                         NULL, 5, &s_agent.worker_task,
+                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (task_result != pdPASS) {
         s_agent.running = false;
         esp_websocket_client_destroy(s_agent.ws);
@@ -1502,9 +1719,7 @@ esp_err_t agent_transport_start(void)
     result = esp_websocket_client_start(s_agent.ws);
     if (result != ESP_OK) {
         s_agent.running = false;
-        for (size_t attempt = 0U; attempt < 250U && s_agent.worker_task != NULL; ++attempt) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
+        ESP_RETURN_ON_ERROR(agent_delete_worker_task(), TAG, "failed to stop Agent worker task");
         esp_websocket_client_destroy(s_agent.ws);
         s_agent.ws = NULL;
         return result;
@@ -1520,12 +1735,7 @@ esp_err_t agent_transport_stop(void)
     s_agent.running = false;
     s_agent.reconnect_requested = false;
     agent_cancel_world_disconnect();
-    for (size_t attempt = 0U; attempt < 250U && s_agent.worker_task != NULL; ++attempt) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    if (s_agent.worker_task != NULL) {
-        return ESP_ERR_TIMEOUT;
-    }
+    ESP_RETURN_ON_ERROR(agent_delete_worker_task(), TAG, "failed to stop Agent worker task");
     if (s_agent.ws != NULL) {
         (void)esp_websocket_client_stop(s_agent.ws);
         (void)esp_websocket_client_destroy(s_agent.ws);

@@ -766,6 +766,7 @@ static void sr_service_runtime_task(void *parameter)
     int16_t *mic_frame = NULL;
     int16_t *afe_input = NULL;
     bool stream_open = false;
+    bool local_command_window = false;
     audio_service_lease_t audio_lease = {0};
 
     if (feed_chunksize <= 0 || feed_channels <= 0) {
@@ -898,13 +899,28 @@ static void sr_service_runtime_task(void *parameter)
                     s_capture_active = s_capture_listener.begin_capture(
                         s_capture_listener.context, capture_started_at_us);
                 }
+                /* One decoder owns each wake window. Running the English
+                 * MultiNet CTC decoder on arbitrary Chinese conversation can
+                 * crash inside ctc_path_extend and can prematurely close the
+                 * remote capture on a spurious fixed-command match. Latch the
+                 * owner so a transport failure cannot switch decoders midway. */
+                local_command_window = s_capture_listener.begin_capture == NULL;
+                if (!local_command_window && !s_capture_active) {
+                    sr_service_finish_command_window("capture_unavailable",
+                                                     "Remote capture unavailable",
+                                                     "remote capture unavailable");
+                    continue;
+                }
                 if (s_capture_active) sr_service_preroll_start_drain(capture_started_at_us);
                 else sr_service_preroll_reset();
-                if (s_command_iface != NULL && s_command_model_data != NULL &&
+                if (local_command_window && s_command_iface != NULL && s_command_model_data != NULL &&
                     sr_status_command_set_ready_get()) {
                     s_command_iface->clean(s_command_model_data);
                     SR_STATUS_MUTATE(s_status.status_text = "Wake acknowledged; awaiting fixed voice command";);
                     sr_service_publish_voice_status("Voice awake: waiting for fixed command.");
+                } else if (s_capture_active) {
+                    SR_STATUS_MUTATE(s_status.status_text = "Remote conversation capture active";);
+                    ESP_LOGW(TAG, "VERIFY:voice:capture_owner:PASS owner=remote local_detect=off");
                 }
             }
         }
@@ -912,12 +928,13 @@ static void sr_service_runtime_task(void *parameter)
         if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE &&
             sr_service_deadline_reached(state_now, s_awake_deadline)) {
             const bool command_runtime_ready =
-                s_command_iface != NULL && s_command_model_data != NULL &&
+                local_command_window && s_command_iface != NULL && s_command_model_data != NULL &&
                 sr_status_command_set_ready_get();
-            sr_service_finish_command_window(command_runtime_ready ? "deadline" : "deadline_no_runtime",
+            sr_service_finish_command_window(!local_command_window ? "capture_deadline" :
+                                             command_runtime_ready ? "deadline" : "deadline_no_runtime",
                                              command_runtime_ready
                                                  ? "Fixed command hard deadline reached"
-                                                 : "Wake session expired without command runtime",
+                                                 : "Voice capture hard deadline reached",
                                              command_runtime_ready
                                                  ? "command hard deadline"
                                                  : "awake hold elapsed");
@@ -971,7 +988,7 @@ static void sr_service_runtime_task(void *parameter)
                                       (size_t)fetch_result->data_size / sizeof(int16_t));
         }
 
-        if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE &&
+        if (local_command_window && sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE &&
             s_command_iface != NULL && s_command_model_data != NULL && sr_status_command_set_ready_get()) {
             if (fetch_result->data != NULL && fetch_result->data_size > 0) {
                 const int command_samples = fetch_result->data_size / (int)sizeof(int16_t);
@@ -1046,10 +1063,8 @@ static void sr_service_runtime_task(void *parameter)
         }
 
         /*
-         * Offer a frame to the remote transcript path only after the local
-         * fixed-command detector has had the opportunity to consume it. A
-         * detected local command closes the window above, so its decisive
-         * frame is not also offered to the remote transcription path.
+         * A remote-owned wake window never enters the fixed-command decoder.
+         * Keep its PCM stream complete until VAD or the hard capture deadline.
          */
         if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE && s_capture_active &&
             s_capture_listener.offer_pcm != NULL && fetch_result->data != NULL &&
@@ -1073,7 +1088,6 @@ static void sr_service_runtime_task(void *parameter)
          * The eight-second awake deadline is a hard upper bound, not an
          * endpointing policy. Once live speech has been observed, finish a
          * transport capture after a bounded trailing-silence window. The
-         * local fixed-command detector above gets every frame first, and the
          * hard deadline remains the fallback for noise or continuous speech.
          */
         if (sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE &&

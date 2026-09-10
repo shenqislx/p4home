@@ -14,6 +14,8 @@
 #endif
 
 typedef struct {
+    world_actor_id_t actor_id;
+    world_action_origin_t origin;
     bool used;
     char action_id[WORLD_SERVICE_ACTION_ID_MAX_BYTES + 1U];
     world_action_tool_t tool;
@@ -42,7 +44,10 @@ typedef struct {
     void *clock_user_data;
     uint32_t retention_ms;
     size_t record_capacity;
-    world_service_snapshot_t snapshot;
+    world_service_snapshot_t snapshot; /* Human / legacy default */
+    world_service_snapshot_t cat_snapshot;
+    uint32_t world_version;
+    bool cat_preemption_pending;
     world_action_record_t *records;
     size_t queue[WORLD_SERVICE_ACTION_QUEUE_CAPACITY];
     size_t queue_count;
@@ -52,6 +57,7 @@ typedef struct {
     size_t observer_count;
     bool object_external_occupied[WORLD_SERVICE_OBJECT_CAPACITY];
     bool object_character_occupied[WORLD_SERVICE_OBJECT_CAPACITY];
+    bool object_cat_occupied[WORLD_SERVICE_OBJECT_CAPACITY];
     uint64_t last_user_interaction_monotonic_ms;
     bool sleep_clock_ready;
     bool sleep_is_night;
@@ -63,6 +69,11 @@ static portMUX_TYPE s_world_lock = portMUX_INITIALIZER_UNLOCKED;
 static world_service_state_t s_world;
 
 #define WORLD_NO_RECORD SIZE_MAX
+
+static world_service_snapshot_t *world_actor_locked(world_actor_id_t actor)
+{
+    return actor == WORLD_ACTOR_CAT ? &s_world.cat_snapshot : &s_world.snapshot;
+}
 
 static world_action_record_t *world_allocate_records(size_t capacity)
 {
@@ -226,7 +237,12 @@ static world_object_action_t world_object_action_for_tool(world_action_tool_t to
 
 static bool world_valid_request(const world_action_request_t *request)
 {
-    if (request == NULL || !world_valid_action_id(request->action_id) ||
+    if (request == NULL || request->actor_id < WORLD_ACTOR_HUMAN ||
+        request->actor_id >= WORLD_ACTOR_COUNT ||
+        request->origin < WORLD_ORIGIN_USER || request->origin > WORLD_ORIGIN_TEST ||
+        (request->actor_id == WORLD_ACTOR_CAT && request->origin == WORLD_ORIGIN_USER) ||
+        (request->actor_id == WORLD_ACTOR_HUMAN && request->origin == WORLD_ORIGIN_AUTONOMY) ||
+        !world_valid_action_id(request->action_id) ||
         request->timeout_ms < 100U || request->timeout_ms > 120000U ||
         request->tool < WORLD_ACTION_V1_FIRST ||
         request->tool > WORLD_ACTION_OBJECT_LAST) {
@@ -261,7 +277,8 @@ static bool world_valid_request(const world_action_request_t *request)
 static bool world_request_matches(const world_action_record_t *record,
                                   const world_action_request_t *request)
 {
-    if (record->tool != request->tool) {
+    if (record->actor_id != request->actor_id || record->origin != request->origin ||
+        record->timeout_ms != request->timeout_ms || record->tool != request->tool) {
         return false;
     }
     switch (request->tool) {
@@ -287,6 +304,8 @@ static bool world_request_matches(const world_action_record_t *record,
 static void world_copy_request(world_action_record_t *record,
                                const world_action_request_t *request)
 {
+    record->actor_id = request->actor_id;
+    record->origin = request->origin;
     record->tool = request->tool;
     record->timeout_ms = request->timeout_ms;
     world_copy_text(record->action_id, sizeof(record->action_id), request->action_id);
@@ -315,10 +334,19 @@ static void world_copy_request(world_action_record_t *record,
     }
 }
 
+static void world_actor_snapshot_locked(world_actor_id_t actor, world_service_snapshot_t *snapshot)
+{
+    *snapshot = *world_actor_locked(actor);
+    snapshot->actor_id = actor;
+    snapshot->world_version = s_world.world_version;
+    snapshot->object_count = s_world.snapshot.object_count;
+    memcpy(snapshot->objects, s_world.snapshot.objects, sizeof(snapshot->objects));
+    snapshot->observed_at_ms = world_wall_now();
+}
+
 static void world_snapshot_locked(world_service_snapshot_t *snapshot)
 {
-    *snapshot = s_world.snapshot;
-    snapshot->observed_at_ms = world_wall_now();
+    world_actor_snapshot_locked(WORLD_ACTOR_HUMAN, snapshot);
 }
 
 static void world_notify_observer(void)
@@ -348,7 +376,9 @@ static void world_event_base_locked(world_action_event_t *event,
     event->status = status;
     event->tool = record->tool;
     event->occurred_at_ms = world_wall_now();
-    event->state_version = s_world.snapshot.state_version;
+    event->actor_id = record->actor_id;
+    event->world_version = s_world.world_version;
+    event->state_version = world_actor_locked(record->actor_id)->state_version;
     world_copy_text(event->action_id, sizeof(event->action_id), record->action_id);
 }
 
@@ -425,17 +455,23 @@ static bool world_record_expired_locked(const world_action_record_t *record,
 
 static void world_clear_active_locked(void)
 {
+    world_service_snapshot_t *snapshot = world_actor_locked(s_world.records[s_world.active_record].actor_id);
     s_world.active_record = WORLD_NO_RECORD;
-    s_world.snapshot.active_action_id[0] = '\0';
-    s_world.snapshot.speaking = false;
-    s_world.snapshot.active_animation = WORLD_OBJECT_ANIMATION_NONE;
+    snapshot->active_action_id[0] = '\0';
+    snapshot->speaking = false;
+    snapshot->active_animation = WORLD_OBJECT_ANIMATION_NONE;
+}
+
+static void world_increment_actor_version_locked(world_actor_id_t actor)
+{
+    world_service_snapshot_t *snapshot = world_actor_locked(actor);
+    if (snapshot->state_version < UINT32_MAX) snapshot->state_version++;
+    if (s_world.world_version < UINT32_MAX) s_world.world_version++;
 }
 
 static void world_increment_version_locked(void)
 {
-    if (s_world.snapshot.state_version < UINT32_MAX) {
-        s_world.snapshot.state_version++;
-    }
+    world_increment_actor_version_locked(WORLD_ACTOR_HUMAN);
 }
 
 static size_t world_object_index_locked(const char *object_id)
@@ -451,17 +487,26 @@ static size_t world_object_index_locked(const char *object_id)
 static void world_refresh_object_occupied_locked(size_t index)
 {
     s_world.snapshot.objects[index].occupied =
-        s_world.object_external_occupied[index] || s_world.object_character_occupied[index];
+        s_world.object_external_occupied[index] || s_world.object_character_occupied[index] ||
+        s_world.object_cat_occupied[index];
+    s_world.snapshot.objects[index].occupied_by_actor = s_world.object_character_occupied[index]
+        ? WORLD_ACTOR_HUMAN : s_world.object_cat_occupied[index] ? WORLD_ACTOR_CAT : WORLD_ACTOR_NONE;
+}
+
+static void world_release_actor_occupancy_locked(world_actor_id_t actor)
+{
+    bool *occupied = actor == WORLD_ACTOR_CAT ? s_world.object_cat_occupied : s_world.object_character_occupied;
+    for (size_t index = 0U; index < s_world.snapshot.object_count; ++index) {
+        if (occupied[index]) {
+            occupied[index] = false;
+            world_refresh_object_occupied_locked(index);
+        }
+    }
 }
 
 static void world_release_character_occupancy_locked(void)
 {
-    for (size_t index = 0U; index < s_world.snapshot.object_count; ++index) {
-        if (s_world.object_character_occupied[index]) {
-            s_world.object_character_occupied[index] = false;
-            world_refresh_object_occupied_locked(index);
-        }
-    }
+    world_release_actor_occupancy_locked(WORLD_ACTOR_HUMAN);
 }
 
 static world_action_error_t world_object_request_error_locked(
@@ -481,11 +526,13 @@ static world_action_error_t world_object_request_error_locked(
         !s_world.snapshot.objects[object_index].available) {
         return WORLD_ACTION_ERROR_OBJECT_UNAVAILABLE;
     }
-    if (s_world.object_external_occupied[object_index]) {
+    if (s_world.object_external_occupied[object_index] ||
+        (record->actor_id == WORLD_ACTOR_CAT ? s_world.object_character_occupied[object_index]
+                                            : s_world.object_cat_occupied[object_index])) {
         return WORLD_ACTION_ERROR_OBJECT_OCCUPIED;
     }
     if (action != WORLD_OBJECT_ACTION_GO_TO &&
-        strcmp(s_world.snapshot.target_object_id, record->arguments.target_id) != 0) {
+        strcmp(world_actor_locked(record->actor_id)->target_object_id, record->arguments.target_id) != 0) {
         return WORLD_ACTION_ERROR_OBJECT_NOT_REACHED;
     }
     return WORLD_ACTION_ERROR_NONE;
@@ -509,6 +556,7 @@ static void world_initialize_objects_locked(void)
         state->room = definition->room;
         state->available = definition->default_available;
         state->occupied = false;
+        state->occupied_by_actor = WORLD_ACTOR_NONE;
     }
     s_world.snapshot.character_facing = WORLD_OBJECT_FACING_RIGHT;
     s_world.snapshot.character_pose = WORLD_CHARACTER_POSE_STANDING;
@@ -567,6 +615,9 @@ esp_err_t world_service_init(const world_service_config_t *config)
     s_world.snapshot.observed_at_ms = world_wall_now();
     s_world.last_user_interaction_monotonic_ms = world_monotonic_now();
     world_initialize_objects_locked();
+    s_world.world_version = 1U;
+    s_world.cat_snapshot = s_world.snapshot;
+    s_world.cat_snapshot.actor_id = WORLD_ACTOR_CAT;
     s_world.initialized = true;
     portEXIT_CRITICAL(&s_world_lock);
     return ESP_OK;
@@ -621,6 +672,82 @@ void world_service_get_snapshot(world_service_snapshot_t *snapshot)
     portEXIT_CRITICAL(&s_world_lock);
 }
 
+void world_service_get_actor_snapshot(world_actor_id_t actor, world_service_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) return;
+    memset(snapshot, 0, sizeof(*snapshot));
+    portENTER_CRITICAL(&s_world_lock);
+    if (s_world.initialized && actor >= WORLD_ACTOR_HUMAN && actor < WORLD_ACTOR_COUNT)
+        world_actor_snapshot_locked(actor, snapshot);
+    portEXIT_CRITICAL(&s_world_lock);
+}
+
+void world_service_get_actors(world_service_snapshot_t snapshots[WORLD_ACTOR_COUNT])
+{
+    if (snapshots == NULL) return;
+    memset(snapshots, 0, sizeof(*snapshots) * WORLD_ACTOR_COUNT);
+    portENTER_CRITICAL(&s_world_lock);
+    if (s_world.initialized) for (size_t i = 0; i < WORLD_ACTOR_COUNT; i++)
+        world_actor_snapshot_locked((world_actor_id_t)i, &snapshots[i]);
+    portEXIT_CRITICAL(&s_world_lock);
+}
+
+void world_service_enable_multi_actor(void)
+{
+    portENTER_CRITICAL(&s_world_lock);
+    s_world.snapshot.multi_actor = true;
+    s_world.cat_snapshot.multi_actor = true;
+    portEXIT_CRITICAL(&s_world_lock);
+}
+
+bool world_service_has_active_action(void)
+{
+    portENTER_CRITICAL(&s_world_lock);
+    bool active = s_world.initialized && s_world.active_record != WORLD_NO_RECORD;
+    portEXIT_CRITICAL(&s_world_lock);
+    return active;
+}
+
+static bool world_has_human_work_locked(void)
+{
+    if (s_world.user_interaction_active) return true;
+    if (s_world.active_record != WORLD_NO_RECORD &&
+        s_world.records[s_world.active_record].actor_id == WORLD_ACTOR_HUMAN) return true;
+    for (size_t i = 0; i < s_world.queue_count; i++)
+        if (s_world.records[s_world.queue[i]].actor_id == WORLD_ACTOR_HUMAN) return true;
+    return false;
+}
+
+esp_err_t world_service_preempt_cat_next(world_action_event_t *event)
+{
+    if (event == NULL) return ESP_ERR_INVALID_ARG;
+    portENTER_CRITICAL(&s_world_lock);
+    if (!s_world.initialized) { portEXIT_CRITICAL(&s_world_lock); return ESP_ERR_INVALID_STATE; }
+    if (!s_world.cat_preemption_pending && !s_world.user_interaction_active) {
+        portEXIT_CRITICAL(&s_world_lock); return ESP_ERR_NOT_FOUND;
+    }
+    size_t index = WORLD_NO_RECORD;
+    bool notify = false;
+    if (s_world.active_record != WORLD_NO_RECORD && s_world.records[s_world.active_record].actor_id == WORLD_ACTOR_CAT) {
+        index = s_world.active_record;
+        world_clear_active_locked();
+        world_increment_actor_version_locked(WORLD_ACTOR_CAT);
+        notify = true;
+    } else for (size_t i = 0; i < s_world.queue_count; i++) {
+        if (s_world.records[s_world.queue[i]].actor_id == WORLD_ACTOR_CAT) { index = s_world.queue[i]; break; }
+    }
+    if (index == WORLD_NO_RECORD) {
+        s_world.cat_preemption_pending = false;
+        portEXIT_CRITICAL(&s_world_lock); return ESP_ERR_NOT_FOUND;
+    }
+    world_remove_queued_record_locked(index);
+    world_set_failure_locked(&s_world.records[index], WORLD_ACTION_ERROR_CANCELLED, false);
+    *event = s_world.records[index].latest_event;
+    portEXIT_CRITICAL(&s_world_lock);
+    if (notify) world_notify_observer();
+    return ESP_OK;
+}
+
 esp_err_t world_service_set_agent_connected(bool connected)
 {
     bool changed = false;
@@ -631,6 +758,15 @@ esp_err_t world_service_set_agent_connected(bool connected)
     }
     changed = s_world.snapshot.agent_connected != connected;
     s_world.snapshot.agent_connected = connected;
+    s_world.cat_snapshot.agent_connected = connected;
+    if (!connected && s_world.cat_snapshot.target_object_id[0] != '\0') {
+        world_release_actor_occupancy_locked(WORLD_ACTOR_CAT);
+        s_world.cat_snapshot.target_object_id[0] = '\0';
+        s_world.cat_snapshot.character_pose = WORLD_CHARACTER_POSE_STANDING;
+        s_world.cat_snapshot.active_animation = WORLD_OBJECT_ANIMATION_NONE;
+        world_increment_actor_version_locked(WORLD_ACTOR_CAT);
+        changed = true;
+    }
     if (connected) {
         s_world.fallback_sleep_reason = WORLD_FALLBACK_SLEEP_NONE;
         if (changed) {
@@ -757,6 +893,7 @@ esp_err_t world_service_set_user_interaction_active(bool active)
         wake_changed = world_note_user_interaction_locked(world_monotonic_now());
     }
     s_world.user_interaction_active = active;
+    if (active) s_world.cat_preemption_pending = true;
     if (!active) {
         gate_changed = world_apply_sleep_gate_locked(world_monotonic_now());
     }
@@ -898,6 +1035,13 @@ esp_err_t world_service_set_object_available(const char *object_id, bool availab
         s_world.snapshot.character_pose = WORLD_CHARACTER_POSE_STANDING;
         changed = true;
     }
+    if (!available && strcmp(s_world.cat_snapshot.target_object_id, object_id) == 0) {
+        world_release_actor_occupancy_locked(WORLD_ACTOR_CAT);
+        s_world.cat_snapshot.target_object_id[0] = '\0';
+        s_world.cat_snapshot.character_pose = WORLD_CHARACTER_POSE_STANDING;
+        world_increment_actor_version_locked(WORLD_ACTOR_CAT);
+        changed = true;
+    }
     if (changed) {
         world_increment_version_locked();
     }
@@ -934,6 +1078,13 @@ esp_err_t world_service_set_object_occupied(const char *object_id, bool occupied
         }
         s_world.snapshot.target_object_id[0] = '\0';
         s_world.snapshot.character_pose = WORLD_CHARACTER_POSE_STANDING;
+        changed = true;
+    }
+    if (occupied && strcmp(s_world.cat_snapshot.target_object_id, object_id) == 0) {
+        world_release_actor_occupancy_locked(WORLD_ACTOR_CAT);
+        s_world.cat_snapshot.target_object_id[0] = '\0';
+        s_world.cat_snapshot.character_pose = WORLD_CHARACTER_POSE_STANDING;
+        world_increment_actor_version_locked(WORLD_ACTOR_CAT);
         changed = true;
     }
     if (changed) {
@@ -987,19 +1138,38 @@ esp_err_t world_service_submit(const world_action_request_t *request,
     world_action_error_t object_error = world_tool_is_object_action(record->tool)
                                             ? world_object_request_error_locked(record)
                                             : WORLD_ACTION_ERROR_NONE;
-    if (object_error != WORLD_ACTION_ERROR_NONE) {
+    if (request->actor_id == WORLD_ACTOR_CAT && (world_has_human_work_locked() || s_world.cat_preemption_pending)) {
+        world_set_failure_locked(record, WORLD_ACTION_ERROR_DEVICE_BUSY, true);
+    } else if (object_error != WORLD_ACTION_ERROR_NONE) {
         world_set_failure_locked(record, object_error,
                                  world_object_error_retryable(object_error));
     } else {
         size_t in_flight = s_world.queue_count +
                            (s_world.active_record != WORLD_NO_RECORD ? 1U : 0U);
-        if (in_flight >= WORLD_SERVICE_ACTION_QUEUE_CAPACITY) {
+        size_t cat_queued = 0U;
+        for (size_t i = 0; i < s_world.queue_count; i++)
+            if (s_world.records[s_world.queue[i]].actor_id == WORLD_ACTOR_CAT) cat_queued++;
+        if (in_flight >= WORLD_SERVICE_ACTION_QUEUE_CAPACITY ||
+            (request->actor_id == WORLD_ACTOR_CAT && cat_queued >= 2U)) {
             world_set_failure_locked(record, WORLD_ACTION_ERROR_QUEUE_FULL, true);
         } else {
             world_event_base_locked(&record->latest_event, record, WORLD_ACTION_STATUS_ACCEPTED);
             record->latest_event.queue_position = (uint8_t)in_flight;
-            s_world.queue[s_world.queue_count++] = record_index;
-            if (world_note_user_interaction_locked(now_ms)) {
+            size_t insert = s_world.queue_count;
+            unsigned priority = request->actor_id == WORLD_ACTOR_HUMAN ?
+                (request->origin == WORLD_ORIGIN_USER ? 0U : 1U) :
+                (request->origin == WORLD_ORIGIN_AUTONOMY ? 3U : 2U);
+            while (insert > 0) {
+                world_action_record_t *queued = &s_world.records[s_world.queue[insert - 1U]];
+                unsigned other = queued->actor_id == WORLD_ACTOR_HUMAN ?
+                    (queued->origin == WORLD_ORIGIN_USER ? 0U : 1U) :
+                    (queued->origin == WORLD_ORIGIN_AUTONOMY ? 3U : 2U);
+                if (other <= priority) break;
+                s_world.queue[insert] = s_world.queue[insert - 1U]; insert--;
+            }
+            s_world.queue[insert] = record_index; s_world.queue_count++;
+            if (request->actor_id == WORLD_ACTOR_HUMAN) s_world.cat_preemption_pending = true;
+            if (request->actor_id == WORLD_ACTOR_HUMAN && world_note_user_interaction_locked(now_ms)) {
                 world_increment_version_locked();
                 notify = true;
             }
@@ -1033,8 +1203,12 @@ esp_err_t world_service_start_next(world_action_event_t *event)
         return ESP_ERR_NOT_FOUND;
     }
     size_t record_index = s_world.queue[0];
+    if (s_world.records[record_index].actor_id == WORLD_ACTOR_CAT && world_has_human_work_locked()) {
+        portEXIT_CRITICAL(&s_world_lock); return ESP_ERR_INVALID_STATE;
+    }
     world_remove_queued_record_locked(record_index);
     world_action_record_t *record = &s_world.records[record_index];
+    world_service_snapshot_t *snapshot = world_actor_locked(record->actor_id);
     uint64_t now_ms = world_monotonic_now();
     world_action_error_t object_error = world_tool_is_object_action(record->tool)
                                             ? world_object_request_error_locked(record)
@@ -1046,17 +1220,17 @@ esp_err_t world_service_start_next(world_action_event_t *event)
                                  world_object_error_retryable(object_error));
     } else {
         s_world.active_record = record_index;
-        (void)world_note_user_interaction_locked(now_ms);
-        world_copy_text(s_world.snapshot.active_action_id,
-                        sizeof(s_world.snapshot.active_action_id), record->action_id);
-        s_world.snapshot.speaking = record->tool == WORLD_ACTION_CHARACTER_SAY;
+        if (record->actor_id == WORLD_ACTOR_HUMAN) (void)world_note_user_interaction_locked(now_ms);
+        world_copy_text(snapshot->active_action_id,
+                        sizeof(snapshot->active_action_id), record->action_id);
+        snapshot->speaking = record->tool == WORLD_ACTION_CHARACTER_SAY;
         if (world_tool_is_object_action(record->tool)) {
             const world_object_definition_t *definition =
                 world_object_registry_find(record->arguments.target_id);
-            s_world.snapshot.active_animation = world_object_animation_for(
+            snapshot->active_animation = world_object_animation_for(
                 definition, world_object_action_for_tool(record->tool));
         }
-        world_increment_version_locked();
+        world_increment_actor_version_locked(record->actor_id);
         world_event_base_locked(&record->latest_event, record, WORLD_ACTION_STATUS_STARTED);
         notify = true;
     }
@@ -1105,79 +1279,81 @@ esp_err_t world_service_complete_active(world_action_event_t *event)
         return ESP_ERR_NOT_FOUND;
     }
     world_action_record_t *record = &s_world.records[s_world.active_record];
+    world_service_snapshot_t *snapshot = world_actor_locked(record->actor_id);
     uint64_t now_ms = world_monotonic_now();
     world_action_error_t object_error = world_tool_is_object_action(record->tool)
                                             ? world_object_request_error_locked(record)
                                             : WORLD_ACTION_ERROR_NONE;
     if (world_record_expired_locked(record, now_ms)) {
-        s_world.last_user_interaction_monotonic_ms = now_ms;
+        if (record->actor_id == WORLD_ACTOR_HUMAN) s_world.last_user_interaction_monotonic_ms = now_ms;
         world_clear_active_locked();
-        world_increment_version_locked();
+        world_increment_actor_version_locked(record->actor_id);
         world_set_failure_locked(record, WORLD_ACTION_ERROR_DEADLINE_EXCEEDED, false);
     } else if (object_error != WORLD_ACTION_ERROR_NONE) {
-        s_world.last_user_interaction_monotonic_ms = now_ms;
+        if (record->actor_id == WORLD_ACTOR_HUMAN) s_world.last_user_interaction_monotonic_ms = now_ms;
         world_clear_active_locked();
-        world_increment_version_locked();
+        world_increment_actor_version_locked(record->actor_id);
         world_set_failure_locked(record, object_error,
                                  world_object_error_retryable(object_error));
     } else {
         /* Completion is the newest meaningful Human activity. This prevents a
          * long-running action from falling straight into sleep on its terminal
          * snapshot. */
-        s_world.last_user_interaction_monotonic_ms = now_ms;
+        if (record->actor_id == WORLD_ACTOR_HUMAN) s_world.last_user_interaction_monotonic_ms = now_ms;
         world_clear_active_locked();
         switch (record->tool) {
         case WORLD_ACTION_CHARACTER_GO_TO_ROOM:
-            world_release_character_occupancy_locked();
-            s_world.snapshot.room = record->arguments.room;
-            s_world.snapshot.target_object_id[0] = '\0';
-            s_world.snapshot.character_pose = WORLD_CHARACTER_POSE_STANDING;
-            s_world.snapshot.activity = WORLD_ACTIVITY_IDLE;
+            world_release_actor_occupancy_locked(record->actor_id);
+            snapshot->room = record->arguments.room;
+            snapshot->target_object_id[0] = '\0';
+            snapshot->character_pose = WORLD_CHARACTER_POSE_STANDING;
+            snapshot->activity = WORLD_ACTIVITY_IDLE;
             break;
         case WORLD_ACTION_CHARACTER_SET_ACTIVITY:
             if (record->arguments.activity == WORLD_ACTIVITY_SLEEP) {
                 /* The legacy request cannot bypass the same night + idle gate,
                  * and its terminal result reports the actual gated state. */
-                (void)world_apply_sleep_gate_locked(now_ms);
+                if (record->actor_id == WORLD_ACTOR_CAT) snapshot->activity = WORLD_ACTIVITY_SLEEP;
+                else (void)world_apply_sleep_gate_locked(now_ms);
             } else {
-                s_world.snapshot.activity = WORLD_ACTIVITY_IDLE;
+                snapshot->activity = WORLD_ACTIVITY_IDLE;
             }
             break;
         case WORLD_ACTION_CHARACTER_SAY:
-            world_copy_text(s_world.snapshot.speech_text,
-                            sizeof(s_world.snapshot.speech_text), record->arguments.text);
-            s_world.snapshot.speech_revision++;
-            s_world.snapshot.speech_tone = WORLD_SPEECH_TONE_DEFAULT;
+            world_copy_text(snapshot->speech_text,
+                            sizeof(snapshot->speech_text), record->arguments.text);
+            snapshot->speech_revision++;
+            snapshot->speech_tone = WORLD_SPEECH_TONE_DEFAULT;
             break;
         case WORLD_ACTION_CHARACTER_GO_TO_OBJECT: {
             const world_object_definition_t *definition =
                 world_object_registry_find(record->arguments.target_id);
-            world_release_character_occupancy_locked();
-            s_world.snapshot.room = definition->room;
-            s_world.snapshot.activity = WORLD_ACTIVITY_IDLE;
-            world_copy_text(s_world.snapshot.target_object_id,
-                            sizeof(s_world.snapshot.target_object_id), definition->object_id);
-            s_world.snapshot.character_art_x = definition->anchor_art_x;
-            s_world.snapshot.character_floor_y = definition->anchor_floor_y;
-            s_world.snapshot.character_facing = definition->facing;
-            s_world.snapshot.character_pose = WORLD_CHARACTER_POSE_STANDING;
+            world_release_actor_occupancy_locked(record->actor_id);
+            snapshot->room = definition->room;
+            snapshot->activity = WORLD_ACTIVITY_IDLE;
+            world_copy_text(snapshot->target_object_id,
+                            sizeof(snapshot->target_object_id), definition->object_id);
+            snapshot->character_art_x = definition->anchor_art_x;
+            snapshot->character_floor_y = definition->anchor_floor_y;
+            snapshot->character_facing = definition->facing;
+            snapshot->character_pose = WORLD_CHARACTER_POSE_STANDING;
             break;
         }
         case WORLD_ACTION_CHARACTER_SIT: {
             size_t object_index = world_object_index_locked(record->arguments.target_id);
-            world_release_character_occupancy_locked();
-            s_world.object_character_occupied[object_index] = true;
+            world_release_actor_occupancy_locked(record->actor_id);
+            (record->actor_id == WORLD_ACTOR_CAT ? s_world.object_cat_occupied : s_world.object_character_occupied)[object_index] = true;
             world_refresh_object_occupied_locked(object_index);
-            s_world.snapshot.character_pose = WORLD_CHARACTER_POSE_SITTING;
-            s_world.snapshot.activity = WORLD_ACTIVITY_IDLE;
+            snapshot->character_pose = WORLD_CHARACTER_POSE_SITTING;
+            snapshot->activity = WORLD_ACTIVITY_IDLE;
             break;
         }
         case WORLD_ACTION_CHARACTER_LOOK_AT:
         case WORLD_ACTION_CHARACTER_INTERACT: {
             const world_object_definition_t *definition =
                 world_object_registry_find(record->arguments.target_id);
-            s_world.snapshot.character_facing = definition->facing;
-            s_world.snapshot.activity = WORLD_ACTIVITY_IDLE;
+            snapshot->character_facing = definition->facing;
+            snapshot->activity = WORLD_ACTIVITY_IDLE;
             break;
         }
         case WORLD_ACTION_CHARACTER_GET_STATE:
@@ -1185,14 +1361,14 @@ esp_err_t world_service_complete_active(world_action_event_t *event)
         default:
             break;
         }
-        world_increment_version_locked();
+        world_increment_actor_version_locked(record->actor_id);
         world_event_base_locked(&record->latest_event, record, WORLD_ACTION_STATUS_COMPLETED);
         switch (record->tool) {
         case WORLD_ACTION_CHARACTER_GO_TO_ROOM:
-            record->latest_event.result.room = s_world.snapshot.room;
+            record->latest_event.result.room = snapshot->room;
             break;
         case WORLD_ACTION_CHARACTER_SET_ACTIVITY:
-            record->latest_event.result.activity = s_world.snapshot.activity;
+            record->latest_event.result.activity = snapshot->activity;
             break;
         case WORLD_ACTION_CHARACTER_SAY:
             world_copy_text(record->latest_event.result.text,
@@ -1200,7 +1376,7 @@ esp_err_t world_service_complete_active(world_action_event_t *event)
             break;
         case WORLD_ACTION_CHARACTER_GET_STATE:
         case WORLD_ACTION_GET_SNAPSHOT:
-            world_snapshot_locked(&record->latest_event.result.snapshot);
+            world_actor_snapshot_locked(record->actor_id, &record->latest_event.result.snapshot);
             break;
         case WORLD_ACTION_CHARACTER_GO_TO_OBJECT:
         case WORLD_ACTION_CHARACTER_SIT:
@@ -1211,7 +1387,7 @@ esp_err_t world_service_complete_active(world_action_event_t *event)
                             record->arguments.target_id);
             record->latest_event.result.object.action =
                 world_object_action_for_tool(record->tool);
-            record->latest_event.result.object.pose = s_world.snapshot.character_pose;
+            record->latest_event.result.object.pose = snapshot->character_pose;
             break;
         default:
             break;
@@ -1241,9 +1417,9 @@ esp_err_t world_service_expire_next_due(world_action_event_t *event)
     if (s_world.active_record != WORLD_NO_RECORD &&
         world_record_expired_locked(&s_world.records[s_world.active_record], now_ms)) {
         record_index = s_world.active_record;
-        s_world.last_user_interaction_monotonic_ms = now_ms;
+        if (s_world.records[record_index].actor_id == WORLD_ACTOR_HUMAN) s_world.last_user_interaction_monotonic_ms = now_ms;
         world_clear_active_locked();
-        world_increment_version_locked();
+        world_increment_actor_version_locked(s_world.records[record_index].actor_id);
         notify = true;
     } else {
         for (size_t queue_index = 0U; queue_index < s_world.queue_count; ++queue_index) {
@@ -1296,9 +1472,9 @@ esp_err_t world_service_cancel(const char *action_id, world_action_event_t *even
     }
     world_remove_queued_record_locked(record_index);
     if (s_world.active_record == record_index) {
-        s_world.last_user_interaction_monotonic_ms = world_monotonic_now();
+        if (record->actor_id == WORLD_ACTOR_HUMAN) s_world.last_user_interaction_monotonic_ms = world_monotonic_now();
         world_clear_active_locked();
-        world_increment_version_locked();
+        world_increment_actor_version_locked(s_world.records[record_index].actor_id);
         notify = true;
     }
     world_set_failure_locked(record, WORLD_ACTION_ERROR_CANCELLED, false);

@@ -25,6 +25,9 @@ import type {
 const MAX_RESULT_HISTORY = 4_096;
 const MAX_STAGE_DURATION_MS = 600_000;
 const MAX_STAGE_ATTEMPTS = 4_096;
+// PCM is streamed and cleared per chunk. This cumulative three-minute budget
+// is independent of the one-minute per-segment/provider/device memory bound.
+const MAX_STREAMED_INTERACTION_PCM_BYTES = 3 * TTS_MAX_PCM_BYTES;
 
 export const VOICE_INTERACTION_STAGE_NAMES = [
   "stt",
@@ -687,7 +690,7 @@ export class VoiceInteractionCoordinator {
             }
             segmentBytes += pcm.byteLength;
             if (segmentBytes > TTS_MAX_PCM_BYTES
-                || streamedPcmBytes + segmentBytes > TTS_MAX_PCM_BYTES) {
+                || streamedPcmBytes + segmentBytes > MAX_STREAMED_INTERACTION_PCM_BYTES) {
               pcm.fill(0);
               streamingFailureStage ??= "tts";
               throw new RangeError("streaming TTS exceeded the interaction PCM bound");

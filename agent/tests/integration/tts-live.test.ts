@@ -39,7 +39,7 @@ test("live pinned Kokoro worker emits bounded non-silent 16 kHz PCM without a ra
     assignment_id: "assignment:human:1",
     segment_index: 0,
     role_id: "human",
-    text: "你好，我是小贝。",
+    text: "你好，我是小星。",
     voice: TTS_ROLE_VOICES.human,
     language: "zh",
     sample_rate_hz: 16_000,

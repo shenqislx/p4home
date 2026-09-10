@@ -295,7 +295,29 @@ class Phase5AVoiceContractTest(unittest.TestCase):
             "SR_SERVICE_VAD_TRAILING_SILENCE_SAMPLES",
         ):
             self.assertIn(expected, source)
+        # Remote capture owns its wake window, including after a transport
+        # failure. Never decode Chinese conversation through English MultiNet
+        # or allow a local false positive to truncate the remote utterance.
+        owner = runtime.index("local_command_window = s_capture_listener.begin_capture == NULL;")
+        capture_begin = runtime.index("s_capture_listener.begin_capture(")
+        clean_guard = runtime.index("if (local_command_window && s_command_iface != NULL")
+        clean_call = runtime.index("s_command_iface->clean(")
+        detect_guard = runtime.index(
+            "if (local_command_window && sr_status_voice_state_get() == SR_SERVICE_VOICE_STATE_AWAKE"
+        )
         detector = runtime.index("s_command_iface->detect(")
+        self.assertLess(capture_begin, owner)
+        self.assertLess(owner, clean_guard)
+        self.assertLess(clean_guard, clean_call)
+        self.assertLess(clean_call, detect_guard)
+        self.assertLess(detect_guard, detector)
+        self.assertEqual(runtime.count("local_command_window = s_capture_listener.begin_capture == NULL;"), 1)
+        self.assertIn("if (!local_command_window && !s_capture_active)", runtime)
+        unavailable = runtime[owner:clean_guard]
+        self.assertIn('sr_service_finish_command_window("capture_unavailable"', unavailable)
+        self.assertIn("continue;", unavailable)
+        self.assertNotIn("local_command_window = true", runtime)
+        self.assertIn("VERIFY:voice:capture_owner:PASS owner=remote local_detect=off", runtime)
         remote_offer = runtime.index("sr_service_preroll_drain_with_live(")
         endpoint = runtime.index('sr_service_finish_command_window("vad_silence"')
         self.assertLess(detector, remote_offer)

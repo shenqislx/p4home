@@ -1,8 +1,14 @@
 # P4 Home 当前工作计划
 
 > Current Focus: [P4 Home 本地 LLM Agent 化架构](../p4-local-agent-architecture.md)
-> Updated: 2026-08-27
+> Updated: 2026-09-09
 > Working Branch: `feature/agent-harness`
+
+## 当前协议演进设计
+
+- [Device Protocol v4 多角色设计](./2026-09-04-device-protocol-v4-multi-actor-design.md)：
+  `implemented`，单连接同时保留 Human Avatar 与 Cat；2026-09-10 已部署并启用三角色，
+  双角色动作、产品短语音及 Cat 自主闭环实测通过，真人观感与听感待验收。
 
 ## 工作规则
 
@@ -24,11 +30,31 @@
 | 2 | Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作 | [Phase 2 归档](../archive/plans/agent/2026-08-15-agent-phase-2-p4-room-world-plan.md) |
 | 3 | Cat Object World | `completed` | sofa 等对象锚点与 Cat 交互动作 | [Phase 3 归档](../archive/plans/agent/2026-08-15-agent-phase-3-object-world-plan.md) |
 | 4 | Robot HA & Multi-role | `completed` | Robot 受限 HA 工具、Human/Robot 语义分割 | [Phase 4 归档](../archive/plans/agent/2026-08-15-agent-phase-4-ha-tool-plan.md) |
-| 5 | Role-aware Voice | `pending_real_environment` | 技术/实机与既定人工功能观察通过；真实延迟已量化，优化与长停顿句确认待完成 | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
+| 5 | Role-aware Voice | `pending_real_environment` | 保留 35B，工具格式和驻留优化已实现；响应速度与真人体验待验收 | [Phase 5](./2026-08-15-agent-phase-5-voice-plan.md) |
 | 6 | Role-aware Memory | `completed` | 最终 review 通过；已通过门禁关闭，其余真实项由用户接受延期 | [Phase 6 归档](../archive/plans/agent/2026-08-15-agent-phase-6-memory-plan.md) |
 | 7 | Cat Autonomy | `completed` | 7A–7C 技术/实机门禁及用户最终 review 已通过 | [Phase 7 归档](../archive/plans/agent/2026-08-15-agent-phase-7-autonomy-plan.md) |
 
 ## 下一步
+
+当前优先收口 Phase 5 Human-only 识别失败恢复。2026-09-05 的失败注入未触发目标终态，
+不能由普通对话成功替代；2026-09-09 补修同一 epoch 的 transcribing 更新重置 125 秒期限、
+以及超时后迟到识别状态回退的问题。回归与构建结果见
+[识别期限与迟到状态验证](../../evidence/agent-phase-5/2026-09-09-recognition-deadline.md)。
+同日收尾验证进一步定位并修复 SDK WebSocket 缓存首包读取阻塞；HA 首次连接及
+“STT 超时 failed UI → 下一轮唤醒 → 正常 UI/播放”的机器证据已通过，见
+[收尾实机记录](../../evidence/agent-phase-5/2026-09-09-closure-hardware.md)。真人观察尚未确认。
+用户反馈冷启动和连续对话都慢，聊天与家控均常用。2026-09-10 已完成 9B / 35B 的
+[首轮评测](../../evidence/agent-phase-5/2026-09-10-qwen35-9b-evaluation.md)及
+[140 条不同输入的扩大评测](../../evidence/agent-phase-5/2026-09-10-qwen35-9b-expanded-evaluation.md)。
+9B 冷态快、热态慢；直接 Human 语义接近，但接入当前 Router/Robot 后完成率明显下降，
+不建议直接替换共享模型。35B 也已复现相同工具请求冷态返回原生调用、热态转普通 JSON 的问题，
+根因待定位。用户随后确认保留 35B；已实施原生工具格式约束、否定/无房间灯光请求的执行否决、
+Human 回复误判修复和 30 分钟可调驻留窗口。最终主样本家控正例由 33/44 提升到 41/44，
+聊天交付及路由成绩保持原水平；降低路由准确率的提速候选已撤回，详见
+[35B 优化记录](../../evidence/agent-phase-5/2026-09-10-35b-optimization.md)。
+常驻 Agent 已更新，P4 就绪后的两轮语音 UI/音频交付均通过机器确认；首次未就绪门禁尝试单独保留。
+下一步处理剩余路由误澄清，并独立测量 capture 预热及 STT/TTS 到实际首声的分段耗时。
+响应体验、长停顿句与真人观察仍待验收。v4 已于 2026-09-10 实现并部署，见三角色启用记录。
 
 Phase 2 已于 2026-08-20 完成并通过用户最终 review。2A Role Contract & Router、2B Cat Action
 Adapter、2C P4 World Service、2D Real Transport & Hardware Gate 四个纵切的退出门禁均已满足；

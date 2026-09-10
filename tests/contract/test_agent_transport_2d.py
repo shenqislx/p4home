@@ -98,7 +98,11 @@ class AgentTransportPhase2DContractTests(unittest.TestCase):
             re.DOTALL,
         )
         self.assertIsNotNone(connected_case)
-        body = connected_case.group(1)
+        # v4 moves handshake and application dispatch to the transport worker;
+        # legacy profiles still call this same transition from CONNECTED.
+        body = source[source.index("static void agent_finish_handshake(void)"):
+                      source.index("static void agent_ws_event(")]
+        self.assertIn("handshake_pending = true", connected_case.group(1))
         handshake = body.index("agent_send_handshake()")
         publish_connected = body.index("s_agent.connected = true")
         fallback_connected = body.index("world_service_set_agent_connected(true)")

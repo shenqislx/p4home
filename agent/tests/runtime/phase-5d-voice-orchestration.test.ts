@@ -5,6 +5,7 @@ import type { DecodedVoiceFrame } from "@p4home/contracts";
 import type { SttFinalTranscript, SttProvider } from "@p4home/provider-stt";
 import {
   TTS_ROLE_VOICES,
+  TTS_MAX_PCM_BYTES,
   type TtsProvider,
   type TtsSynthesisRequest,
   type TtsSynthesisResult,
@@ -26,6 +27,79 @@ import {
 } from "@p4home/runtime";
 
 const DEVICE_ID = "p4-voice-coordinator";
+
+test("unified STT failures terminate recognition UI without Role or TTS", async (t) => {
+  for (const outcome of ["silence", "too_short", "empty_transcript", "provider_error", "timed_out", "too_long", "cancelled"]) {
+    await t.test(outcome, async (testContext) => {
+      // This in-memory worker has no process/socket holding the event loop open.
+      const pendingIo = setTimeout(() => {}, 5_000);
+      testContext.after(() => clearTimeout(pendingIo));
+      const updates: Array<{ stage: string; epoch: number; response_text: string }> = [];
+      const runtime = new UnifiedVoiceRuntime({
+        server: { host: "127.0.0.1", port: 0, allow_insecure_loopback_test: true },
+        device_tokens: { [DEVICE_ID]: "recognition-terminal-test-token-0123456789" },
+        stt: {
+          stt_timeout_ms: 1000, max_utterance_ms: 1000, max_results: 0,
+          on_result() { throw new Error("diagnostic sink failed"); },
+          provider: { async transcribe(request): Promise<SttFinalTranscript> {
+            if (outcome === "provider_error") throw new Error("provider failed");
+            if (outcome === "timed_out") return await new Promise(() => {});
+            return { schema_version: 1, kind: "final", session_id: request.session_id,
+              stream_id: request.stream_id, epoch: request.epoch, text: "", language: "zh", duration_ms: 1 };
+          } },
+        },
+        interaction: {
+          ui_output: "required", audio_output: "disabled",
+          dispatch_role: async () => { throw new Error("must not dispatch Role"); },
+        },
+      });
+      runtime.server.presentConversationUi = async (_device, update) => {
+        updates.push(update);
+        return { schema_version: 1, ...context(40), revision: 1, status: "completed" };
+      };
+      const active = summary(40);
+      runtime.pipeline.onSessionOpen(active);
+      const frames = outcome === "silence" ? 0 : outcome === "too_short" ? 4 : outcome === "too_long" ? 51 : 15;
+      for (let i = 0; i < frames; i++) runtime.pipeline.onFrame(active, voiceFrame(40, i, 1200));
+      runtime.pipeline.onSessionClosed({ ...active, status: outcome === "cancelled" ? "cancelled" : "completed", eos: true });
+      await runtime.pipeline.drain();
+      assert.equal(updates.length, 1);
+      assert.equal(updates[0]?.stage, outcome === "cancelled" ? "cancelled" : "failed");
+      assert.match(updates[0]!.response_text, /重新唤醒/);
+      assert.equal(runtime.coordinator.results.length, 0);
+      // A new capture must remain admissible after every terminal.
+      runtime.pipeline.onSessionOpen(summary(41));
+      await runtime.close();
+    });
+  }
+});
+
+test("new captures fence pending failure UI and old STT results", async () => {
+  const epochs: number[] = [];
+  const signals: AbortSignal[] = [];
+  const runtime = new UnifiedVoiceRuntime({
+    server: { host: "127.0.0.1", port: 0, allow_insecure_loopback_test: true },
+    device_tokens: { [DEVICE_ID]: "recognition-fence-test-token-0123456789" },
+    stt: { provider: { async transcribe() { return await new Promise(() => {}); } } },
+    interaction: { ui_output: "required", audio_output: "disabled", dispatch_role: async () => roleResult() },
+  });
+  runtime.server.presentConversationUi = async (_device, update, _timeout, signal) => {
+    epochs.push(update.epoch); signals.push(signal!);
+    return await new Promise((_resolve, reject) => signal!.addEventListener("abort", () => reject(new Error("cancelled")), { once: true }));
+  };
+  runtime.pipeline.onSessionOpen(summary(50));
+  runtime.pipeline.onSessionClosed({ ...summary(50), status: "completed", eos: true });
+  runtime.pipeline.onSessionOpen(summary(51));
+  assert.equal(signals[0]?.aborted, true);
+  for (let i = 0; i < 15; i++) runtime.pipeline.onFrame(summary(51), voiceFrame(51, i, 1200));
+  runtime.pipeline.onSessionClosed({ ...summary(51), status: "completed", eos: true });
+  runtime.pipeline.onSessionOpen(summary(52));
+  await runtime.pipeline.drain();
+  assert.deepEqual(epochs, [50]);
+  runtime.pipeline.onSessionClosed({ ...summary(52), status: "completed", eos: true });
+  await runtime.close();
+  assert.equal(signals[1]?.aborted, true);
+});
 
 function context(epoch: number): VoiceDispatchContext {
   return {
@@ -341,6 +415,51 @@ test("terminal telemetry is synchronous, bounded to safe fields and independent 
   assert.equal(serialized.includes(humanResponse().text), false);
   assert.equal(serialized.includes(DEVICE_ID), false);
   assert.equal(serialized.includes(context(100).session_id), false);
+});
+
+test("long streamed replies have a separate cumulative budget while segment and total overflow stay bounded", async () => {
+  for (const lengths of [
+    [TTS_MAX_PCM_BYTES, TTS_MAX_PCM_BYTES, TTS_MAX_PCM_BYTES],
+    [TTS_MAX_PCM_BYTES, TTS_MAX_PCM_BYTES, TTS_MAX_PCM_BYTES, 2],
+    [TTS_MAX_PCM_BYTES + 2],
+  ]) {
+    let lastChunk: Uint8Array | undefined;
+    const coordinator = new VoiceInteractionCoordinator({
+      device_ids: [DEVICE_ID],
+      dispatch_role: async (_value, signal, onSpeech) => {
+        assert.ok(onSpeech);
+        for (let i = 0; i < lengths.length; i++) {
+          await onSpeech({ schema_version: 1, interaction_id: "voice:coordinator:101",
+            assignment_id: "assignment:human:long", segment_index: i,
+            role_id: "human", text: "有界长回复。" }, signal);
+        }
+        return roleResult(humanResponse());
+      },
+      render_tts: async () => { throw new Error("unexpected batch render"); },
+      playback: async () => { throw new Error("unexpected batch playback"); },
+      render_tts_stream: (_id, segment) => (async function* () {
+        let remaining = lengths[segment.segment_index]!;
+        while (remaining > 0) {
+          const count = Math.min(640, remaining);
+          lastChunk = new Uint8Array(count).fill(1);
+          remaining -= count;
+          yield lastChunk;
+        }
+      })(),
+      playback_stream: async (deviceId, source) => {
+        let bytes = 0;
+        for await (const pcm of source) { bytes += pcm.byteLength; pcm.fill(0); }
+        return { ...playbackSummary(deviceId), bytes, frames: Math.ceil(bytes / 640) };
+      },
+      cancel_low_priority_cat: () => undefined,
+    });
+    const result = await coordinator.run(interaction(101), new AbortController().signal, context(101));
+    const valid = lengths.length === 3;
+    assert.equal(result.outcome, valid ? "completed" : "tts_failed");
+    assert.equal(result.tts_pcm_bytes, lengths.length === 1 ? 0 : 3 * TTS_MAX_PCM_BYTES);
+    assert.ok(lastChunk?.every((value) => value === 0), "consumed/rejected PCM must be cleared");
+    coordinator.close();
+  }
 });
 
 test("single Human response keeps model and final UI ahead of the bounded speech queue", async () => {
