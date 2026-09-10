@@ -79,8 +79,9 @@ def resolve_model(
     provider: str,
     cache_directory: str,
     cache_prefix: str,
+    prepare_script: str = "prepare_model.py",
 ) -> pathlib.Path:
-    prepare_model = repo_root / f"agent/packages/{provider}/python/prepare_model.py"
+    prepare_model = repo_root / f"agent/packages/{provider}/python/{prepare_script}"
     match = MODEL_REVISION_RE.search(prepare_model.read_text(encoding="utf-8"))
     if match is None:
         raise RuntimeError(f"cannot resolve pinned {provider} model revision")
@@ -99,7 +100,11 @@ def resolve_stt_model(repo_root: pathlib.Path) -> pathlib.Path:
     return resolve_model(repo_root, "provider-stt", "stt", "whisper-small-")
 
 
-def resolve_tts_model(repo_root: pathlib.Path) -> pathlib.Path:
+def resolve_tts_model(repo_root: pathlib.Path, engine: str = "kokoro") -> pathlib.Path:
+    if engine == "qwen3":
+        return resolve_model(repo_root, "provider-tts", "tts", "qwen3-custom-6bit-", "prepare_qwen3_model.py")
+    if engine != "kokoro":
+        raise ValueError("invalid TTS engine")
     return resolve_model(repo_root, "provider-tts", "tts", "kokoro-")
 
 
@@ -118,6 +123,16 @@ def install(args: argparse.Namespace) -> pathlib.Path:
         raise ValueError("invalid product Human avatar Device port")
 
     config_dir = pathlib.Path(args.config_dir).expanduser().resolve()
+    tts_engine = getattr(args, "tts_engine", None)
+    engine_file = config_dir / "tts-engine"
+    if tts_engine is None and (engine_file.exists() or engine_file.is_symlink()):
+        if engine_file.is_symlink() or not engine_file.is_file() or engine_file.stat().st_mode & 0o077:
+            raise ValueError("TTS engine setting must be a private regular file")
+        tts_engine = engine_file.read_text().strip()
+    if tts_engine is None:
+        tts_engine = "kokoro"
+    if tts_engine not in {"kokoro", "qwen3"}:
+        raise ValueError("invalid TTS engine")
     state_dir = pathlib.Path(args.state_dir).expanduser().resolve()
     log_dir = pathlib.Path(args.log_dir).expanduser().resolve()
     launch_agent = pathlib.Path(args.launch_agent).expanduser().resolve()
@@ -129,13 +144,14 @@ def install(args: argparse.Namespace) -> pathlib.Path:
 
     generate_identity(config_dir)
     stt_model = resolve_stt_model(repo_root)
-    tts_model = resolve_tts_model(repo_root)
+    tts_model = resolve_tts_model(repo_root, tts_engine)
     atomic_write(config_dir / "device-id", f"{args.device_id}\n".encode())
     atomic_write(config_dir / "agent-host", f"{args.agent_host}\n".encode())
     atomic_write(config_dir / "agent-port", f"{args.agent_port}\n".encode())
     atomic_write(config_dir / "device-port", f"{args.device_port}\n".encode())
     atomic_write(config_dir / "stt-model-path", f"{stt_model}\n".encode())
     atomic_write(config_dir / "tts-model-path", f"{tts_model}\n".encode())
+    atomic_write(config_dir / "tts-engine", f"{tts_engine}\n".encode())
     atomic_write(config_dir / "spki-sha256", f"{spki_sha256(config_dir / 'agent-key.pem')}\n".encode())
 
     node = pathlib.Path(args.node_bin).expanduser().resolve()
@@ -174,6 +190,8 @@ def main() -> None:
     parser.add_argument("--device-port", type=int, default=18444)
     parser.add_argument("--device-id", default="p4-product-human")
     parser.add_argument("--node-bin", default=node_default)
+    parser.add_argument("--tts-engine", choices=["kokoro", "qwen3"], default=None,
+                        help="preserve an installed choice, otherwise use Kokoro")
     parser.add_argument("--config-dir", default=str(home / ".config/p4home/product-voice"))
     parser.add_argument(
         "--state-dir", default=str(home / "Library/Application Support/p4home/product-voice")

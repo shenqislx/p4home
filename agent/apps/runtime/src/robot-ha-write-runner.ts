@@ -26,10 +26,10 @@ import {
 } from "@p4home/transport-ha";
 
 import { QWEN_THINKING_ENABLED } from "./model-config.ts";
-import { hasNegatedDeviceCommand } from "./device-command-policy.ts";
+import { hasNegatedDeviceCommand, hasReportedDeviceCommand } from "./device-command-policy.ts";
+import { resolveLightRequest, robotLightName } from "./robot-light-target.ts";
 import {
   ROBOT_HA_OFFLINE_TEXT,
-  ROBOT_HA_READ_NOT_SELECTED_TEXT,
   readRobotHaCapabilities,
   type RobotHaReadAudit,
 } from "./robot-ha-read-runner.ts";
@@ -162,6 +162,7 @@ function failure(
 function modelCapabilities(capabilities: readonly RobotHaCapability[]): readonly Record<string, unknown>[] {
   return capabilities.map((capability) => ({
     alias: capability.alias,
+    ...(robotLightName(capability) === null ? {} : { name: robotLightName(capability) }),
     domain: capability.domain,
     tools: [
       "home.get_entity",
@@ -173,10 +174,17 @@ function modelCapabilities(capabilities: readonly RobotHaCapability[]): readonly
 }
 
 function isUnqualifiedMultiLightCommand(text: string, capabilities: readonly RobotHaCapability[]): boolean {
-  if (capabilities.filter((capability) => capability.domain === "light").length < 2) return false;
+  if (capabilities.filter((capability) => capability.domain === "light"
+    || (capability.domain === "switch" && /(?:light|lamp)/u.test(capability.alias))).length < 2) return false;
   // This veto covers unqualified direct light commands only. It does not infer
   // room names, resolve pronouns, or authorize other natural-language requests.
   return /^(?:(?:请|麻烦|帮我|替我)\s*)*(?:(?:打开|开启|关闭|关掉|开|关)\s*(?:一下)?\s*(?:灯|灯光)|把\s*(?:灯|灯光)\s*(?:打开|开启|关闭|关掉))\s*(?:一下)?[。！!？?\s]*$/u.test(text.trim());
+}
+
+function isSingleSpotLightCommand(text: string): boolean {
+  // A narrow veto for the reproduced voice transcription; this never grants
+  // permission or rewrites the original user text retained by the audit.
+  return /^(?:(?:请|麻烦|帮我|替我)\s*)*(?:打开|开启|关闭|关掉|开|关)\s*(?:客厅|书房|阳台)?\s*(?:射灯|设灯)\s*(?:一下)?[。！!？?\s]*$/u.test(text.trim());
 }
 
 function withCapabilities(
@@ -187,10 +195,17 @@ function withCapabilities(
   if (system?.role !== "system") {
     throw new TypeError("Robot context must begin with a system message");
   }
+  const currentText = [...rest].reverse().find((message) => message.role === "user")?.content ?? "";
+  const resolved = resolveLightRequest(currentText, capabilities);
+  const lightHint = resolved?.aliases.length === 1
+    ? `本句明确灯具名称匹配：${JSON.stringify({ heard: resolved.raw_name, name: resolved.name, alias: resolved.aliases[0], action: resolved.action })}。不得替换房间、灯型或操作。`
+    : "";
   return [{
     ...system,
     content: `${system.content}当前能力：${JSON.stringify(modelCapabilities(capabilities))}。只能原样选择 alias 和对应 tool；结果由 Runtime 确定。`
       + "需要调用工具时，必须使用原生 tool_calls；不要在 content 中输出 JSON、Markdown 或 action 对象。"
+      + "灯具优先按 name 匹配，保留用户指定的房间和灯型，不得省略或替换。"
+      + lightHint
       + "多个设备都可能符合用户描述时，必须询问具体房间或设备，不得自行挑选 alias。",
   }, ...rest];
 }
@@ -597,13 +612,29 @@ export async function runRobotHaWrite(options: RunRobotHaWriteOptions): Promise<
   const nativeCalls = response.message.tool_calls ?? [];
   const currentText = [...options.messages].reverse().find((message) => message.role === "user")?.content ?? "";
   const ambiguousLight = isUnqualifiedMultiLightCommand(currentText, capabilities);
-  if (nativeCalls.some((call) => call.function.name !== "home.get_entity")
-    && (hasNegatedDeviceCommand(currentText) || ambiguousLight)) {
+  const reportedCommand = hasReportedDeviceCommand(currentText);
+  const wrongSpotLight = isSingleSpotLightCommand(currentText) && nativeCalls.some((call) =>
+    call.function.name !== "home.get_entity"
+    && !/(?:^|_)spot_?light$/u.test(String(call.function.arguments?.alias)));
+  const explicitTarget = resolveLightRequest(currentText, capabilities);
+  const wrongExplicitTarget = explicitTarget !== null && nativeCalls.some((call) =>
+    (explicitTarget.aliases.length !== 1
+      || call.function.arguments?.alias !== explicitTarget.aliases[0]
+      || call.function.name !== `home.${explicitTarget.action}`));
+  if (wrongExplicitTarget || (nativeCalls.some((call) => call.function.name !== "home.get_entity")
+    && (hasNegatedDeviceCommand(currentText) || reportedCommand || ambiguousLight || wrongSpotLight))) {
     await options.audit?.modelToolRejected(response.message,
-      ambiguousLight ? "ambiguous_light_target" : "negated_device_command");
+      reportedCommand ? "reported_device_command" : wrongSpotLight ? "mismatched_spot_light_target" : wrongExplicitTarget ? "mismatched_light_target"
+        : ambiguousLight ? "ambiguous_light_target" : "negated_device_command");
     return {
       status: "completed",
-      final_text: ambiguousLight
+      final_text: reportedCommand
+        ? "这句话是在转述他人的要求，我没有操作设备。请直接说明你现在要执行的动作。"
+        : wrongSpotLight
+        ? "没有匹配到你要的射灯，我没有操作设备。请确认房间和灯具名称。"
+        : wrongExplicitTarget
+          ? "生成的设备指令与你指定的灯具或开关要求不一致，我没有操作设备。请重新说明。"
+          : ambiguousLight
         ? "有多盏灯可供选择，我没有操作设备。请说明要操作哪个房间的灯。"
         : "这条指令包含不要执行的要求，我没有操作设备。请明确现在需要执行的动作。",
       model_turns: 1,
@@ -616,7 +647,7 @@ export async function runRobotHaWrite(options: RunRobotHaWriteOptions): Promise<
   if (nativeCalls.length === 0) {
     return {
       status: "completed",
-      final_text: ROBOT_HA_READ_NOT_SELECTED_TEXT,
+      final_text: "没有匹配到明确的设备操作，我没有操作设备。请说明设备名称和要执行的动作。",
       model_turns: 1,
       capability_available: true,
       outcome: "response",

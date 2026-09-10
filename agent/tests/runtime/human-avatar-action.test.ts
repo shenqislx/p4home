@@ -365,7 +365,7 @@ test("Human avatar runner fixes actor ownership and executes go_to then sit seri
     device,
   });
   assert.equal(result.status, "completed");
-  assert.equal(result.final_text, "好的，Human 已在客厅沙发坐下。");
+  assert.equal(result.final_text, "好的，我已在客厅沙发坐下。");
   assert.equal(result.tool_results.length, 2);
   assert.equal(result.tool_results.every((item) => item.schema_version === 3), true);
   assert.deepEqual(device.calls.map((call) => ({
@@ -553,7 +553,7 @@ test("voice Human avatar path bypasses streaming chat and keeps Cat and Robot se
       human_avatar: device,
       on_human_speech_segment: () => { streamed++; },
     });
-    assert.equal(result.response.text, "好的，Human 已移动到客厅。");
+    assert.equal(result.response.text, "好的，我已移动到客厅。");
     assert.equal(streamed, 0);
     assert.deepEqual(sessions.get("human").history(), []);
     assert.deepEqual(sessions.get("cat").history(), []);

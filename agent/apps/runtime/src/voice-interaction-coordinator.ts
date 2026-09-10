@@ -8,7 +8,8 @@ import {
   validateConversationUiUpdate,
   type ConversationUiUpdate,
 } from "@p4home/contracts";
-import { TTS_MAX_PCM_BYTES, TTS_ROLE_VOICES, TTS_SAMPLE_RATE_HZ } from "@p4home/provider-tts";
+import { TTS_MAX_PCM_BYTES, TTS_MODEL_REVISION, TTS_SAMPLE_RATE_HZ,
+  ttsVoicesForRevision, type TtsRoleVoices } from "@p4home/provider-tts";
 
 import type { ComposedRoleResponse } from "./role-response-composer.ts";
 import type { RunRoleInteractionResult } from "./role-orchestrator.ts";
@@ -137,6 +138,8 @@ export interface VoiceInteractionTelemetry {
 
 export interface VoiceInteractionCoordinatorOptions {
   readonly device_ids: readonly string[];
+  /** Bind output validation and playback audit to the installed, pinned model. */
+  readonly tts_model_revision?: string;
   readonly dispatch_role: (
     interaction: UserTextInteraction,
     signal: AbortSignal,
@@ -468,6 +471,7 @@ function assertRenderedResult(
   value: RoleAwareTtsResult,
   interactionId: string,
   response: ComposedRoleResponse,
+  voices: TtsRoleVoices,
 ): void {
   if (value.schema_version !== 1 || value.interaction_id !== interactionId
       || !isDeepStrictEqual(value.role_response, response)
@@ -485,7 +489,7 @@ function assertRenderedResult(
     const expectedDurationMs = segment.samples / TTS_SAMPLE_RATE_HZ * 1_000;
     if (segment.schema_version !== 1 || segment.interaction_id !== interactionId
         || segment.assignment_id !== part.assignment_id || segment.segment_index !== index
-        || segment.role_id !== part.role_id || segment.voice !== TTS_ROLE_VOICES[part.role_id]
+        || segment.role_id !== part.role_id || segment.voice !== voices[part.role_id]
         || segment.source_status !== part.status || segment.source_outcome !== part.outcome
         || !(segment.pcm instanceof Uint8Array) || segment.pcm.byteLength < 2
         || segment.pcm.byteLength % 2 !== 0
@@ -544,6 +548,7 @@ export class VoiceInteractionCoordinator {
   readonly #maxResults: number;
   readonly #uiOutput: "disabled" | "required";
   readonly #audioOutput: "disabled" | "required";
+  readonly #voices: TtsRoleVoices;
   #closed = false;
 
   public constructor(options: VoiceInteractionCoordinatorOptions) {
@@ -578,6 +583,7 @@ export class VoiceInteractionCoordinator {
     this.#maxResults = maxResults;
     this.#uiOutput = uiOutput;
     this.#audioOutput = audioOutput;
+    this.#voices = { ...ttsVoicesForRevision(options.tts_model_revision ?? TTS_MODEL_REVISION) };
   }
 
   public onCaptureOpen(summary: VoiceCaptureSummary): void {
@@ -732,7 +738,7 @@ export class VoiceInteractionCoordinator {
           assignment_id: segment.assignment_id,
           segment_index: segment.segment_index,
           role_id: "human",
-          voice: TTS_ROLE_VOICES.human,
+          voice: this.#voices.human,
           source_status: "completed",
           source_outcome: "response",
           pcm_bytes: segmentBytes,
@@ -921,7 +927,7 @@ export class VoiceInteractionCoordinator {
         interaction.interaction_id, roleResult.response, controller.signal,
       );
       stageMetrics.tts = agentMetric("completed", currentStageStartedAt);
-      assertRenderedResult(rendered, interaction.interaction_id, roleResult.response);
+      assertRenderedResult(rendered, interaction.interaction_id, roleResult.response, this.#voices);
       if (controller.signal.aborted) {
         return this.#record(this.#result(
           interaction.interaction_id, context, "cancelled", roleResult.response,

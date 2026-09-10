@@ -15,8 +15,10 @@
 
 通用 LLM 不运行在 P4。P4 是 UI、音频前端和 World Action 执行端；Agent 节点负责推理、会话、工具、Memory 和编排。
 
-产品角色固定为：Role Router 只分发语义且无 Tool；Robot 只执行受限 HA 命令；Human 只负责对话
-且无执行权限；Cat 是事件驱动电子宠物，只使用最小 P4 World 能力且不直接接收用户原文。四者可
+产品角色固定为：Role Router 只分发语义且无 Tool；Robot 只执行受限 HA 命令；Human 普通对话
+无执行工具，avatar 路径仅能操作 Runtime 固定的屏幕 Human，不能操作 Cat 或 HA；Cat 是事件驱动
+电子宠物，只使用最小 P4 World 能力且不直接接收用户原文。已实现的 Device Protocol v4
+允许 Human Avatar 与 Cat 共用连接并隔离状态、动作和权限；v1/v2/v3 仍保留兼容路径。四者可
 共用同一个已加载的 `qwen3.6:35b-mlx` 和 Provider，但上下文、工具、参数、预算与审计隔离。
 所有 Qwen 请求都必须显式设置 Ollama `think: false`，不允许角色自行开启思考模式。
 

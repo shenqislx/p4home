@@ -2,9 +2,10 @@
 import base64
 import contextlib
 import json
+import os
 import sys
 
-VERSION = "a71e4d38b236d968966a2002c4c895dbd12b1c3c"
+VERSION = os.environ.get("P4HOME_TTS_MODEL_REVISION", "a71e4d38b236d968966a2002c4c895dbd12b1c3c")
 PROTOCOL_STDOUT = sys.stdout
 
 

@@ -11,9 +11,19 @@ export const TTS_ROLE_VOICES = {
   human: "zf_xiaoxiao",
   robot: "zf_xiaobei",
 } as const;
+export const QWEN3_TTS_MODEL_ID = "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-6bit";
+export const QWEN3_TTS_MODEL_REVISION = "1c6c0ff58c43afa8df571facde2efa077efd85e2";
+export const QWEN3_TTS_ROLE_VOICES = { human: "Serena", robot: "Vivian" } as const;
 
 export type TtsRole = keyof typeof TTS_ROLE_VOICES;
-export type TtsVoice = typeof TTS_ROLE_VOICES[TtsRole];
+export type TtsVoice = typeof TTS_ROLE_VOICES[TtsRole] | typeof QWEN3_TTS_ROLE_VOICES[TtsRole];
+export type TtsRoleVoices = Readonly<Record<TtsRole, TtsVoice>>;
+
+export function ttsVoicesForRevision(revision: string): TtsRoleVoices {
+  if (revision === TTS_MODEL_REVISION) return TTS_ROLE_VOICES;
+  if (revision === QWEN3_TTS_MODEL_REVISION) return QWEN3_TTS_ROLE_VOICES;
+  throw new TypeError("TTS model revision must be pinned");
+}
 
 export interface TtsSegmentIdentity {
   readonly interaction_id: string;

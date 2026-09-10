@@ -108,6 +108,13 @@ export P4HOME_STT_MODEL="$stt_model"
 export P4HOME_TTS_PYTHON="$AGENT_ROOT/packages/provider-tts/python/.venv/bin/python"
 export P4HOME_TTS_WORKER="$AGENT_ROOT/packages/provider-tts/python/p4home_tts_worker.py"
 export P4HOME_TTS_MODEL="$tts_model"
+export P4HOME_TTS_ENGINE="kokoro"
+if [[ -e "$CONFIG_DIR/tts-engine" || -L "$CONFIG_DIR/tts-engine" ]]; then
+  require_private_file "$CONFIG_DIR/tts-engine"
+  tts_engine="$(<"$CONFIG_DIR/tts-engine")"
+  [[ "$tts_engine" == "kokoro" || "$tts_engine" == "qwen3" ]]
+  export P4HOME_TTS_ENGINE="$tts_engine"
+fi
 
 cd "$AGENT_ROOT"
 exec "$P4HOME_NODE_BIN" --import tsx apps/runtime/src/product-voice-main.ts

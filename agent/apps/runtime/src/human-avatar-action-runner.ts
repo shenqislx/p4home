@@ -227,13 +227,13 @@ function toolResult(
 
 function completedText(call: ToolCall): string {
   if (call.name === "character.go_to_room") {
-    return `好的，Human 已移动到${ROOM_LABELS[call.arguments.room_id as RoomId]}。`;
+    return `好的，我已移动到${ROOM_LABELS[call.arguments.room_id as RoomId]}。`;
   }
   const target = OBJECT_LABELS[String(call.arguments.target_id)] ?? "目标位置";
-  if (call.name === "character.sit") return `好的，Human 已在${target}坐下。`;
-  if (call.name === "character.look_at") return `好的，Human 已看向${target}。`;
-  if (call.name === "character.interact") return `好的，Human 已和${target}互动。`;
-  return `好的，Human 已移动到${target}。`;
+  if (call.name === "character.sit") return `好的，我已在${target}坐下。`;
+  if (call.name === "character.look_at") return `好的，我已看向${target}。`;
+  if (call.name === "character.interact") return `好的，我已和${target}互动。`;
+  return `好的，我已移动到${target}。`;
 }
 
 function undispatchedResult(call: ToolCall, dependencyCode: string): ToolResult {
@@ -290,7 +290,7 @@ export async function runHumanAvatarAction(
   if (tools.length === 0) {
     return {
       status: "unavailable",
-      final_text: "屏幕上的 Human 当前没有可用动作，请稍后再试。",
+      final_text: "屏幕上的小星当前没有可用动作，请稍后再试。",
       model_turns: 0,
       tool_results: [],
       error_code: "AVATAR_CAPABILITY_UNAVAILABLE",
@@ -328,7 +328,7 @@ export async function runHumanAvatarAction(
     }
     return {
       status: "unavailable",
-      final_text: "暂时无法理解屏幕 Human 的动作，请稍后再试。",
+      final_text: "暂时无法理解小星的动作，请稍后再试。",
       model_turns: 1,
       tool_results: [],
       error_code: "AVATAR_MODEL_UNAVAILABLE",
@@ -341,7 +341,7 @@ export async function runHumanAvatarAction(
   ) {
     return {
       status: "clarify",
-      final_text: "我还不能确定要让屏幕上的 Human 做什么，请说清楚位置和动作。",
+      final_text: "我还不能确定要让屏幕上的小星做什么，请说清楚位置和动作。",
       model_turns: 1,
       tool_results: [],
       error_code: "INVALID_AVATAR_PLAN",
@@ -354,7 +354,7 @@ export async function runHumanAvatarAction(
   } catch {
     return {
       status: "clarify",
-      final_text: "我还不能确定要让屏幕上的 Human 做什么，请说清楚位置和动作。",
+      final_text: "我还不能确定要让屏幕上的小星做什么，请说清楚位置和动作。",
       model_turns: 1,
       tool_results: [],
       error_code: "INVALID_AVATAR_PLAN",
@@ -430,7 +430,7 @@ export async function runHumanAvatarAction(
       );
       return {
         status: cancelled ? "cancelled" : "failed",
-        final_text: cancelled ? "" : "屏幕上的 Human 动作没有完成，请稍后再试。",
+        final_text: cancelled ? "" : "屏幕上的小星动作没有完成，请稍后再试。",
         model_turns: 1,
         tool_results: results,
         error_code: cancelled ? "CANCELLED" : "AVATAR_ACTION_FAILED",
@@ -464,7 +464,7 @@ export async function runHumanAvatarAction(
       );
       return {
         status: cancelled ? "cancelled" : "failed",
-        final_text: cancelled ? "" : "屏幕上的 Human 动作没有完整完成，请稍后再试。",
+        final_text: cancelled ? "" : "屏幕上的小星动作没有完整完成，请稍后再试。",
         model_turns: 1,
         tool_results: results,
         error_code: cancelled ? "CANCELLED" : result.error?.code ?? "AVATAR_ACTION_FAILED",

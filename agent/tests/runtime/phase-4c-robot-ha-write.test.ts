@@ -451,6 +451,108 @@ test("Robot requires a target for generic light writes when multiple lights are 
   }
 });
 
+test("Robot refuses a main-light call for the reproduced spotlight transcription", async () => {
+  for (const text of ["打开客厅设灯", "关闭客厅设灯", "打开客厅射灯", "请关闭书房射灯"]) {
+    const client = new FakeWriteClient();
+    const result = await runRobotHaWrite({
+      run_id: "spotlight:target", client, profile: getRoleProfile("robot"),
+      messages: [{ role: "system", content: "Robot test" }, { role: "user", content: text }],
+      provider: { async chat() { return toolResponse("home.turn_on", "living_room_main_light"); } },
+    });
+    assert.equal(client.writes.length, 0);
+    assert.equal(result.tool_results.length, 0);
+    assert.match(result.final_text, /没有匹配到你要的射灯/);
+  }
+});
+
+test("explicit light names and on/off intent veto an unrelated model write", async () => {
+  for (const [text, name, alias] of [
+    ["打开客厅大灯", "home.turn_off", "living_room_main_light"],
+    ["关闭客厅大灯", "home.activate_scene", "evening_scene"],
+  ]) {
+    const client = new FakeWriteClient();
+    const result = await runRobotHaWrite({
+      run_id: "lighting:mismatch", client, profile: getRoleProfile("robot"),
+      messages: [{ role: "system", content: "Robot test" }, { role: "user", content: text! }],
+      provider: { async chat() { return toolResponse(name!, alias!); } },
+    });
+    assert.equal(client.writes.length, 0);
+    assert.equal(result.tool_results.length, 0);
+    assert.match(result.final_text, /与你指定的灯具或开关要求不一致/);
+  }
+});
+
+test("homophone hints preserve user messages and wrong-room or opposite-action calls execute nothing", async () => {
+  class LightingClient extends FakeWriteClient {
+    public override readonly capabilities: readonly RobotHaCapability[] = [...CAPABILITIES, {
+      alias: "living_room_down_light", domain: "switch", readable: true, write_actions: ["turn_on", "turn_off"],
+    }];
+  }
+  for (const [text, alias, action, allowed] of [
+    ["把客厅的桶灯关闭", "living_room_down_light", "turn_off", true],
+    ["把客厅的桶灯关闭", "living_room_main_light", "turn_off", false],
+    ["把客厅的桶灯关闭", "living_room_down_light", "turn_on", false],
+    ["打开书房同登", "living_room_down_light", "turn_on", false],
+    ["查询客厅铜灯状态", "living_room_main_light", "get_entity", false],
+  ] as const) {
+    const client = new LightingClient();
+    client.setState({ alias: "living_room_down_light", domain: "switch", state: "off", available: true, attributes: {}, updated_at_ms: 1000 });
+    const messages = [{ role: "system" as const, content: "Robot test" }, { role: "user" as const, content: text }];
+    const before = structuredClone(messages);
+    const result = await runRobotHaWrite({
+      run_id: "homophone:target", client, profile: getRoleProfile("robot"), messages,
+      provider: { async chat(request) {
+        assert.equal(request.messages.at(-1)?.content, text);
+        if (allowed) assert.match(request.messages[0]!.content, /客厅筒灯/);
+        return toolResponse(`home.${action}`, alias);
+      } },
+    });
+    assert.deepEqual(messages, before);
+    assert.equal(client.writes.length, 0);
+    assert.equal(result.tool_results.length, allowed ? 1 : 0, text);
+    if (allowed) assert.equal(result.tool_results[0]?.status, "success");
+  }
+});
+
+test("Robot independently blocks reported commands before any write even when routing is bypassed", async () => {
+  const client = new FakeWriteClient();
+  const result = await runRobotHaWrite({
+    run_id: "reported:target", client, profile: getRoleProfile("robot"),
+    messages: [{ role: "system", content: "Robot test" }, { role: "user", content: "他说把客厅的设灯打开" }],
+    provider: { async chat() { return toolResponse("home.turn_on", "living_room_main_light"); } },
+  });
+  assert.equal(client.writes.length, 0);
+  assert.equal(result.tool_results.length, 0);
+  assert.match(result.final_text, /转述/);
+});
+
+test("Robot also requires a target for switch-backed lights", async () => {
+  class MultiLightClient extends FakeWriteClient {
+    public override readonly capabilities: readonly RobotHaCapability[] = [{
+      alias: "living_room_main_light", domain: "switch", readable: true,
+      write_actions: ["turn_on", "turn_off"],
+    }, {
+      alias: "study_light", domain: "switch" as const, readable: true,
+      write_actions: ["turn_on" as const, "turn_off" as const],
+    }];
+  }
+  for (const text of ["打开灯", "请关闭灯光", "帮我把灯打开"]) {
+    const client = new MultiLightClient();
+    let rejected = 0;
+    const result = await runRobotHaWrite({
+      run_id: "ambiguous:write",
+      messages: [{ role: "system", content: "Robot test" }, { role: "user", content: text }],
+      profile: getRoleProfile("robot"),
+      provider: { async chat() { return toolResponse("home.turn_on", "living_room_main_light"); } },
+      client,
+      audit: directAudit({ async modelToolRejected() { rejected++; } }),
+    });
+    assert.equal(result.status, "completed");
+    assert.equal(rejected, 1, text);
+    assert.equal(client.writes.length, 0, text);
+  }
+});
+
 test("Robot exposes only capability-derived low-risk tools and completes only after state observation", async () => {
   using store = new SqliteAuditStore(":memory:");
   const client = new FakeWriteClient();

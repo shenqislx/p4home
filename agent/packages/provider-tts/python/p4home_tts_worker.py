@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persistent, memory-only MLX Kokoro worker with bounded NDJSON PCM chunks."""
+"""Persistent, memory-only MLX TTS worker with bounded NDJSON PCM chunks."""
 
 from __future__ import annotations
 
@@ -27,7 +27,11 @@ checked_source_total = BOUNDS["checked_source_total"]
 
 # The provider launches Python with -I, so sibling imports are deliberately
 # unavailable. Load only the fixed repository file, just like the bounds module.
-MODEL_PATH = pathlib.Path(__file__).resolve().with_name("prepare_model.py")
+QWEN3_REVISION = "1c6c0ff58c43afa8df571facde2efa077efd85e2"
+IS_QWEN3 = os.environ.get("P4HOME_TTS_MODEL_REVISION") == QWEN3_REVISION
+MODEL_PATH = pathlib.Path(__file__).resolve().with_name(
+    "prepare_qwen3_model.py" if IS_QWEN3 else "prepare_model.py"
+)
 if not MODEL_PATH.is_file() or MODEL_PATH.is_symlink():
     raise SystemExit("TTS model verifier is unavailable")
 MODEL = runpy.run_path(str(MODEL_PATH))
@@ -42,7 +46,8 @@ MAX_TEXT_CHARS = 1_024
 PCM_CHUNK_BYTES = 640
 MAX_CLAUSE_CHARS = 80
 SOFT_CLAUSE_CHARS = 24
-ROLE_VOICES = {"human": "zf_xiaoxiao", "robot": "zf_xiaobei"}
+ROLE_VOICES = ({"human": "Serena", "robot": "Vivian"} if IS_QWEN3
+               else {"human": "zf_xiaoxiao", "robot": "zf_xiaobei"})
 CONTRACT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 STRONG_BOUNDARIES = frozenset("。！？!?；;：:\n")
@@ -151,33 +156,60 @@ def downsample_24k_to_16k(audio: np.ndarray) -> np.ndarray:
     return resampled.astype(np.float32)
 
 
+def resampled_audio(model, model_path, request):
+    import numpy as np
+    source_samples = 0
+    if not IS_QWEN3:
+        generated = model.generate(
+            split_text_for_streaming(str(request["text"])),
+            voice=str(model_path / "voices" / f"{request['voice']}.safetensors"),
+            speed=1.0, lang_code="z", split_pattern=None,
+        )
+        resampler = None
+    else:
+        path = pathlib.Path(__file__).resolve().with_name("tts_resampler.py")
+        if not path.is_file() or path.is_symlink():
+            raise ValueError("resampler unavailable")
+        resampler = runpy.run_path(str(path))["StreamingResampler24To16"]()
+        generated = model.generate_custom_voice(
+            text=request["text"], speaker=request["voice"], language="Chinese",
+            instruct="用自然、平稳的普通话交流，语速适中，停顿自然。",
+            temperature=0.6, max_tokens=750, verbose=False,
+            stream=True, streaming_interval=0.48,
+        )
+    token_count = 0
+    for result in generated:
+        if result.sample_rate != 24_000:
+            raise ValueError("unexpected sample rate")
+        if IS_QWEN3:
+            token_count += result.token_count
+            if token_count >= 750:
+                raise ValueError("speech generation reached its token limit")
+        source = np.asarray(result.audio, dtype=np.float32).reshape(-1).copy()
+        try:
+            source_samples = checked_source_total(source_samples, int(source.size))
+            if not np.isfinite(source).all():
+                raise ValueError("invalid provider audio")
+            converted = (resampler.push(source) if resampler is not None
+                         else downsample_24k_to_16k(source))
+            if converted.size:
+                yield converted
+        finally:
+            source.fill(0)
+    if resampler is not None:
+        tail = resampler.push(np.empty(0, dtype=np.float32), final=True)
+        if tail.size:
+            yield tail
+
+
 def synthesize(model: object, model_path: pathlib.Path, request: dict[str, object]) -> None:
     import numpy as np
 
-    source_samples = 0
     output_bytes = 0
     output_samples = 0
     chunk_index = 0
-    clauses = split_text_for_streaming(str(request["text"]))
-    voice_path = model_path / "voices" / f"{request['voice']}.safetensors"
     with contextlib.redirect_stdout(sys.stderr):
-        generated = model.generate(
-            clauses,
-            voice=str(voice_path),
-            speed=1.0,
-            lang_code="z",
-            split_pattern=None,
-        )
-        for result in generated:
-            if result.sample_rate != 24_000:
-                raise ValueError("unexpected sample rate")
-            source = np.asarray(result.audio, dtype=np.float32).reshape(-1).copy()
-            if source.size == 0 or not np.isfinite(source).all():
-                source.fill(0)
-                raise ValueError("invalid provider audio")
-            source_samples = checked_source_total(source_samples, int(source.size))
-            resampled = downsample_24k_to_16k(source)
-            source.fill(0)
+        for resampled in resampled_audio(model, model_path, request):
             pcm_array = np.rint(np.clip(resampled, -1.0, 1.0) * 32767.0).astype("<i2")
             resampled.fill(0)
             pcm = bytearray(pcm_array.tobytes())
@@ -248,6 +280,8 @@ def main() -> int:
             from mlx_audio.tts.utils import load_model
 
             model = load_model(args.model)
+            if IS_QWEN3 and (model.tokenizer is None or model.speech_tokenizer is None):
+                raise ValueError("Qwen3 tokenizers unavailable")
     except Exception as error:
         sys.stderr.write(f"TTS startup failed type={type(error).__name__}\n")
         sys.stderr.flush()

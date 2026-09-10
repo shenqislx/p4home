@@ -14,6 +14,10 @@
   (configurable from 100 ms through 10 minutes) and restarts it automatically on the next request or refresh.
 - Each PCM request is bounded, identity-bound and transcribed only in memory; stdout contains a bounded readiness
   record followed by exactly one terminal per request and never contains PCM. Internal PCM copies are zeroed after use.
+- Decoding uses `temperature=0`, `no_speech_threshold=0.6`, and `logprob_threshold=None` so a confident
+  language guess cannot override Whisper's no-speech decision. No hotword prompt is supplied: the tested prompt
+  invented a product name on silence. Empty transcripts use the existing retry UI without Role dispatch.
+  This reduces noise hallucinations; it does not establish recognition accuracy for human speech in the room.
 - Cancellation, timeout, process failure or protocol drift kills the resident worker; a later request starts from a
   fresh verified worker rather than reusing ambiguous state.
 

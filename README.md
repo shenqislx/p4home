@@ -14,10 +14,22 @@
 
 通用 LLM 不运行在 ESP32-P4 上。P4 负责 UI、交互、音频前端和世界动作执行；Mac mini/PC/Home Server 负责模型推理、Agent、Memory 与工具编排。
 
-Agent 产品层使用统一 Role Router 和三个隔离角色：Robot 只执行受限 HA 命令，Human 只负责对话，
+Agent 产品层使用统一 Role Router 和三个隔离角色：Robot 只执行受限 HA 命令，Human 负责对话和受限屏幕 Avatar 动作，
 Cat 作为事件驱动电子宠物使用最小 P4 World 能力。它们默认共用一个已加载的
 `qwen3.6:35b-mlx`，但不共享上下文、工具权限或推理参数；所有 Qwen 请求固定使用
 `think: false`。
+
+## 当前可用状态（2026-09-10）
+
+本机已启用 Human、Robot、Cat，并用 Device Protocol v4 同时保留两个屏幕角色；对话模型保持
+35B。Human 已换用 Qwen3-TTS 的 Serena，用户确认音色验收通过。唤醒当前试用高灵敏度配置，
+但真人 20 cm、未播报时 1/10 的失败基线尚未复测；现场其他声音干扰也仍未解决，Phase 5
+保持 `pending_real_environment`。
+
+- [日常使用、配置和回退](./docs/product-human-voice.md)
+- [本轮收尾与剩余验收项](./evidence/agent-phase-5/2026-09-10-product-closeout.md)
+
+下文的运行编号与测量值保留为历史证据，当前部署以以上入口为准。
 
 ## 当前工作重点
 
@@ -30,7 +42,7 @@ Cat 作为事件驱动电子宠物使用最小 P4 World 能力。它们默认共
 - [当前工作计划与 Phase 状态](./docs/plans/README.md)
 - [当前里程碑](./docs/project-milestones.md)
 - [Harness Workflow](./docs/harness-workflow.md)
-- [Human-only 常驻语音聊天](./docs/product-human-voice.md)
+- [常驻语音与三角色使用](./docs/product-human-voice.md)
 
 Phase 2 已完成并通过用户最终 review。Role Contract & Router、Cat Action Adapter、P4 World
 Service、真实传输与实机门禁四个纵切均满足退出条件；Agent/P4 真实 Device WebSocket 已通过实机

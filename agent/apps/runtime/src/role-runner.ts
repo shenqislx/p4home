@@ -447,7 +447,7 @@ async function executeAssignedRole(
         run_id: options.run_id,
         role_id: "human",
         status: "completed",
-        final_text: "现在还不能控制屏幕上的 Human，请稍后再试。",
+        final_text: "现在还不能控制屏幕上的小星，请稍后再试。",
         model_turns: 0,
         capability_available: false,
         outcome: "capability_unavailable",

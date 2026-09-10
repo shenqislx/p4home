@@ -139,6 +139,13 @@ def transcribe(mlx_whisper: object, model_path: pathlib.Path, request: dict[str,
                 language="zh",
                 verbose=False,
                 condition_on_previous_text=False,
+                # A confident language guess must not override the model's
+                # no-speech decision (e.g. noise decoded as subtitle credits).
+                # Avoid sampling fallback and hotword prompts that invent text
+                # on a silent capture. Empty text uses the existing retry UI.
+                temperature=0.0,
+                no_speech_threshold=0.6,
+                logprob_threshold=None,
             )
         text = result.get("text")
         if not isinstance(text, str) or len(text) > 1024:

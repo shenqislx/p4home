@@ -115,11 +115,16 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
             completed = types.SimpleNamespace(stdout="v24.19.0\n")
             with (
                 mock.patch.object(MODULE, "resolve_stt_model", return_value=model),
-                mock.patch.object(MODULE, "resolve_tts_model", return_value=model),
+                mock.patch.object(MODULE, "resolve_tts_model", return_value=model) as resolve_tts,
                 mock.patch.object(MODULE.subprocess, "run", return_value=completed),
                 mock.patch.object(MODULE, "spki_sha256", return_value="ab" * 32),
             ):
                 result = MODULE.install(args)
+                self.assertEqual((config / "tts-engine").read_text().strip(), "kokoro")
+                (config / "tts-engine").write_text("qwen3\n")
+                MODULE.install(args)
+                resolve_tts.assert_called_with(ROOT, "qwen3")
+                self.assertEqual((config / "tts-engine").read_text().strip(), "qwen3")
             self.assertEqual(result, launch_agent.resolve())
             payload = plistlib.loads(launch_agent.read_bytes())
             self.assertEqual(payload["Label"], MODULE.LABEL)
@@ -198,7 +203,8 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
                 "#!/bin/sh\n"
                 "if [ \"$1\" = \"--version\" ]; then echo v24.19.0; exit 0; fi\n"
                 "printf '%s' \"$P4HOME_DEVICE_PORT\" > \"$P4HOME_TEST_CAPTURE\"\n"
-                "printf '%s\\n' \"$P4HOME_PRODUCT_ROLE_MODE\" \"$P4HOME_HA_TOKEN_FILE\" \"$P4HOME_CAT_AUTONOMY_ENABLED\" > \"$P4HOME_TEST_CAPTURE.roles\"\n",
+                "printf '%s\\n' \"$P4HOME_PRODUCT_ROLE_MODE\" \"$P4HOME_HA_TOKEN_FILE\" \"$P4HOME_CAT_AUTONOMY_ENABLED\" > \"$P4HOME_TEST_CAPTURE.roles\"\n"
+                "printf '%s' \"$P4HOME_TTS_ENGINE\" > \"$P4HOME_TEST_CAPTURE.tts\"\n",
                 encoding="utf-8",
             )
             node.chmod(0o700)
@@ -210,6 +216,7 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
                 "P4HOME_TEST_CAPTURE": str(capture),
                 "P4HOME_PRODUCT_ROLE_MODE": "human-robot",
                 "P4HOME_HA_TOKEN_FILE": "/must-not-inherit",
+                "P4HOME_TTS_ENGINE": "qwen3",
             })
             subprocess.run(
                 [str(ROOT / "scripts/run-product-human-voice.sh")],
@@ -223,6 +230,20 @@ class ProductHumanVoiceInstallTest(unittest.TestCase):
             self.assertEqual((config / "device-token").read_text(), "stable-token\n")
             roles = pathlib.Path(str(capture) + ".roles")
             self.assertEqual(roles.read_text().splitlines(), ["human-only", "", "0"])
+            tts_capture = pathlib.Path(str(capture) + ".tts")
+            self.assertEqual(tts_capture.read_text(), "kokoro")
+            engine_file = config / "tts-engine"
+            engine_file.write_text("qwen3\n")
+            engine_file.chmod(0o600)
+            command = [str(ROOT / "scripts/run-product-human-voice.sh")]
+            subprocess.run(command, check=True, env=environment, capture_output=True)
+            self.assertEqual(tts_capture.read_text(), "qwen3")
+            engine_file.write_text("unknown-engine\n")
+            self.assertNotEqual(subprocess.run(command, env=environment, capture_output=True).returncode, 0)
+            engine_file.write_text("qwen3\n")
+            engine_file.chmod(0o644)
+            self.assertNotEqual(subprocess.run(command, env=environment, capture_output=True).returncode, 0)
+            engine_file.unlink()
 
             ha = root / "ha"
             ha.mkdir(mode=0o700)

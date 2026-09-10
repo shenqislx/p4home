@@ -100,6 +100,9 @@ static bool s_capture_speech_seen;
 static bool s_playback_active_requested;
 static int64_t s_playback_wake_resume_after_us;
 static bool s_playback_wake_gate_active;
+#if CONFIG_P4HOME_SR_INPUT_DIAGNOSTICS
+static bool s_diagnostic_wakenet_enabled;
+#endif
 
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_preroll_signal_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -388,6 +391,9 @@ static void sr_service_apply_board_afe_policy(afe_config_t *afe_config)
     afe_config->aec_init = false;
     afe_config->agc_init = false;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
+#if CONFIG_P4HOME_SR_WAKE_SENSITIVE
+    afe_config->wakenet_mode = DET_MODE_95;
+#endif
 }
 
 static bool sr_service_board_afe_policy_valid(const afe_config_t *afe_config)
@@ -540,6 +546,9 @@ static bool sr_service_set_wakenet_enabled(bool enabled, const char *reason)
         return false;
     }
 
+#if CONFIG_P4HOME_SR_INPUT_DIAGNOSTICS
+    s_diagnostic_wakenet_enabled = enabled;
+#endif
     ESP_LOGI(TAG,
              "WakeNet %s reason=%s state=%d",
              enabled ? "enabled" : "disabled",
@@ -768,6 +777,15 @@ static void sr_service_runtime_task(void *parameter)
     bool stream_open = false;
     bool local_command_window = false;
     audio_service_lease_t audio_lease = {0};
+#if CONFIG_P4HOME_SR_INPUT_DIAGNOSTICS
+    int64_t input_window_start_us = esp_timer_get_time();
+    uint64_t input_square_sum = 0;
+    int64_t input_sum = 0;
+    uint64_t output_square_sum = 0;
+    uint32_t output_samples = 0;
+    uint32_t input_samples = 0, input_clipped = 0, input_peak = 0;
+    uint32_t input_vad_frames = 0, input_fetch_misses = 0;
+#endif
 
     if (feed_chunksize <= 0 || feed_channels <= 0) {
         SR_STATUS_MUTATE(s_status.status_text = "ESP-SR runtime loop geometry invalid";);
@@ -810,6 +828,16 @@ static void sr_service_runtime_task(void *parameter)
         }
 
         const uint32_t raw_peak = sr_service_pcm_peak(mic_frame, (size_t)feed_chunksize);
+#if CONFIG_P4HOME_SR_INPUT_DIAGNOSTICS
+        if (raw_peak > input_peak) input_peak = raw_peak;
+        for (int i = 0; i < feed_chunksize; ++i) {
+            const int32_t sample = mic_frame[i];
+            input_square_sum += (uint64_t)((int64_t)sample * sample);
+            input_sum += sample;
+            if (sample >= 32760 || sample <= -32760) input_clipped++;
+        }
+        input_samples += (uint32_t)feed_chunksize;
+#endif
 
         for (int i = 0; i < feed_chunksize; ++i) {
             afe_input[i * feed_channels] = mic_frame[i];
@@ -831,6 +859,41 @@ static void sr_service_runtime_task(void *parameter)
          * frame. A frame already captured from the speaker is ignored below
          * as soon as the half-duplex gate becomes active. */
         sr_service_apply_playback_wake_gate();
+#if CONFIG_P4HOME_SR_INPUT_DIAGNOSTICS
+        if (fetch_result == NULL) input_fetch_misses++;
+        else if (fetch_result->vad_state == VAD_SPEECH) input_vad_frames++;
+        if (fetch_result != NULL && fetch_result->data != NULL && fetch_result->data_size > 0) {
+            const size_t count = (size_t)fetch_result->data_size / sizeof(int16_t);
+            for (size_t i = 0; i < count; ++i) {
+                const int64_t sample = fetch_result->data[i];
+                output_square_sum += (uint64_t)(sample * sample);
+            }
+            output_samples += (uint32_t)count;
+        }
+        const int64_t input_now_us = esp_timer_get_time();
+        const int64_t input_elapsed_us = input_now_us - input_window_start_us;
+        if (input_elapsed_us >= 5000000 && input_samples > 0) {
+            ESP_LOGW(TAG, "DIAG:voice:input samples=%" PRIu32 " delivered_hz=%" PRIu32
+                     " mean_square=%" PRIu64 " peak=%" PRIu32 " clipped=%" PRIu32
+                     " dc_mean=%" PRId64 " afe_mean_square=%" PRIu64
+                     " vad_frames=%" PRIu32 " fetch_misses=%" PRIu32
+                     " wakenet=%s playback_gate=%s voice_state=%s",
+                     input_samples, (uint32_t)((uint64_t)input_samples * 1000000U / input_elapsed_us),
+                     input_square_sum / input_samples, input_peak, input_clipped,
+                     input_sum / (int64_t)input_samples,
+                     output_samples > 0 ? output_square_sum / output_samples : 0ULL,
+                     input_vad_frames, input_fetch_misses,
+                     s_diagnostic_wakenet_enabled ? "on" : "off",
+                     s_playback_wake_gate_active ? "on" : "off", sr_service_voice_state_text());
+            input_window_start_us = input_now_us;
+            input_square_sum = 0;
+            input_sum = 0;
+            output_square_sum = 0;
+            output_samples = 0;
+            input_samples = input_clipped = input_peak = 0;
+            input_vad_frames = input_fetch_misses = 0;
+        }
+#endif
 
         taskENTER_CRITICAL(&s_preroll_signal_lock);
         const bool rearm_preroll = s_preroll_rearm_requested;
@@ -1219,6 +1282,9 @@ static esp_err_t sr_service_start_runtime_loop(esp_afe_sr_iface_t *afe_iface,
     }
 
     s_runtime_afe_iface = afe_iface;
+#if CONFIG_P4HOME_SR_INPUT_DIAGNOSTICS
+    s_diagnostic_wakenet_enabled = true;
+#endif
     /*
      * Publish the starting state before the higher-priority task can run. The
      * task owns all later transitions; if it fails immediately, its cleanup
@@ -1316,6 +1382,7 @@ esp_err_t sr_service_init(void)
         esp_srmodel_deinit(models);
         goto log_and_exit;
     }
+    const det_mode_t default_wakenet_mode = afe_config->wakenet_mode;
     sr_service_apply_board_afe_policy(afe_config);
     if (!sr_service_board_afe_policy_valid(afe_config)) {
         SR_STATUS_MUTATE(s_status.status_text = "AFE board policy or channel geometry invalid";);
@@ -1324,6 +1391,15 @@ esp_err_t sr_service_init(void)
         goto log_and_exit;
     }
     ESP_LOGW(TAG, "AFE board policy: input_format=M aec=off agc=off memory=more_psram");
+    ESP_LOGW(TAG, "VERIFY:voice:wake_config:PASS mode=%d default_mode=%d sensitive=%s ns=%s vad_mode=%d linear_gain=%.2f",
+             (int)afe_config->wakenet_mode, (int)default_wakenet_mode,
+#if CONFIG_P4HOME_SR_WAKE_SENSITIVE
+             "on",
+#else
+             "off",
+#endif
+             afe_config->ns_init ? "on" : "off", (int)afe_config->vad_mode,
+             (double)afe_config->afe_linear_gain);
 
     esp_afe_sr_iface_t *afe_iface = esp_afe_handle_from_config(afe_config);
     const bool afe_iface_ready = (afe_iface != NULL);

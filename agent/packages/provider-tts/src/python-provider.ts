@@ -8,6 +8,8 @@ import {
   TTS_MODEL_REVISION,
   TTS_PROVIDER_VERSION,
   TTS_ROLE_VOICES,
+  ttsVoicesForRevision,
+  type TtsRoleVoices,
   TTS_SAMPLE_BITS,
   TTS_SAMPLE_RATE_HZ,
   TtsProviderError,
@@ -61,7 +63,7 @@ export interface PythonTtsProviderOptions {
 
 type WorkerObject = Readonly<Record<string, unknown>>;
 
-function validateRequest(request: TtsSynthesisRequest): void {
+function validateRequest(request: TtsSynthesisRequest, voices: TtsRoleVoices = TTS_ROLE_VOICES): void {
   if (!CONTRACT_ID.test(request.interaction_id) || !CONTRACT_ID.test(request.assignment_id)) {
     throw new TypeError("TTS interaction and assignment ids are invalid");
   }
@@ -71,7 +73,7 @@ function validateRequest(request: TtsSynthesisRequest): void {
   if (request.role_id !== "human" && request.role_id !== "robot") {
     throw new TypeError("TTS role_id is invalid");
   }
-  if (request.voice !== TTS_ROLE_VOICES[request.role_id]) {
+  if (request.voice !== voices[request.role_id]) {
     throw new TypeError("TTS voice must match the frozen role voice");
   }
   if (request.language !== "zh" || request.sample_rate_hz !== TTS_SAMPLE_RATE_HZ
@@ -112,7 +114,7 @@ function validPythonVersion(value: unknown): boolean {
   return typeof value === "string" && value.startsWith("3.12.");
 }
 
-function validateWorkerReady(value: unknown): void {
+function validateWorkerReady(value: unknown, revision = TTS_MODEL_REVISION): void {
   const response = workerObject(value);
   if (response.status === "startup_error") {
     exactKeys(response, STARTUP_ERROR_KEYS);
@@ -129,7 +131,7 @@ function validateWorkerReady(value: unknown): void {
   exactKeys(response, READY_KEYS);
   if (response.schema_version !== WORKER_SCHEMA_VERSION || response.status !== "ready"
       || response.provider_version !== TTS_PROVIDER_VERSION
-      || response.model_revision !== TTS_MODEL_REVISION
+      || response.model_revision !== revision
       || !validPythonVersion(response.python_version)) {
     throw new TtsProviderError("INVALID_RESPONSE", "TTS worker readiness violates the pinned contract");
   }
@@ -448,6 +450,7 @@ function requestLine(request: TtsSynthesisRequest): string {
 }
 
 export class PythonTtsProvider implements StreamingTtsProvider {
+  readonly #voices: TtsRoleVoices;
   readonly #options: PythonTtsProviderOptions;
   readonly #timeoutMs: number;
   readonly #mutex = new BoundedAsyncMutex();
@@ -462,10 +465,10 @@ export class PythonTtsProvider implements StreamingTtsProvider {
       throw new TypeError("TTS Python executable, worker and model paths must be absolute");
     }
     if (!MODEL_REVISION.test(options.model_revision)
-        || options.model_revision !== TTS_MODEL_REVISION
         || options.provider_version !== TTS_PROVIDER_VERSION) {
       throw new TypeError("TTS provider version and model revision must be pinned");
     }
+    this.#voices = ttsVoicesForRevision(options.model_revision);
     const timeoutMs = options.timeout_ms ?? 45_000;
     if (!Number.isInteger(timeoutMs) || timeoutMs < MIN_TIMEOUT_MS || timeoutMs > MAX_TIMEOUT_MS) {
       throw new RangeError("TTS timeout must be an integer between 1000 and 120000 ms");
@@ -478,7 +481,7 @@ export class PythonTtsProvider implements StreamingTtsProvider {
     request: TtsSynthesisRequest,
     options: TtsSynthesisOptions = {},
   ): AsyncIterable<TtsPcmChunk> {
-    validateRequest(request);
+    validateRequest(request, this.#voices);
     return this.#stream(request, options);
   }
 
@@ -619,7 +622,7 @@ export class PythonTtsProvider implements StreamingTtsProvider {
       segment_index: 0,
       role_id: "human",
       text: "准备就绪。",
-      voice: TTS_ROLE_VOICES.human,
+      voice: this.#voices.human,
       language: "zh",
       sample_rate_hz: TTS_SAMPLE_RATE_HZ,
       channels: TTS_CHANNELS,
@@ -650,6 +653,8 @@ export class PythonTtsProvider implements StreamingTtsProvider {
             P4HOME_TTS_PROVIDER_VERSION: this.#options.provider_version,
             P4HOME_TTS_MODEL_REVISION: this.#options.model_revision,
             PYTHONNOUSERSITE: "1",
+            HF_HUB_OFFLINE: "1",
+            TRANSFORMERS_OFFLINE: "1",
           },
         },
       );
@@ -682,7 +687,7 @@ export class PythonTtsProvider implements StreamingTtsProvider {
       }
     });
     try {
-      validateWorkerReady(parseWorkerLine(await reader.read(signal)));
+      validateWorkerReady(parseWorkerLine(await reader.read(signal)), this.#options.model_revision);
       if (reader.hasBufferedData) {
         throw new TtsProviderError("INVALID_RESPONSE", "TTS worker emitted data after readiness");
       }

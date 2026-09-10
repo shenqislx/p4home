@@ -98,6 +98,23 @@ test("role profiles keep user text and tool namespaces isolated", () => {
   );
 });
 
+test("router homophone hints preserve the original transcript and reject rewritten assignment spans", async () => {
+  const text = "把客厅的设登打开";
+  for (const outputText of [text, "把客厅的射灯打开"]) {
+    let captured: OllamaChatRequest | undefined;
+    const result = await routeInteraction({
+      interaction: { ...INTERACTION, text }, route_plan_id: "homophone:route",
+      provider: providerReturning(JSON.stringify({ assignments: [{ role: "robot", text: outputText }] }), {},
+        request => { captured = request; }),
+    });
+    assert.equal(captured?.messages[1]?.content, text);
+    assert.match(captured?.messages[0]?.content ?? "", /客厅射灯/);
+    assert.equal(captured?.tools, undefined);
+    assert.equal(result.model_output_accepted, outputText === text);
+    assert.deepEqual(result.plan.assignments[0]?.source_span, { start: 0, end: text.length });
+  }
+});
+
 test("router emits one full-span Robot assignment without exposing tools", async () => {
   let captured: OllamaChatRequest | undefined;
   const result = await routeInteraction({
@@ -122,6 +139,17 @@ test("router emits one full-span Robot assignment without exposing tools", async
   assert.deepEqual(captured?.format, ROLE_ROUTER_DECISION_SCHEMA);
   assert.equal(captured?.think, QWEN_THINKING_ENABLED);
   assert.equal(captured?.options?.temperature, 0);
+});
+
+test("Router refuses a third-person report even if the model classifies it as a device command", async () => {
+  const text = "他说把客厅的设灯打开";
+  const result = await routeInteraction({
+    interaction: { ...INTERACTION, text }, route_plan_id: "reported:device",
+    provider: providerReturning(JSON.stringify({ assignments: [{ role: "robot", text }] })),
+  });
+  assert.equal(result.fallback_error_code, "REPORTED_DEVICE_COMMAND");
+  assert.equal(result.plan.assignments[0]?.role_id, "human");
+  assert.equal(result.plan.assignments[0]?.mode, "clarify");
 });
 
 test("Router vetoes a model decision that executes an explicitly negated device request", async () => {

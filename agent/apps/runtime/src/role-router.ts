@@ -6,7 +6,8 @@ import {
 } from "@p4home/provider-ollama";
 
 import { QWEN_THINKING_ENABLED } from "./model-config.ts";
-import { hasNegatedDeviceCommand } from "./device-command-policy.ts";
+import { lightHomophoneRoutingHint } from "./robot-light-target.ts";
+import { hasNegatedDeviceCommand, hasReportedDeviceCommand } from "./device-command-policy.ts";
 import {
   assertContractId,
   type HumanAvatarAssignment,
@@ -191,7 +192,7 @@ export async function routeInteraction(
   try {
     response = await options.provider.chat({
       messages: [
-        { role: "system", content: ROLE_ROUTER_SYSTEM_PROMPT },
+        { role: "system", content: ROLE_ROUTER_SYSTEM_PROMPT + lightHomophoneRoutingHint(options.interaction.text) },
         { role: "user", content: options.interaction.text },
       ],
       options: ROLE_ROUTER_MODEL_OPTIONS,
@@ -280,6 +281,12 @@ export async function routeInteraction(
     && hasNegatedDeviceCommand(options.interaction.text)
   ) {
     return fallback(options, "invalid_model_output", "NEGATED_DEVICE_COMMAND");
+  }
+  if (
+    plan.assignments.some((assignment) => assignment.role_id === "robot")
+    && hasReportedDeviceCommand(options.interaction.text)
+  ) {
+    return fallback(options, "invalid_model_output", "REPORTED_DEVICE_COMMAND");
   }
   if (
     options.human_only === true

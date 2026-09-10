@@ -1,5 +1,20 @@
 menu "P4 Home speech recognition models"
 
+    config P4HOME_SR_WAKE_SENSITIVE
+        bool "Use WakeNet high-sensitivity detection mode"
+        default n
+        help
+            Use the model's DET_MODE_95 operating point instead of the AFE
+            default. May reduce missed wakes but may also increase false wakes.
+            Does not change microphone gain or the playback suppression gate.
+
+    config P4HOME_SR_INPUT_DIAGNOSTICS
+        bool "Log bounded microphone and wake-gate diagnostics"
+        default n
+        help
+            Every five seconds, log aggregate input level, clipping, delivered
+            sample rate and WakeNet gate state. Does not retain microphone PCM.
+
     # ESP-SR 2.1.4 ships this WakeNet9 model but omits its Kconfig entry.
     # Keep the upstream symbol name so the ESP-SR model packer resolves the
     # bundled model/wakenet_model/wn9_hixiaoxing_tts directory.

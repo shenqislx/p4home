@@ -18,6 +18,10 @@ import {
   PythonTtsProvider,
   TTS_MODEL_REVISION,
   TTS_PROVIDER_VERSION,
+  TTS_MODEL_ID,
+  QWEN3_TTS_MODEL_ID,
+  QWEN3_TTS_MODEL_REVISION,
+  ttsVoicesForRevision,
 } from "@p4home/provider-tts";
 import { SqliteAuditStore } from "@p4home/storage-sqlite";
 import { RobotHaClient, loadRobotHaRuntimeConfig } from "@p4home/transport-ha";
@@ -345,11 +349,14 @@ async function main(): Promise<void> {
       timeout_ms: optionalInteger("P4HOME_STT_TIMEOUT_MS", 120_000, 1_000, 120_000),
     });
     stt = sttProvider;
+    const ttsEngine = process.env.P4HOME_TTS_ENGINE?.trim() || "kokoro";
+    if (ttsEngine !== "kokoro" && ttsEngine !== "qwen3") throw new TypeError("invalid_p4home_tts_engine");
+    const ttsRevision = ttsEngine === "qwen3" ? QWEN3_TTS_MODEL_REVISION : TTS_MODEL_REVISION;
     tts = new PythonTtsProvider({
       python_executable: absolutePath("P4HOME_TTS_PYTHON"),
       worker_script: absolutePath("P4HOME_TTS_WORKER"),
       model_path: absolutePath("P4HOME_TTS_MODEL"),
-      model_revision: TTS_MODEL_REVISION,
+      model_revision: ttsRevision,
       provider_version: TTS_PROVIDER_VERSION,
       timeout_ms: optionalInteger("P4HOME_TTS_TIMEOUT_MS", 120_000, 1_000, 120_000),
     });
@@ -358,7 +365,7 @@ async function main(): Promise<void> {
     // sequentially to avoid overlapping the two MLX startup memory peaks.
     await sttProvider.warmup({ signal: shutdown.signal });
     await tts.warmup({ signal: shutdown.signal });
-    const ttsPipeline = new RoleAwareTtsPipeline(tts);
+    const ttsPipeline = new RoleAwareTtsPipeline(tts, ttsVoicesForRevision(ttsRevision));
     runtime = new UnifiedVoiceRuntime({
       server: {
         host: process.env.P4HOME_AGENT_HOST?.trim() || "0.0.0.0",
@@ -379,6 +386,7 @@ async function main(): Promise<void> {
         ),
       },
       interaction: {
+        tts_model_revision: ttsRevision,
         dispatch_role: async (interaction, signal, onHumanSpeechSegment) => (
           await dispatcher.dispatch(interaction, signal, onHumanSpeechSegment)
         ),
@@ -415,6 +423,8 @@ async function main(): Promise<void> {
       host: address.host,
       port: address.port,
       model,
+      tts_engine: ttsEngine,
+      tts_model: ttsEngine === "qwen3" ? QWEN3_TTS_MODEL_ID : TTS_MODEL_ID,
       role_mode: roleMode,
       ha_entities: haClient?.capabilities.length ?? 0,
       ui_output: "required",

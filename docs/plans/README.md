@@ -1,14 +1,15 @@
 # P4 Home 当前工作计划
 
 > Current Focus: [P4 Home 本地 LLM Agent 化架构](../p4-local-agent-architecture.md)
-> Updated: 2026-09-09
+> Updated: 2026-09-10
 > Working Branch: `feature/agent-harness`
 
 ## 当前协议演进设计
 
 - [Device Protocol v4 多角色设计](./2026-09-04-device-protocol-v4-multi-actor-design.md)：
   `implemented`，单连接同时保留 Human Avatar 与 Cat；2026-09-10 已部署并启用三角色，
-  双角色动作、产品短语音及 Cat 自主闭环实测通过，真人观感与听感待验收。
+  双角色动作、产品短语音及 Cat 自主闭环实测通过；Human Serena 音色已验收，真人唤醒、
+  其他音色与屏幕观感仍分别保留待验收。
 
 ## 工作规则
 
@@ -35,6 +36,11 @@
 | 7 | Cat Autonomy | `completed` | 7A–7C 技术/实机门禁及用户最终 review 已通过 | [Phase 7 归档](../archive/plans/agent/2026-08-15-agent-phase-7-autonomy-plan.md) |
 
 ## 下一步
+
+最新收尾入口：[2026-09-10 产品收尾记录](../../evidence/agent-phase-5/2026-09-10-product-closeout.md)。
+当前 35B 与三角色保持启用，Qwen3-TTS Serena 音色通过用户验收；高灵敏度唤醒已部署试用，
+真人 1/10 的失败基线仍待复测，现场其他声音干扰未解决。以下为此前各项工作的历史进展；
+不得用自动测试通过将 Phase 5 整体关闭。
 
 当前优先收口 Phase 5 Human-only 识别失败恢复。2026-09-05 的失败注入未触发目标终态，
 不能由普通对话成功替代；2026-09-09 补修同一 epoch 的 transcribing 更新重置 125 秒期限、

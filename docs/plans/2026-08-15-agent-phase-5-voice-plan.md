@@ -20,7 +20,27 @@
 > Architecture: [P4 Local Agent Architecture](../p4-local-agent-architecture.md)
 > Depends on: Phase 2、4 complete；P4 音频、ESP-SR model partition 与 Agent 节点可用
 
-### 2026-09-09 当前补充门禁
+### 2026-09-10 当前收尾门禁
+
+- [x] 用户确认 26 项中文名映射无误后，部署射灯／筒灯的限定同音语义修正，保留 STT 原文；
+  584 项回归、102 条完整语义重放及 2 条实际错听原文重放通过，真人准确率待复测，见
+  [灯具谐音修正](../../evidence/agent-phase-5/2026-09-10-light-homophone-correction.md)。
+- [x] 用户授权扩大照明范围后，部署 26 个已确认灯具控制实体的开关权限，并修复具体失败原因播报；
+  578 项回归及 56 条模型指令通过。3 路用途不明确的开关与实际开关效果待确认，见
+  [灯具权限与失败播报](../../evidence/agent-phase-5/2026-09-10-ha-lighting-permissions.md)。
+- [x] 保留 35B，部署 v4 Human/Robot/Cat，保留 Human 全部既有能力与已授权的 Robot 局域网 HTTP。
+- [x] Qwen3-TTS 已部署，用户明确确认 Serena 音色验收通过；Vivian 不因此自动通过。
+- [x] 高灵敏度 WakeNet 试用、严格无语音 STT 判定及聚合诊断已落地，自动对照记录见
+  [唤醒与识别跟进](../../evidence/agent-phase-5/2026-09-10-wake-stt-followup.md)。
+- [ ] 真人唤醒复测：已有失败基线为“嗨小星”、20 cm、未播报时 1/10；用户本轮不方便复测。
+- [ ] 现场其他声音混入对话的输入归属问题；不能用纯噪声过滤或合成测试计作解决。
+- [x] Robot 当前模型组合的语音语义／UI／音频复验：修复播放协调器残留旧音色表后，只读查询、
+  Human 聊天和 Avatar 移动均通过角色／UI／音频机器确认；Vivian 听感仍未人工验收。
+- [ ] 首声体感、长停顿句、失败恢复人工观察及既有真实断线／长跑项保持独立待验收。
+- 本轮回归、部署身份和运行配置见 [产品收尾记录](../../evidence/agent-phase-5/2026-09-10-product-closeout.md)。
+  Phase 5 保持 `pending_real_environment`，不归档、不合并主线。
+
+### 2026-09-09 补充门禁（历史）
 
 - 最新收尾结果：HA 首次就绪、STT 超时 failed UI/applied、下一轮无重启恢复和 60 秒观察
   的机器证据已通过，见[实机记录](../../evidence/agent-phase-5/2026-09-09-closure-hardware.md)。

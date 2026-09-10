@@ -11,6 +11,8 @@ import {
   TTS_MODEL_REVISION,
   TTS_PROVIDER_VERSION,
   TTS_ROLE_VOICES,
+  QWEN3_TTS_MODEL_REVISION,
+  QWEN3_TTS_ROLE_VOICES,
   TTS_SAMPLE_BITS,
   TTS_SAMPLE_RATE_HZ,
   TtsProviderError,
@@ -429,4 +431,24 @@ test("worker stream rejects extra keys, identity, sequence, PCM and terminal mis
     voice: TTS_ROLE_VOICES.robot,
     error_code: "PROCESS_ERROR",
   }, REQUEST, { chunks: 0, bytes: 0, samples: 0 }), /error identity/);
+});
+
+
+test("Qwen3 uses its pinned revision and rejects cross-engine or cross-role voices", async () => {
+  const tts = new PythonTtsProvider({
+    python_executable: "/usr/bin/python3",
+    worker_script: new URL("../fixtures/tts-worker-ok.py", import.meta.url).pathname,
+    model_path: "/private/tmp/p4home-qwen3-model",
+    model_revision: QWEN3_TTS_MODEL_REVISION,
+    provider_version: TTS_PROVIDER_VERSION,
+  });
+  try {
+    assert.throws(() => tts.stream(REQUEST), /frozen role voice/);
+    assert.throws(() => tts.stream({ ...REQUEST, voice: QWEN3_TTS_ROLE_VOICES.robot }), /frozen role voice/);
+    const result = await tts.synthesize({ ...REQUEST, voice: QWEN3_TTS_ROLE_VOICES.human });
+    assert.equal(result.voice, "Serena");
+    assert.equal(result.samples, 320);
+    result.pcm.fill(0);
+    await tts.warmup();
+  } finally { tts.close(); }
 });

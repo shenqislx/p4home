@@ -5,6 +5,8 @@ import type { DecodedVoiceFrame } from "@p4home/contracts";
 import type { SttFinalTranscript, SttProvider } from "@p4home/provider-stt";
 import {
   TTS_ROLE_VOICES,
+  QWEN3_TTS_MODEL_REVISION,
+  QWEN3_TTS_ROLE_VOICES,
   TTS_MAX_PCM_BYTES,
   type TtsProvider,
   type TtsSynthesisRequest,
@@ -292,6 +294,78 @@ class FakeTtsProvider implements TtsProvider {
     };
   }
 }
+
+test("Qwen3 composition reaches playback and keeps both role voices in the audit", async () => {
+  const provider = new FakeTtsProvider();
+  const pipeline = new RoleAwareTtsPipeline(provider, QWEN3_TTS_ROLE_VOICES);
+  const played: number[] = [];
+  const coordinator = new VoiceInteractionCoordinator({
+    device_ids: [DEVICE_ID], tts_model_revision: QWEN3_TTS_MODEL_REVISION,
+    dispatch_role: async () => roleResult(),
+    render_tts: (id, response, signal) => pipeline.render(id, response, signal),
+    playback: async (deviceId, pcm) => {
+      played.push(pcm[0]!);
+      return playbackSummary(deviceId);
+    },
+    cancel_low_priority_cat: () => undefined,
+  });
+  coordinator.onCaptureOpen(summary(60));
+  const result = await coordinator.run(interaction(60), new AbortController().signal, context(60));
+  assert.equal(result.outcome, "completed");
+  assert.deepEqual(played, [1, 2]);
+  assert.deepEqual(result.playback_segments.map(s => s.voice), ["Serena", "Vivian"]);
+  assert.ok(provider.generated.every(pcm => pcm.every(v => v === 0)));
+  coordinator.close();
+});
+
+test("Qwen3 coordinator rejects a wrong-role or legacy voice before playback", async () => {
+  for (const wrongVoice of ["Serena", TTS_ROLE_VOICES.robot] as const) {
+    const provider = new FakeTtsProvider();
+    const pipeline = new RoleAwareTtsPipeline(provider, QWEN3_TTS_ROLE_VOICES);
+    const coordinator = new VoiceInteractionCoordinator({
+      device_ids: [DEVICE_ID], tts_model_revision: QWEN3_TTS_MODEL_REVISION,
+      dispatch_role: async () => roleResult(),
+      render_tts: async (id, response, signal) => {
+        const result = await pipeline.render(id, response, signal);
+        return { ...result, segments: result.segments.map(s => s.role_id === "robot" ? { ...s, voice: wrongVoice } : s) };
+      },
+      playback: async () => { throw new Error("invalid voice must not play"); },
+      cancel_low_priority_cat: () => undefined,
+    });
+    coordinator.onCaptureOpen(summary(61));
+    const result = await coordinator.run(interaction(61), new AbortController().signal, context(61));
+    assert.equal(result.outcome, "tts_failed");
+    assert.equal(result.playback_segments.length, 0);
+    assert.ok(provider.generated.every(pcm => pcm.every(v => v === 0)));
+    coordinator.close();
+  }
+});
+
+test("Qwen3 Human streaming playback reports Serena rather than the legacy voice", async () => {
+  const response = humanResponse("你好。");
+  const coordinator = new VoiceInteractionCoordinator({
+    device_ids: [DEVICE_ID], tts_model_revision: QWEN3_TTS_MODEL_REVISION,
+    dispatch_role: async (input, signal, onSpeech) => {
+      await onSpeech!({ schema_version: 1, interaction_id: input.interaction_id,
+        assignment_id: response.parts[0]!.assignment_id, segment_index: 0, role_id: "human",
+        text: response.parts[0]!.text }, signal);
+      return roleResult(response);
+    },
+    render_tts: async () => { throw new Error("batch TTS must not run"); },
+    playback: async () => { throw new Error("batch playback must not run"); },
+    render_tts_stream: () => (async function* () { yield new Uint8Array(640).fill(1); })(),
+    playback_stream: async (deviceId, source) => {
+      for await (const pcm of source) pcm.fill(0);
+      return playbackSummary(deviceId);
+    },
+    cancel_low_priority_cat: () => undefined,
+  });
+  coordinator.onCaptureOpen(summary(62));
+  const result = await coordinator.run(interaction(62), new AbortController().signal, context(62));
+  assert.equal(result.outcome, "completed");
+  assert.deepEqual(result.playback_segments.map(s => s.voice), ["Serena"]);
+  coordinator.close();
+});
 
 test("unified voice result renders and plays Human then Robot without retaining PCM", async () => {
   const provider = new FakeTtsProvider();
@@ -854,7 +928,7 @@ test("Robot unknown truth survives playback failure and cannot be rewritten by m
   const result = await coordinator.run(interaction(3), new AbortController().signal, context(3));
 
   assert.equal(result.outcome, "playback_failed");
-  assert.equal(provider.requests[0]?.text, "设备操作结果尚不确定。");
+  assert.equal(provider.requests[0]?.text, "请求已发出，但没有确认设备是否完成操作。请先核对设备状态，系统不会自动重试。");
   assert.equal(result.role_response?.parts[0]?.tool_results[0]?.status, "error");
   assert.equal(result.role_response?.parts[0]?.tool_results[0]?.error?.code, "HA_OUTCOME_UNKNOWN");
 });

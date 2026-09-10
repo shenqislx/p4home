@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ToolErrorCode } from "@p4home/core";
 
 import {
   TTS_ROLE_VOICES,
+  QWEN3_TTS_ROLE_VOICES,
   type TtsProvider,
   type TtsSynthesisRequest,
   type TtsSynthesisResult,
@@ -193,8 +195,60 @@ test("Robot error and unknown terminals override model prose with deterministic 
     }],
   };
   const result = await new RoleAwareTtsPipeline(provider).render("voice:interaction:3", unknownResponse);
-  assert.equal(provider.requests[0]?.text, "设备操作结果尚不确定。");
+  assert.equal(provider.requests[0]?.text, "请求已发出，但没有确认设备是否完成操作。请先核对设备状态，系统不会自动重试。");
   assert.equal(result.segments[0]?.robot_tool_terminals[0]?.error_code, "HA_OUTCOME_UNKNOWN");
+});
+
+test("Robot failure speech explains structured causes without speaking server messages or success prose", async () => {
+  const response = mixedResponse();
+  const cases = [
+    ["UNAUTHORIZED_HA_ACTION", "控制权限"], ["UNKNOWN_ENTITY", "设备名称"],
+    ["HA_OFFLINE", "未连接"], ["HA_REJECTED", "拒绝"],
+    ["HA_STATE_MISSING", "没有读取到"], ["HA_STATE_INVALID", "状态异常"],
+    ["INVALID_HA_TOOL_CALL", "设备指令"], ["ROLE_POLICY_VIOLATION", "设备指令"],
+    ["TIMEOUT", "超时"], ["DEADLINE_EXCEEDED", "超时"], ["CANCELLED", "取消"],
+    ["UNREACHABLE", "模型服务"], ["MODEL_NOT_FOUND", "模型服务"],
+    ["HTTP_ERROR", "模型服务"], ["INVALID_RESPONSE", "模型服务"],
+    ["UNEXPECTED_PROVIDER_ERROR", "模型服务"], ["NEW_UNKNOWN_ERROR", "没有提供"],
+  ];
+  for (const [code, expected] of cases) {
+    for (const terminalError of [true, false]) {
+      const provider = new FakeTtsProvider();
+      await new RoleAwareTtsPipeline(provider).render("voice:failure:reason", {
+        ...response,
+        parts: [{
+          ...response.parts[1]!, status: "failed", error_code: code!, text: "设备已经成功打开。",
+          tool_results: terminalError ? [{
+            schema_version: 2, tool_call_id: "tool:failure", name: "home.turn_on",
+            status: "error", result: null,
+            // Include unexpected boundary codes to check the safe fallback.
+            error: { code: code as ToolErrorCode, message: "private-server-detail", retryable: false },
+          }] : [],
+        }],
+      });
+      const text = provider.requests[0]!.text;
+      assert.ok(text.includes(expected!), code);
+      assert.doesNotMatch(text, /private-server-detail|成功打开/);
+    }
+  }
+});
+
+test("mixed Robot terminals preserve partial success, unknown outcome and skipped operations", async () => {
+  const response = mixedResponse();
+  const provider = new FakeTtsProvider();
+  const result = await new RoleAwareTtsPipeline(provider).render("voice:failure:mixed", {
+    ...response, parts: [{
+      ...response.parts[1]!, status: "failed", error_code: "HA_OUTCOME_UNKNOWN",
+      tool_results: [response.parts[1]!.tool_results[0]!, ...(["HA_OUTCOME_UNKNOWN", "CANCELLED"] as const).map((code, index) => ({
+        schema_version: 2 as const, tool_call_id: `tool:error:${index}`, name: "home.turn_on",
+        status: "error" as const, result: null,
+        error: { code, message: "not spoken", retryable: false },
+      }))],
+    }],
+  });
+  assert.match(result.segments[0]!.text, /^部分设备请求已完成。请求已发出/);
+  assert.match(result.segments[0]!.text, /不会自动重试。后续操作已取消。$/);
+  assert.equal(result.segments[0]!.robot_tool_terminals.length, 3);
 });
 
 test("provider failure discards the render result without rewriting the Role execution truth", async () => {
@@ -280,4 +334,16 @@ test("Human avatar completion can speak with Human voice and cannot become Robot
   Object.assign(invalid.parts[0]!.tool_results[0]!, { result: { room_id: "unknown" } });
   await assert.rejects(new RoleAwareTtsPipeline(new FakeTtsProvider()).render("voice:avatar:2", invalid),
     (error: unknown) => error instanceof RoleAwareTtsError && error.code === "INVALID_COMPOSITION");
+});
+
+
+test("Qwen3 role projection changes voices without changing text or HA terminals", async () => {
+  const provider = new FakeTtsProvider();
+  const response = mixedResponse();
+  const result = await new RoleAwareTtsPipeline(provider, QWEN3_TTS_ROLE_VOICES)
+    .render("voice:qwen3:roles", response);
+  assert.deepEqual(result.segments.map(s => s.voice), ["Serena", "Vivian"]);
+  assert.equal(result.segments[0]!.text, response.parts[0]!.text);
+  assert.equal(result.segments[1]!.robot_tool_terminals[0]!.name, "home.turn_on");
+  for (const segment of result.segments) segment.pcm.fill(0);
 });

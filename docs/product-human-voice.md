@@ -1,6 +1,20 @@
-# P4Home Human-only 常驻语音聊天
+# P4Home 常驻语音与三角色使用
 
-## 产品边界
+## 当前安装
+
+本机显式启用了 Human + Robot + Cat，使用 Device Protocol v4、`qwen3.6:35b-mlx` 和
+Qwen3-TTS（Human: Serena；Robot: Vivian）。Serena 已通过用户音色验收。Robot 沿用已授权的
+局域网 HTTP 和既有单实体白名单；Cat 保留独立的低频自治策略。
+
+日常入口为“嗨小星”，听到“在呢”后说话。当前产品采用半双工：播报期间不接受唤醒，播放结束
+后有 400 ms 保护时间。支持日常聊天、白名单设备状态查询、受限家控和屏幕 Human 动作；
+多说话人环境的输入归属尚未解决。高灵敏度唤醒正在试用，真人改善尚未验收。
+
+本页先说明新安装默认的 Human-only 安全边界，再说明显式三角色启用、当前中文音色与唤醒配置。
+不要把默认模式的限制误当成当前本机部署状态。详细结果见
+[收尾记录](../evidence/agent-phase-5/2026-09-10-product-closeout.md)。
+
+## 默认 Human-only 模式的产品边界
 
 此模式用于日常人工聊天，不是 `phase5e_ui` 自动化门禁：
 
@@ -18,7 +32,7 @@
   `go_to_room/go_to/sit/look_at/interact` 白名单 Tool。`actor_id=human_avatar` 由 Runtime 固定，模型
   不能选择 Cat、坐标或 Home Assistant；
 - `ui_output=required`，P4 必须确认 UI revision；
-- `audio_output=required`，Human 回复按安全中文分段进入常驻 Kokoro worker；每段 PCM 增量生成后
+- `audio_output=required`，Human 回复按安全中文分段进入已配置的常驻 TTS worker（旧安装默认 Kokoro）；每段 PCM 增量生成后
   立即按 P4 credit 播放，不再等待整轮模型回复和整段音频全部完成；
 - Role Router 与 Human 的每次 Qwen API 请求都显式携带 `think: false`，不依赖模型默认值；
 - Agent readiness 前真实预热 Qwen，并以 `keep_alive=30m` 在最后一次请求后保温 30 分钟；活跃
@@ -213,3 +227,34 @@ Cat 配置错误会记录 `cat_autonomy_disabled`，Human 身体和语音服务�
 
 2026-09-10 的实现及本地/实机证据见
 [三角色启用记录](../evidence/agent-phase-5/2026-09-10-three-role-enablement.md)。
+
+## 中文播报模型（2026-09-10）
+
+当前设备已显式切换为 `Qwen3-TTS-12Hz-1.7B-CustomVoice-6bit`，Human 使用 Serena，Robot 使用
+Vivian。35B 对话模型与三角色权限不变。内部 Human 标识继续用于路由和审计，动作播报使用“我”或“小星”。
+
+私有 `tts-engine` 文件为 `qwen3`，`tts-model-path` 指向已校验的 Qwen3 模型目录；两者为 0600。
+安装脚本的 `--tts-engine qwen3` 可显式选择，新参数缺失时保留已安装的选择。旧安装没有该文件时
+仍按 Kokoro 解释，继承的环境变量不会静默切换引擎。重新安装不会把已选择的 Qwen3 路径改回 Kokoro。
+
+新模型、文本分词器和语音分词器全部使用固定版本与仓库固定哈希，运行期离线。服务就绪日志会显示
+`tts_engine` 和 `tts_model`；没有合成失败后自动换音色的回退。需要回退时，恢复私有备份里的
+`tts-engine`、`tts-model-path` 并重启常驻服务，原 Kokoro 模型仍保留。
+
+本机预热后的固定文本样本首段 PCM 约 0.15–0.17 秒；这是单独 TTS 的测试值，不包含唤醒、STT、
+路由、35B 推理或扬声器播放。用户已明确确认“Serena 的音色通过验收”，Human 默认保留 Serena；
+该结论不覆盖 Robot 的 Vivian 音色、所有中英混读场景或唤醒成功率。TTS 更换不会自动解决唤醒漏检。
+实现、实测与未通过项见 [中文 TTS 验证记录](../evidence/agent-phase-5/2026-09-10-qwen3-tts.md)。
+
+## 唤醒与收音试用配置（2026-09-10）
+
+针对用户在 20 cm、未播报时“嗨小星”仅 1/10 成功的反馈，当前本机候选固件显式开启
+`CONFIG_P4HOME_SR_WAKE_SENSITIVE=y`，使用 ESP-SR 的 `DET_MODE_95`。项目默认值仍为关闭，
+不更改模型词表、麦克风增益、AGC 或半双工门控。高灵敏度可能增加误唤醒；真人效果仍待复测。
+关闭该配置并重新构建应用即可恢复库默认检测模式；原应用镜像另有本地备份。
+
+识别 worker 不使用热词提示，固定温度为零并严格遵守无语音判定。该防护处理静音／纯噪声的
+虚构转录，不处理现场其他人声：单麦克风目前没有说话人隔离，收音窗口内的其他声音仍可能
+被转成用户输入。Serena 已通过的音色验收不受这项未解决问题影响。
+
+对照样本、硬件身份及验收边界见 [唤醒与识别跟进](../evidence/agent-phase-5/2026-09-10-wake-stt-followup.md)。

@@ -1,6 +1,6 @@
 # P4 Home 当前里程碑
 
-> Updated: 2026-08-31
+> Updated: 2026-09-10
 > Current Architecture: [P4 Local Agent Architecture](./p4-local-agent-architecture.md)
 > Active Work: [Agent Phase Plans](./plans/README.md)
 
@@ -25,7 +25,7 @@
 | M7.2 Role Runtime & Cat World | `completed` | Role Router、三角色隔离、Cat 房间动作闭环 |
 | M7.3 Cat Object World | `completed` | sofa/window/desk 等 Cat 对象级动作，实机门禁与最终 review 已通过 |
 | M7.4 Robot HA & Multi-role | `completed` | 4A–4E 技术/真实环境门禁及用户最终 review 已通过 |
-| M7.5 Role-aware Voice | `pending_real_environment` | 技术/实机与既定人工功能观察通过；真实延迟已量化，优化与长停顿句确认待完成 |
+| M7.5 Role-aware Voice | `pending_real_environment` | 35B 与三角色已部署，Serena 音色验收通过；真人唤醒、现场串音、长停顿及响应体验仍待收口 |
 | M7.6 Role-aware Memory | `completed` | 最终 review 通过；6F/6G/6H Cat 与 6I 已通过，其余真实门禁由用户接受延期 |
 | M7.7 Cat Autonomy | `completed` | 7A–7C 技术/实机门禁及用户最终 review 已通过 |
 

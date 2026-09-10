@@ -9,6 +9,8 @@ import {
   type TtsProvider,
   type TtsPcmChunk,
   type TtsRole,
+  type TtsVoice,
+  type TtsRoleVoices,
   type TtsSynthesisRequest,
   type TtsSynthesisResult,
 } from "@p4home/provider-tts";
@@ -24,7 +26,7 @@ export interface RoleAwareTtsSegment {
   readonly assignment_id: string;
   readonly segment_index: number;
   readonly role_id: TtsRole;
-  readonly voice: typeof TTS_ROLE_VOICES[TtsRole];
+  readonly voice: TtsVoice;
   readonly text: string;
   readonly source_status: ComposedResponsePart["status"];
   readonly source_outcome: ComposedResponsePart["outcome"];
@@ -80,16 +82,55 @@ function terminalMetadata(part: ComposedResponsePart): RoleAwareTtsSegment["robo
   }));
 }
 
+function robotFailureReason(code: string): string {
+  switch (code) {
+    case "UNAUTHORIZED_HA_ACTION":
+      return "这个设备或操作还没有获得控制权限，相关请求没有发送。";
+    case "UNKNOWN_ENTITY":
+      return "没有找到已接入的对应设备，请确认设备名称。";
+    case "HA_OFFLINE":
+      return "家居服务当前未连接，无法继续操作设备。";
+    case "HA_REJECTED":
+      return "家居服务拒绝了这次操作，请检查设备状态和家居服务的控制权限。";
+    case "HA_STATE_MISSING":
+      return "没有读取到设备状态，无法确认设备是否可用。";
+    case "HA_STATE_INVALID":
+      return "设备返回的状态异常，无法继续确认操作。";
+    case "HA_OUTCOME_UNKNOWN":
+      return "请求已发出，但没有确认设备是否完成操作。请先核对设备状态，系统不会自动重试。";
+    case "TIMEOUT":
+    case "DEADLINE_EXCEEDED":
+    case "TIMED_OUT":
+      return "处理超时，未能完成这次请求。";
+    case "CANCELLED":
+      return "后续操作已取消。";
+    case "INVALID_HA_TOOL_CALL":
+    case "ROLE_POLICY_VIOLATION":
+      return "没有生成符合要求的设备指令，无法执行。请重新说明设备名称和操作。";
+    case "UNEXPECTED_PROVIDER_ERROR":
+    case "UNREACHABLE":
+    case "MODEL_NOT_FOUND":
+    case "HTTP_ERROR":
+    case "INVALID_RESPONSE":
+      return "模型服务响应异常，无法完成设备指令。";
+    default:
+      return "设备请求未完成，系统没有提供可确认的具体原因。";
+  }
+}
+
 function renderText(part: ComposedResponsePart): string {
   if (part.role_id === "human") {
     return part.status === "completed" ? part.text.trim() : "暂时无法回应。";
   }
   const errors = part.tool_results.filter((terminal) => terminal.status === "error");
-  if (errors.some((terminal) => terminal.error.code === "HA_OUTCOME_UNKNOWN")) {
-    return "设备操作结果尚不确定。";
-  }
   if (part.status !== "completed" || errors.length > 0) {
-    return "设备操作未完成。";
+    // Use structured errors only; neither model prose nor raw server messages
+    // may invent success, expose private details, or recommend replaying a write.
+    const codes: string[] = [...new Set(errors.map((terminal) => terminal.error.code))];
+    if (codes.length === 0) codes.push(part.error_code ?? part.status.toUpperCase());
+    const partial = part.tool_results.some((terminal) => terminal.status === "success")
+      ? "部分设备请求已完成。" : "";
+    return partial + codes.map(robotFailureReason).join("");
   }
   return part.text.trim();
 }
@@ -143,7 +184,7 @@ function assertGeneratedResult(
     readonly assignment_id: string;
     readonly segment_index: number;
     readonly role_id: TtsRole;
-    readonly voice: typeof TTS_ROLE_VOICES[TtsRole];
+    readonly voice: TtsVoice;
   },
 ): void {
   const expectedDurationMs = value.samples / TTS_SAMPLE_RATE_HZ * 1_000;
@@ -168,9 +209,11 @@ function assertGeneratedResult(
 
 export class RoleAwareTtsPipeline {
   readonly #provider: TtsProvider;
+  readonly #voices: TtsRoleVoices;
 
-  public constructor(provider: TtsProvider) {
+  public constructor(provider: TtsProvider, voices: TtsRoleVoices = TTS_ROLE_VOICES) {
     this.#provider = provider;
+    this.#voices = { ...voices };
   }
 
   public async *streamHumanSegment(
@@ -200,7 +243,7 @@ export class RoleAwareTtsPipeline {
       segment_index: segment.segment_index,
       role_id: "human",
       text: segment.text,
-      voice: TTS_ROLE_VOICES.human,
+      voice: this.#voices.human,
       language: "zh",
       sample_rate_hz: TTS_SAMPLE_RATE_HZ,
       channels: TTS_CHANNELS,
@@ -251,7 +294,7 @@ export class RoleAwareTtsPipeline {
         || chunk.interaction_id !== request.interaction_id
         || chunk.assignment_id !== request.assignment_id
         || chunk.segment_index !== request.segment_index || chunk.role_id !== "human"
-        || chunk.voice !== TTS_ROLE_VOICES.human || chunk.chunk_index !== chunkIndex
+        || chunk.voice !== this.#voices.human || chunk.chunk_index !== chunkIndex
         || chunk.sample_rate_hz !== TTS_SAMPLE_RATE_HZ || chunk.channels !== TTS_CHANNELS
         || chunk.sample_bits !== TTS_SAMPLE_BITS || !(chunk.pcm instanceof Uint8Array)
         || chunk.pcm.byteLength < 2 || chunk.pcm.byteLength % 2 !== 0
@@ -281,7 +324,7 @@ export class RoleAwareTtsPipeline {
       for (const [segmentIndex, part] of roleResponse.parts.entries()) {
         if (isAborted(signal)) aborted(signal);
         const text = renderText(part);
-        const voice = TTS_ROLE_VOICES[part.role_id];
+        const voice = this.#voices[part.role_id];
         let generated: TtsSynthesisResult;
         const request = {
           interaction_id: interactionId,

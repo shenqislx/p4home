@@ -406,10 +406,11 @@ error
 
 Event Bus 只作为进程内部解耦机制。跨 P4、Agent、HA 的边界应称为 Device Protocol/Event Stream，不能假设 in-process Event Bus 提供持久性或 exactly-once。
 
-当前 v2 Cat 与 v3 Human Avatar 的产品接线互斥。兼容并蓄的目标方案是
+旧 v2 Cat 与 v3 Human Avatar 的产品接线互斥。已实现的兼容方案是
 [Device Protocol v4 多角色设计](./plans/2026-09-04-device-protocol-v4-multi-actor-design.md)：
 用一个连接承载固定的 `human_avatar` 与 `cat`，以 actor-scoped 状态和动作隔离角色，并由设备对
-共享队列、对象、UI 和音频资源做确定性仲裁。该方案当前仅为 `proposed`，不能当作已实现能力。
+共享队列、对象、UI 和音频资源做确定性仲裁。v4 已部署到本机三角色产品；旧协议合同保持冻结。
+该协议实现不自动证明真人语音、听感或屏幕观感验收通过。
 
 ## 10. P4 Action Queue 与状态机
 
@@ -852,7 +853,7 @@ unrestricted production deployment。2026-08-27 用户最终 review 通过，Pha
 - [ ] 100 次连续动作无崩溃、无重复执行；
 - [ ] 日志可由 `run_id → tool_call_id → action_id` 完整追踪；
 - [ ] 日志可由 `interaction_id → route_plan_id → role_id → run_id` 还原路由与角色归属；
-- [ ] Router 无 Tool，Human 无执行 Tool，Robot 只有 HA Tool，Cat 只有最小 P4 World Tool；
+- [ ] Router 无 Tool；Human 普通对话无 Tool，avatar 仅操作固定 Human；Robot 只有 HA Tool，Cat 只有最小 P4 World Tool；
 - [ ] Cat 不接收原始用户输入，Timer/HA 事件经过 Event Policy 才能触发；
 - [ ] 固件 image、DIRAM、heap、stack 与 UI 帧率门禁通过。
 
@@ -878,7 +879,7 @@ unrestricted production deployment。2026-08-27 用户最终 review 通过，Pha
 LLM：提出结构化意图
 Role Router：把用户语义分配给 Human/Robot，不授予权限
 Robot：只执行受策略约束的 HA 命令
-Human：普通路径只负责对话；avatar 路径只通过 Device Protocol v3 控制屏幕 Human
+Human：普通路径只负责对话；avatar 路径只通过 Device Protocol v3/v4 控制屏幕 Human
 Cat：只由低频事件驱动并使用最小 P4 World 能力
 Agent Core：按角色控制 Run 的预算、上下文和工具生命周期
 P4Home Domain：定义允许做什么及安全策略
